@@ -1,465 +1,157 @@
-1) End-to-end flow of ExplainFutures
-Stage A — Project + Data Intake
-
-User selects/creates a Project.
-
-User uploads CSV / TXT / Excel.
-
-App asks user to confirm:
-
-time column (date/time parsing)
-
-variable columns (numeric series)
-
-delimiter/decimal (for TXT/CSV)
-
-App runs Data Health checks:
-
-missing data per variable
-
-duplicates / non-monotonic timestamps
-
-irregular sampling / suggested resampling frequency
-
-basic outlier flags
-
-App saves dataset metadata (and optionally cleaned data) to Supabase.
-
-Stage B — Explore & Visualize
-
-User explores single-variable time plots.
-
-User explores multi-variable comparisons:
-
-multiple y-axes
-
-per-series color
-
-axis limits and linear/log scale
-
-User optionally applies transformations:
-
-log, z-score, min-max
-
-resampling (daily/weekly/monthly)
-
-differencing/detrending (for relationship modeling)
-
-Stage C — Modeling (Core Value)
-
-Time models (variable vs time)
-For each variable, user selects:
-
-interpretable model (linear/poly/exp/log)
-
-ML model option (e.g., random forest/GBM) if enabled
-App trains, validates with time-aware split, and stores:
-
-equation text (if interpretable)
-
-metrics + reliability score
-
-model artifact
-
-Pairwise relations (variable ↔ variable)
-User selects X and Y (and optional lag/detrend).
-App fits relation model, computes diagnostics and stores artifact.
-
-Target model (all → one variable)
-User selects a target (e.g., GDP) and feature set.
-App builds features, trains multivariate model(s), validates, explains, stores.
-
-Stage D — Future Lab (Interactive What-If)
-
-User selects a future time point t* (or a horizon).
-
-App computes baseline forecasts at t* for all variables using time models.
-
-User changes one variable value interactively.
-
-Propagation engine updates other variables using:
-
-multivariate target model (highest priority for target)
-
-pairwise models (for linked variables)
-
-time model baseline (fallback)
-
-App shows:
-
-updated values table
-
-baseline vs adjusted trajectories
-
-explanation: which models were used and reliability
-
-Stage E — Scenario Lab (NLP) included in v1 (as you decided)
-
-User pastes scenario text (multiple scenarios allowed).
-
-NLP extracts structured assumptions:
-
-variable mapping
-
-direction/magnitude
-
-time anchors
-
-confidence
-
-App quantifies assumptions into values/ranges at selected horizon.
-
-App plots scenarios vs predicted trajectories and shows “distance to scenario”.
-
-2) Flowchart (Mermaid)
-
-Copy-paste this into your README (GitHub renders Mermaid in many contexts; if not, you can use a Mermaid previewer).
-
-flowchart TD
-  A[Start: Open ExplainFutures] --> B[Select/Create Project]
-  B --> C[Upload Data: CSV/TXT/Excel]
-  C --> D[Parse & Validate Time Column]
-  D --> E[Select Variables + Data Types]
-  E --> F[Data Health Report]
-  F --> G{User Accepts Cleaning/Resampling?}
-  G -- Yes --> H[Preprocess: Clean/Resample/Transform]
-  G -- No --> I[Use Raw (Validated) Data]
-  H --> J[Save Dataset to Supabase]
-  I --> J[Save Dataset to Supabase]
-
-  J --> K[Explore: Single Variable Time Plot]
-  K --> L[Explore: Multi-Variable Multi-Axis Plot]
-  L --> M[Model 1: Time → Variable (Interp + ML)]
-  M --> N[Store Model + Metrics + Equation]
-  N --> O[Model 2: Pairwise Relations (X ↔ Y)]
-  O --> P[Store Pair Models + Diagnostics]
-  P --> Q[Model 3: Multivariate Target (All → One)]
-  Q --> R[Store Target Model + Explainability + Metrics]
-
-  R --> S[Future Lab: Choose Future Time t*]
-  S --> T[Compute Baseline Forecasts at t*]
-  T --> U[User Adjusts One Variable Value]
-  U --> V[Propagation Engine Updates Other Variables]
-  V --> W[Visualize Baseline vs Adjusted Futures]
-  W --> X[Export Results (Plots/CSV/Report)]
-
-  R --> Y[Scenario Lab (NLP): Paste Scenario Text]
-  Y --> Z[NLP Parse → Structured Assumptions]
-  Z --> AA[Quantify Scenario Values at Horizon]
-  AA --> AB[Plot Scenarios vs Model Trajectories]
-  AB --> X
-
-3) Module map: which file does what
-A) Entry point and navigation
-
-app.py
-
-Initializes session state
-
-Loads project + dataset context
-
-Handles global config (theme, caching policies)
-
-Routes to multipage workflow
-
-Key functions
-
-init_session_state()
-
-load_project_context()
-
-set_app_config()
-
-B) Pages (UI orchestration)
-
-pages/1_Upload_and_Data_Health.py
-
-Upload widget + column selection
-
-Data health report + cleaning options
-
-Save dataset to Supabase
-
-Calls:
-
-core/io/loaders.py
-
-core/io/validators.py
-
-core/preprocess/cleaning.py
-
-db/repo.py
-
-pages/2_Explore_and_Visualize.py
-
-Single-series plot
-
-Multi-axis plot
-
-Transform toggles
-
-Calls:
-
-core/viz/plot_time.py
-
-core/viz/plot_multi_axis.py
-
-core/preprocess/cleaning.py
-
-pages/3_Time_Models.py
-
-Fit per-variable time models (interpretable + ML)
-
-Forecast horizon selection
-
-Metrics/equation rendering
-
-Save model artifacts
-
-Calls:
-
-core/models/time_models.py
-
-core/models/metrics.py
-
-core/models/uncertainty.py
-
-core/engine/registry.py
-
-db/repo.py
-
-pages/4_Relations_Pairwise.py
-
-Select X/Y variables, lag/detrend options
-
-Fit bivariate model, show scatter/residuals
-
-Save pair model
-
-Calls:
-
-core/models/pair_models.py
-
-core/models/metrics.py
-
-core/viz/plot_relations.py (optional, can live in viz/)
-
-db/repo.py
-
-pages/5_Target_Model.py
-
-Select target + feature set
-
-Train multivariate model(s) (equation + ML)
-
-Explainability outputs
-
-Save model
-
-Calls:
-
-core/models/multivar_models.py
-
-core/preprocess/features.py
-
-core/models/metrics.py
-
-db/repo.py
-
-pages/6_Future_Lab.py
-
-Select time t* / horizon
-
-Baseline vs adjusted futures
-
-Mouse selection or control-based adjustment
-
-Propagation + visualization + export
-
-Calls:
-
-core/engine/propagation.py
-
-core/models/time_models.py (forecast)
-
-core/models/multivar_models.py (target predictions)
-
-core/models/pair_models.py (secondary relations)
-
-core/viz/plot_future.py (optional)
-
-db/repo.py
-
-pages/7_Scenarios_NLP.py (v1 included)
-
-Scenario text input
-
-Extract assumptions + map to variables
-
-Quantify and plot scenario points/regions
-
-Compare against forecasts
-
-Calls:
-
-core/nlp/scenario_parse.py
-
-core/nlp/variable_mapping.py
-
-core/nlp/scenario_quantify.py
-
-core/viz/plot_scenario.py
-
-db/repo.py
-
-4) Core modules: functions and responsibilities
-core/io/loaders.py
-
-load_csv(file, delimiter, decimal) -> df
-
-load_excel(file, sheet_name) -> df
-
-load_txt(file, delimiter) -> df
-
-standardize_columns(df) -> df
-
-core/io/validators.py
-
-detect_time_column(df) -> candidates
-
-parse_datetime(df, time_col) -> df
-
-validate_numeric_columns(df, vars) -> report
-
-validate_time_index(df, time_col) -> report
-
-core/preprocess/cleaning.py
-
-handle_missing(df, method) -> df
-
-resample(df, freq, agg) -> df
-
-transform(df, var, transform_type) -> df
-
-detrend_or_difference(df, var, mode) -> df
-
-core/preprocess/features.py
-
-make_lag_features(df, vars, lags) -> X
-
-align_target_features(df, target, features) -> X, y
-
-split_time_train_test(df, split_date) -> train, test
-
-core/viz/plot_time.py
-
-plot_single_series(df_long, var, style_cfg) -> plotly_fig
-
-core/viz/plot_multi_axis.py
-
-plot_multi_axis(df_long, vars, axis_cfg) -> plotly_fig
-
-core/models/time_models.py
-
-fit_time_model(df_long, var, method, cfg) -> ModelArtifact
-
-forecast_time_model(artifact, future_index) -> ForecastResult
-
-equation_from_model(artifact) -> str (when interpretable)
-
-core/models/pair_models.py
-
-fit_pair_model(df_long, x, y, method, cfg) -> ModelArtifact
-
-predict_pair_model(artifact, x_values) -> y_pred
-
-core/models/multivar_models.py
-
-fit_target_model(X, y, method, cfg) -> ModelArtifact
-
-predict_target_model(artifact, X_future) -> y_pred
-
-explain_model(artifact) -> coefficients/importance
-
-core/models/metrics.py
-
-evaluate_regression(y_true, y_pred) -> dict
-
-time_series_cv(df, model_fn, cfg) -> cv_metrics
-
-reliability_score(metrics) -> float (your “percent trust”)
-
-core/models/uncertainty.py
-
-bootstrap_intervals(predict_fn, X, n) -> intervals
-
-prediction_interval_summary(intervals) -> dict
-
-core/engine/registry.py
-
-serialize_artifact(artifact) -> bytes/json
-
-deserialize_artifact(payload) -> artifact
-
-list_models(project_id) -> models
-
-core/engine/propagation.py
-
-build_dependency_graph(models) -> graph
-
-baseline_state_at_t(time_models, t*) -> dict
-
-apply_intervention(state, var, new_value) -> state
-
-propagate_state(state, graph, strategy, constraints) -> state
-
-explain_propagation(trace) -> text
-
-core/nlp/scenario_parse.py
-
-split_scenarios(text) -> scenarios
-
-extract_time_horizon(scenario_text) -> horizon
-
-extract_directions(scenario_text) -> statements
-
-core/nlp/variable_mapping.py
-
-map_phrases_to_variables(phrases, variables, synonyms) -> mapping
-
-core/nlp/scenario_quantify.py
-
-assumptions_to_values(assumptions, baseline, horizon) -> scenario_state
-
-5) Database layer (Supabase)
-db/supabase_client.py
-
-get_client()
-
-get_user() (later, if you add auth)
-
-db/repo.py
-
-All CRUD functions live here:
-
-create_project(name, ...)
-
-save_dataset(dataset_meta, storage_path)
-
-save_timeseries_long(dataset_id, df_long) (optional)
-
-save_model(project_id, artifact, metrics)
-
-load_models(project_id)
-
-save_scenario(project_id, narrative, extracted_json)
-
-save_what_if_run(project_id, t*, change, implied_state)
-
-6) Text explanation you can place in the README
-
-ExplainFutures is a modular Streamlit application for time-series visualization, interpretable and ML-based forecasting, multivariate relationship learning, and interactive “what-if” future exploration. The workflow begins with project creation and dataset ingestion (CSV/TXT/Excel). After validating the time axis and variable types, the app generates a Data Health report and standardizes the dataset into a long-format time-series table. Users can then explore variables individually over time or compare multiple variables using multi-axis plots with per-series scaling and styling controls.
-
-ExplainFutures builds its analytical value through three modeling layers: (i) time-to-variable forecasting models that provide both interpretable equations and ML alternatives, (ii) pairwise variable relations for bivariate dependencies, and (iii) a multivariate target model that explains and predicts a chosen target variable from all drivers. Each model is validated using time-aware splits and scored with objective error metrics, which are converted into a reliability score. Model artifacts, equations, diagnostics, and metrics are stored in Supabase for reproducibility.
-
-The Future Lab is the signature capability: for a chosen future time point, ExplainFutures calculates a baseline forecast state for all variables and then allows the user to modify one variable value. A propagation engine uses the learned dependency graph (target model, pair models, and baseline time models) to update other variables consistently, while providing a traceable explanation of which models were applied. In version 1, the Scenario Lab adds NLP-based parsing of narrative scenario text to extract structured assumptions, quantify scenario states, and visualize scenarios relative to predicted trajectories.
+# ExplainFutures Phase 1 - Development Status
+
+## ✅ COMPLETED FILES
+
+### Core Application
+- ✅ `app.py` - Main entry point with home page
+- ✅ `requirements.txt` - All dependencies listed
+- ✅ `README.md` - Comprehensive documentation
+
+### Core Modules
+- ✅ `core/config.py` - Configuration and session state initialization
+- ✅ `core/utils.py` - Utility functions (formatting, validation, helpers)
+- ✅ `core/io/loaders.py` - File loading (CSV, TXT, Excel)
+- ✅ `core/io/validators.py` - Data validation and quality checks
+
+### Structure
+- ✅ All `__init__.py` files created
+- ✅ Directory structure established
+
+## 🔨 REMAINING FILES TO CREATE
+
+### Critical for Phase 1 to work:
+
+1. **pages/1_Upload_and_Data_Health.py** (PRIORITY 1)
+   - File upload interface
+   - Time column selection
+   - Variable selection
+   - Data health report display
+   - Preprocessing options
+
+2. **pages/2_Explore_and_Visualize.py** (PRIORITY 1)
+   - Single variable time plot
+   - Multi-variable multi-axis plot
+   - Plot customization controls
+
+3. **core/preprocess/cleaning.py** (PRIORITY 2)
+   - Missing value handling
+   - Outlier detection/removal
+   - Resampling functions
+   - Data transformation
+
+4. **core/viz/plot_time.py** (PRIORITY 2)
+   - Single variable plotting
+   - Plotly figure generation
+
+5. **core/viz/plot_multi_axis.py** (PRIORITY 2)
+   - Multi-variable plotting
+   - Multiple Y-axes configuration
+   - Interactive features
+
+### Nice to have:
+
+6. `.streamlit/config.toml` - Streamlit configuration
+7. `.gitignore` - Git ignore file
+8. Example data files for testing
+
+## 📋 NEXT STEPS FOR COMPLETION
+
+### Step 1: Create the two page files
+These are essential - the app won't work without them.
+
+**pages/1_Upload_and_Data_Health.py** should:
+- Use `st.file_uploader()` for upload
+- Call `loaders.load_file_smart()`
+- Call `validators.parse_time_column()`
+- Call `loaders.convert_to_long_format()`
+- Call `validators.detect_and_report_issues()`
+- Display health report with metrics and warnings
+- Save processed data to `st.session_state.df_long`
+
+**pages/2_Explore_and_Visualize.py** should:
+- Check if data is loaded (`st.session_state.data_loaded`)
+- Provide tabs for single vs multi-variable plots
+- Use Plotly for interactive charts
+- Allow customization (colors, axes, scales)
+
+### Step 2: Create visualization functions
+These make the plots pretty and functional.
+
+**core/viz/plot_time.py**:
+- `plot_single_variable(df_long, variable, **kwargs)` → plotly figure
+- Handle missing data gracefully
+- Add hover tooltips
+
+**core/viz/plot_multi_axis.py**:
+- `plot_multi_variable(df_long, variables, axis_config)` → plotly figure
+- Support multiple Y-axes (left/right)
+- Support log/linear scales
+- Handle color assignment
+
+### Step 3: Create preprocessing module
+This cleans the data.
+
+**core/preprocess/cleaning.py**:
+- `handle_missing_data(df, method='drop'|'interpolate'|'forward_fill')`
+- `detect_outliers(df, method='iqr'|'zscore')`
+- `remove_outliers(df, method='remove'|'clip')`
+- `resample_timeseries(df, frequency='D'|'W'|'M')`
+
+### Step 4: Add configuration files
+- `.streamlit/config.toml` for theme and settings
+- `.gitignore` for version control
+
+## 🎯 MINIMUM VIABLE PHASE 1
+
+To get a working app, you MUST create:
+1. pages/1_Upload_and_Data_Health.py
+2. pages/2_Explore_and_Visualize.py  
+3. core/viz/plot_time.py
+4. core/viz/plot_multi_axis.py
+
+Everything else can be minimal stubs or added later.
+
+## 📦 FILE SIZES
+
+Current files total: ~50 KB
+Estimated remaining: ~30 KB
+Total Phase 1: ~80 KB of Python code
+
+## 🚀 TESTING CHECKLIST
+
+Once all files are created, test:
+- [ ] App launches without errors
+- [ ] Can upload CSV file
+- [ ] Time column parses correctly
+- [ ] Variables selected properly
+- [ ] Data converts to long format
+- [ ] Health report displays
+- [ ] Single variable plot works
+- [ ] Multi-variable plot works
+- [ ] Can customize plot appearance
+- [ ] Session state persists during navigation
+
+## 💡 USAGE PATTERN
+
+```python
+# Typical user flow:
+1. Run: streamlit run app.py
+2. Navigate to: "Upload & Data Health"
+3. Upload file → Select columns → Process
+4. Review health report
+5. Navigate to: "Explore & Visualize"
+6. Create plots → Customize → Export
+```
+
+## 📝 NOTES FOR NEXT DEVELOPMENT SESSION
+
+- All foundation code is complete and well-structured
+- The architecture follows the developer guide exactly
+- Module separation is clean (io, preprocess, viz)
+- Configuration is centralized
+- Session state is properly initialized
+- Error handling is built into loaders and validators
+
+**Ready for:** Creating the UI pages and visualization functions
+**Estimated time:** 2-3 hours to complete Phase 1
+**Complexity:** Medium (mostly Streamlit UI code)
