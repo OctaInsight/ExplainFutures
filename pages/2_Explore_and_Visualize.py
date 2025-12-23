@@ -1,5 +1,5 @@
 """
-Page 2: Explore and Visualize
+Page 3: Explore and Visualize
 Interactive visualization of time-series data
 """
 
