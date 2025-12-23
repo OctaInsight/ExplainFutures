@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import sys
 from pathlib import Path
+import plotly.graph_objects as go
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -15,7 +16,6 @@ sys.path.insert(0, str(project_root))
 from core.config import get_config, initialize_session_state
 from core.utils import display_error, display_warning, display_info, get_color_for_index
 from core.viz.plot_time import plot_single_variable
-from core.viz.plot_multi_axis import plot_multi_variable
 
 # Initialize
 initialize_session_state()
@@ -127,7 +127,7 @@ def render_single_variable_plot(df_long, variables):
                 color=color,
                 show_markers=show_markers,
                 line_width=line_width,
-                y_scale=y_scale,  # Already lowercase
+                y_scale=y_scale,
                 show_grid=show_grid,
                 height=plot_height
             )
@@ -247,7 +247,7 @@ def render_multi_variable_plot(df_long, variables):
                 "line_width": line_width,
                 "y_min": y_min,
                 "y_max": y_max,
-                "axis_index": idx  # Each variable gets its own axis
+                "axis_index": idx
             }
     
     st.markdown("---")
@@ -270,41 +270,46 @@ def render_multi_variable_plot(df_long, variables):
     # Create plot button
     if st.button("📊 Generate Comparison Plot", type="primary", key="multi_plot_button"):
         with st.spinner("Creating multi-variable plot with independent axes..."):
-            # Create plot with independent axes
-            fig = create_multi_axis_plot(
-                df_long,
-                variables=selected_vars,
-                axis_config=axis_config,
-                show_legend=show_legend,
-                show_grid=show_grid,
-                height=plot_height,
-                title=plot_title if plot_title else None
-            )
-            
-            if fig is None:
-                display_error("Failed to create plot")
-                return
-            
-            # Display plot
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Display summary statistics
-            with st.expander("📊 Summary Statistics"):
-                stats_data = []
+            try:
+                # Create plot with independent axes
+                fig = create_multi_axis_plot(
+                    df_long,
+                    variables=selected_vars,
+                    axis_config=axis_config,
+                    show_legend=show_legend,
+                    show_grid=show_grid,
+                    height=plot_height,
+                    title=plot_title if plot_title else None
+                )
                 
-                for var in selected_vars:
-                    var_data = df_long[df_long['variable'] == var]['value'].dropna()
-                    stats_data.append({
-                        "Variable": var,
-                        "Count": len(var_data),
-                        "Mean": f"{var_data.mean():.2f}",
-                        "Std Dev": f"{var_data.std():.2f}",
-                        "Min": f"{var_data.min():.2f}",
-                        "Max": f"{var_data.max():.2f}"
-                    })
+                if fig is None:
+                    display_error("Failed to create plot - figure is None")
+                    return
                 
-                stats_df = pd.DataFrame(stats_data)
-                st.dataframe(stats_df, use_container_width=True, hide_index=True)
+                # Display plot
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Display summary statistics
+                with st.expander("📊 Summary Statistics"):
+                    stats_data = []
+                    
+                    for var in selected_vars:
+                        var_data = df_long[df_long['variable'] == var]['value'].dropna()
+                        stats_data.append({
+                            "Variable": var,
+                            "Count": len(var_data),
+                            "Mean": f"{var_data.mean():.2f}",
+                            "Std Dev": f"{var_data.std():.2f}",
+                            "Min": f"{var_data.min():.2f}",
+                            "Max": f"{var_data.max():.2f}"
+                        })
+                    
+                    stats_df = pd.DataFrame(stats_data)
+                    st.dataframe(stats_df, use_container_width=True, hide_index=True)
+                    
+            except Exception as e:
+                display_error(f"Error creating plot: {str(e)}")
+                st.exception(e)
 
 
 def create_multi_axis_plot(df_long, variables, axis_config, show_legend=True, 
@@ -312,18 +317,16 @@ def create_multi_axis_plot(df_long, variables, axis_config, show_legend=True,
     """
     Create a plot with independent Y-axis for each variable
     """
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
-    
     try:
         n_vars = len(variables)
         
-        # Create figure with multiple y-axes
+        if n_vars == 0:
+            return None
+        
+        # Create figure
         fig = go.Figure()
         
-        # Calculate axis positions (overlaid on same plot)
-        # First variable uses primary y-axis, others are overlaid
-        
+        # Add traces for each variable
         for idx, var in enumerate(variables):
             # Get variable data
             var_data = df_long[df_long['variable'] == var].copy()
@@ -337,9 +340,6 @@ def create_multi_axis_plot(df_long, variables, axis_config, show_legend=True,
             config = axis_config.get(var, {})
             color = config.get('color', get_color_for_index(idx))
             line_width = config.get('line_width', 2)
-            scale = config.get('scale', 'linear')
-            y_min = config.get('y_min')
-            y_max = config.get('y_max')
             
             # Determine which y-axis to use
             if idx == 0:
@@ -360,7 +360,7 @@ def create_multi_axis_plot(df_long, variables, axis_config, show_legend=True,
             
             fig.add_trace(trace)
         
-        # Configure layout with multiple y-axes
+        # Configure layout
         layout_config = {
             'xaxis': dict(
                 title="Time",
@@ -415,7 +415,7 @@ def create_multi_axis_plot(df_long, variables, axis_config, show_legend=True,
                 
                 layout_config['yaxis'] = yaxis_config
             else:
-                # Additional y-axes (overlaid on left side, offset vertically)
+                # Additional y-axes (overlaid on left side)
                 position = 0.15 - (idx * 0.08)  # Stack on left side
                 
                 yaxis_config = {
@@ -428,7 +428,7 @@ def create_multi_axis_plot(df_long, variables, axis_config, show_legend=True,
                     'anchor': 'free',
                     'overlaying': 'y',
                     'side': 'left',
-                    'position': position
+                    'position': max(0, position)  # Ensure position is not negative
                 }
                 
                 if y_min is not None and y_max is not None:
@@ -455,9 +455,10 @@ def create_multi_axis_plot(df_long, variables, axis_config, show_legend=True,
         return fig
         
     except Exception as e:
-        print(f"Error creating multi-axis plot: {e}")
+        st.error(f"Error in create_multi_axis_plot: {str(e)}")
         import traceback
         traceback.print_exc()
+        st.code(traceback.format_exc())
         return None
 
 
