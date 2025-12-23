@@ -1,1 +1,18 @@
+# ExplainFutures Phase 1 Requirements
+# Python 3.9+
+
+# Core Dependencies
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+plotly>=5.17.0
+
+# File I/O
+openpyxl>=3.1.0  # For Excel files
+xlrd>=2.0.1      # For old Excel files (.xls)
+
+# Optional but recommended
+python-dateutil>=2.8.2
 
