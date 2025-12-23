@@ -233,8 +233,6 @@ def render_multi_variable_plot(df_long, variables):
                         value=float(data_max),
                         key=f"ymax_{var}"
                     )
-                else:
-                    y_min, y_max = None, None
             else:
                 y_min, y_max = None, None
             
