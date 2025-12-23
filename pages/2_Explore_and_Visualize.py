@@ -82,7 +82,8 @@ def render_single_variable_plot(df_long, variables):
         selected_var = st.selectbox(
             "Select variable",
             variables,
-            help="Choose which variable to plot"
+            help="Choose which variable to plot",
+            key="single_var_select"
         )
     
     with col2:
@@ -90,7 +91,8 @@ def render_single_variable_plot(df_long, variables):
         color = st.color_picker(
             "Line color",
             value=get_color_for_index(0),
-            help="Choose line color"
+            help="Choose line color",
+            key="single_var_color"
         )
     
     # Advanced options
@@ -98,18 +100,18 @@ def render_single_variable_plot(df_long, variables):
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            show_markers = st.checkbox("Show markers", value=False)
-            line_width = st.slider("Line width", 1, 5, 2)
+            show_markers = st.checkbox("Show markers", value=False, key="single_markers")
+            line_width = st.slider("Line width", 1, 5, 2, key="single_line_width")
         
         with col2:
-            y_scale = st.selectbox("Y-axis scale", ["Linear", "Log"])
-            show_grid = st.checkbox("Show grid", value=True)
+            y_scale = st.selectbox("Y-axis scale", ["Linear", "Log"], key="single_y_scale")
+            show_grid = st.checkbox("Show grid", value=True, key="single_show_grid")
         
         with col3:
-            plot_height = st.slider("Plot height", 300, 800, 500, step=50)
+            plot_height = st.slider("Plot height", 300, 800, 500, step=50, key="single_plot_height")
     
     # Create plot button
-    if st.button("📈 Generate Plot", type="primary"):
+    if st.button("📈 Generate Plot", type="primary", key="single_plot_button"):
         with st.spinner("Creating plot..."):
             # Filter data for selected variable
             var_data = df_long[df_long['variable'] == selected_var].copy()
@@ -161,7 +163,8 @@ def render_multi_variable_plot(df_long, variables):
         "Choose 2 or more variables to compare",
         variables,
         default=variables[:2] if len(variables) >= 2 else variables,
-        help="Select variables to plot together"
+        help="Select variables to plot together",
+        key="multi_var_select"
     )
     
     if len(selected_vars) < 2:
@@ -183,14 +186,14 @@ def render_multi_variable_plot(df_long, variables):
                 color = st.color_picker(
                     "Color",
                     value=get_color_for_index(idx),
-                    key=f"color_{var}"
+                    key=f"multi_color_{var}"
                 )
             
             with col2:
                 axis_side = st.selectbox(
                     "Y-axis",
                     ["Left", "Right"],
-                    key=f"axis_{var}",
+                    key=f"multi_axis_{var}",
                     help="Which side to place the Y-axis"
                 )
             
@@ -198,14 +201,14 @@ def render_multi_variable_plot(df_long, variables):
                 scale = st.selectbox(
                     "Scale",
                     ["Linear", "Log"],
-                    key=f"scale_{var}"
+                    key=f"multi_scale_{var}"
                 )
             
             with col4:
                 line_width = st.slider(
                     "Line width",
                     1, 5, 2,
-                    key=f"width_{var}"
+                    key=f"multi_width_{var}"
                 )
             
             # Axis range (optional)
@@ -214,7 +217,7 @@ def render_multi_variable_plot(df_long, variables):
             with col1:
                 use_custom_range = st.checkbox(
                     "Custom Y-axis range",
-                    key=f"custom_range_{var}"
+                    key=f"multi_custom_range_{var}"
                 )
             
             if use_custom_range:
@@ -226,12 +229,12 @@ def render_multi_variable_plot(df_long, variables):
                     y_min = st.number_input(
                         "Min",
                         value=float(data_min),
-                        key=f"ymin_{var}"
+                        key=f"multi_ymin_{var}"
                     )
                     y_max = st.number_input(
                         "Max",
                         value=float(data_max),
-                        key=f"ymax_{var}"
+                        key=f"multi_ymax_{var}"
                     )
             else:
                 y_min, y_max = None, None
@@ -254,18 +257,18 @@ def render_multi_variable_plot(df_long, variables):
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        show_legend = st.checkbox("Show legend", value=True)
-        plot_height = st.slider("Plot height", 400, 900, 600, step=50)
+        show_legend = st.checkbox("Show legend", value=True, key="multi_show_legend")
+        plot_height = st.slider("Plot height", 400, 900, 600, step=50, key="multi_plot_height")
     
     with col2:
-        show_grid = st.checkbox("Show grid", value=True)
-        sync_zoom = st.checkbox("Synchronized zoom", value=True)
+        show_grid = st.checkbox("Show grid", value=True, key="multi_show_grid")
+        sync_zoom = st.checkbox("Synchronized zoom", value=True, key="multi_sync_zoom")
     
     with col3:
-        plot_title = st.text_input("Plot title (optional)", "")
+        plot_title = st.text_input("Plot title (optional)", "", key="multi_plot_title")
     
     # Create plot button
-    if st.button("📊 Generate Comparison Plot", type="primary"):
+    if st.button("📊 Generate Comparison Plot", type="primary", key="multi_plot_button"):
         with st.spinner("Creating multi-variable plot..."):
             # Create plot
             fig = plot_multi_variable(
