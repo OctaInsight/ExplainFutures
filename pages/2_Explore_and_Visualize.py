@@ -400,8 +400,10 @@ def create_multi_axis_plot(df_long, variables, axis_config, show_legend=True,
             if idx == 0:
                 # Primary y-axis (left side)
                 yaxis_config = {
-                    'title': var,
-                    'titlefont': dict(color=color),
+                    'title': dict(
+                        text=var,
+                        font=dict(color=color)
+                    ),
                     'tickfont': dict(color=color),
                     'type': scale,
                     'showgrid': show_grid,
@@ -419,8 +421,10 @@ def create_multi_axis_plot(df_long, variables, axis_config, show_legend=True,
                 position = 0.15 - (idx * 0.08)  # Stack on left side
                 
                 yaxis_config = {
-                    'title': var,
-                    'titlefont': dict(color=color),
+                    'title': dict(
+                        text=var,
+                        font=dict(color=color)
+                    ),
                     'tickfont': dict(color=color),
                     'type': scale,
                     'showgrid': False,  # Only primary axis shows grid
