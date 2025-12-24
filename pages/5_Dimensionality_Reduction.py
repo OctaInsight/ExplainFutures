@@ -24,6 +24,9 @@ config = get_config()
 # Page configuration
 st.set_page_config(page_title="Dimensionality Reduction", page_icon="🔬", layout="wide")
 
+# Render shared sidebar
+render_app_sidebar()  
+
 st.title("🔬 Dimensionality Reduction")
 st.markdown("*Reduce data complexity with PCA and other techniques*")
 st.markdown("---")
