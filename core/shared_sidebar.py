@@ -6,6 +6,17 @@ This module provides the sidebar that appears on all pages
 import streamlit as st
 from datetime import datetime
 from core.config import get_config
+import base64
+from pathlib import Path
+
+def get_logo_base64():
+    """Get logo as base64 string for embedding"""
+    logo_path = Path(__file__).parent.parent / "assets" / "logo_small.png"
+    try:
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except:
+        return None
 
 def render_app_sidebar():
     """
@@ -13,15 +24,28 @@ def render_app_sidebar():
     This function should be called at the top of every page
     """
     
+    # Try to get logo as base64
+    logo_base64 = get_logo_base64()
+    
     # Logo and Title at the very top (always visible)
-    st.sidebar.markdown("""
-        <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
-        <img src='assets/logo.png' style='width: 80px; height: 80px;'/> 
-           
-        <h2 style='margin: 0; color: white; font-weight: 600;'>ExplainFutures</h2>
-        <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
-        </div>
-    """, unsafe_allow_html=True)
+    if logo_base64:
+        # Method 1: Base64 embedded image (most reliable)
+        st.sidebar.markdown(f"""
+            <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
+                <img src='data:image/png;base64,{logo_base64}' style='width: 80px; height: 80px; margin-bottom: 0.5rem;' alt='Logo'/>
+                <h2 style='margin: 0; color: white; font-weight: 600;'>ExplainFutures</h2>
+                <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        # Fallback: Use emoji if logo file not found
+        st.sidebar.markdown("""
+            <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
+                <div style='font-size: 3rem; margin-bottom: 0.5rem;'>🔮</div>
+                <h2 style='margin: 0; color: white; font-weight: 600;'>ExplainFutures</h2>
+                <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
+            </div>
+        """, unsafe_allow_html=True)
     
     st.sidebar.markdown("---")
     
@@ -100,7 +124,8 @@ def render_app_sidebar():
         """)
     
     st.sidebar.markdown("---")
-   
+
+    
     # About sections in sidebar
     with st.sidebar.expander("📖 About ExplainFutures"):
         st.markdown("""
