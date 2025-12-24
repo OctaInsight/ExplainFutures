@@ -102,10 +102,26 @@ def run_hierarchical_clustering(df_wide, feature_cols):
                     # Use correlation distance
                     corr_matrix = np.corrcoef(data_scaled)
                     distance_matrix = 1 - np.abs(corr_matrix)
+                    
+                    # Ensure perfect symmetry (fix numerical precision issues)
+                    distance_matrix = (distance_matrix + distance_matrix.T) / 2
+                    
+                    # Ensure diagonal is exactly zero
                     np.fill_diagonal(distance_matrix, 0)
+                    
+                    # Ensure all values are non-negative (can happen with precision errors)
+                    distance_matrix = np.maximum(distance_matrix, 0)
+                    
                     # Convert to condensed form
-                    condensed_dist = squareform(distance_matrix)
-                    linkage_matrix = linkage(condensed_dist, method=linkage_method)
+                    try:
+                        condensed_dist = squareform(distance_matrix, checks=False)
+                        linkage_matrix = linkage(condensed_dist, method=linkage_method)
+                    except Exception as e:
+                        st.error(f"Error converting distance matrix: {str(e)}")
+                        # Fallback: use pdist directly on scaled data
+                        from scipy.spatial.distance import pdist
+                        condensed_dist = pdist(data_scaled.T, metric='correlation')
+                        linkage_matrix = linkage(condensed_dist, method=linkage_method)
                 else:
                     # Use regular distance
                     linkage_matrix = linkage(data_scaled, method=linkage_method, metric=distance_metric)
