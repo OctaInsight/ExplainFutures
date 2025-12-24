@@ -98,11 +98,8 @@ def render_app_sidebar():
         6. 🔮 Project
         """)
     
-    # Large spacer before extra information
-    st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
-    
-
-    
+    st.sidebar.markdown("---")
+   
     # About sections in sidebar
     with st.sidebar.expander("📖 About ExplainFutures"):
         st.markdown("""
