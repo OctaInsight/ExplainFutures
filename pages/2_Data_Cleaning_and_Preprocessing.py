@@ -58,65 +58,95 @@ def add_to_cleaning_history(operation_type, method, variables, details=None):
     st.session_state.cleaning_history.append(operation)
 
 
-def plot_comparison(df_original, df_modified, variable, operation_type):
-    """Create a comparison plot between original and modified data"""
+def plot_comparison(df_original, df_modified, original_variable, new_variable, operation_type):
+    """Create a comparison plot between original and modified data
+    
+    Args:
+        df_original: DataFrame with original data
+        df_modified: DataFrame with modified data (contains both original and new variables)
+        original_variable: Name of the original variable (e.g., 'Temperature')
+        new_variable: Name of the new/cleaned variable (e.g., 'Temperature_cleaned')
+        operation_type: Type of operation (for title)
+    """
     
     try:
-        # Get data for the specific variable - try both 'time' and 'timestamp' columns
+        # Determine time column name
         time_col = 'timestamp' if 'timestamp' in df_original.columns else 'time'
         
-        orig_data = df_original[df_original['variable'] == variable].copy()
-        mod_data = df_modified[df_modified['variable'] == variable].copy()
+        # Get original data
+        orig_data = df_original[df_original['variable'] == original_variable].copy()
         
-        if len(orig_data) == 0 or len(mod_data) == 0:
-            st.warning(f"No data found for variable: {variable}")
+        # Get modified/cleaned data from df_modified
+        mod_data = df_modified[df_modified['variable'] == new_variable].copy()
+        
+        # Debug info
+        if len(orig_data) == 0:
+            st.error(f"❌ No original data found for: {original_variable}")
+            st.info(f"Available original variables: {df_original['variable'].unique()[:5]}")
             return None
+            
+        if len(mod_data) == 0:
+            st.error(f"❌ No cleaned data found for: {new_variable}")
+            st.info(f"Available cleaned variables: {df_modified['variable'].unique()[-5:]}")
+            return None
+        
+        # Sort both by time
+        orig_data = orig_data.sort_values(time_col)
+        mod_data = mod_data.sort_values(time_col)
         
         # Create figure
         fig = go.Figure()
         
-        # Original data
+        # Original data (Blue line)
         fig.add_trace(go.Scatter(
             x=orig_data[time_col],
             y=orig_data['value'],
             mode='lines+markers',
-            name='Original',
+            name=f'Original ({original_variable})',
             line=dict(color='#3498db', width=2),
-            marker=dict(size=4, color='#3498db')
+            marker=dict(size=4, color='#3498db'),
+            hovertemplate='<b>Original</b><br>Time: %{x}<br>Value: %{y:.2f}<extra></extra>'
         ))
         
-        # Modified data
+        # Modified data (Red line)
         fig.add_trace(go.Scatter(
             x=mod_data[time_col],
             y=mod_data['value'],
             mode='lines+markers',
-            name='Modified',
+            name=f'Cleaned ({new_variable})',
             line=dict(color='#e74c3c', width=2),
-            marker=dict(size=4, color='#e74c3c')
+            marker=dict(size=4, color='#e74c3c'),
+            hovertemplate='<b>Cleaned</b><br>Time: %{x}<br>Value: %{y:.2f}<extra></extra>'
         ))
         
         # Layout
         fig.update_layout(
-            title=f"Comparison: {variable} - {operation_type}",
+            title=f"Before vs After: {original_variable} → {new_variable}<br><sub>{operation_type}</sub>",
             xaxis_title="Time",
             yaxis_title="Value",
             hovermode='x unified',
-            height=450,
+            height=500,
             showlegend=True,
             legend=dict(
                 yanchor="top",
                 y=0.99,
-                xanchor="left",
-                x=0.01,
-                bgcolor="rgba(255,255,255,0.8)"
+                xanchor="right",
+                x=0.99,
+                bgcolor="rgba(255,255,255,0.9)",
+                bordercolor="rgba(0,0,0,0.2)",
+                borderwidth=1
             ),
-            template='plotly_white'
+            template='plotly_white',
+            xaxis=dict(showgrid=True, gridwidth=1, gridcolor='lightgray'),
+            yaxis=dict(showgrid=True, gridwidth=1, gridcolor='lightgray')
         )
         
         return fig
         
     except Exception as e:
-        st.error(f"Error creating comparison plot: {str(e)}")
+        st.error(f"❌ Error creating comparison plot: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
         return None
 
 
@@ -310,7 +340,8 @@ def handle_missing_values(df_long, variables):
                 fig = plot_comparison(
                     df_long,
                     st.session_state.df_clean,
-                    selected_new,
+                    selected_orig,  # Original variable name
+                    selected_new,   # Cleaned variable name
                     "Missing Value Treatment"
                 )
                 if fig:
@@ -541,7 +572,8 @@ def handle_outliers(df_long, variables):
                 fig = plot_comparison(
                     df_long,
                     st.session_state.df_clean,
-                    selected_new,
+                    selected_orig,  # Original variable name
+                    selected_new,   # Treated variable name
                     "Outlier Treatment"
                 )
                 if fig:
@@ -755,7 +787,8 @@ def handle_transformations(df_long, variables):
                 fig = plot_comparison(
                     df_long,
                     st.session_state.df_clean,
-                    selected_new,
+                    selected_orig,     # Original variable name
+                    selected_new,      # Transformed variable name
                     "Transformation"
                 )
                 if fig:
@@ -1059,7 +1092,8 @@ def show_cleaning_summary():
                     fig = plot_comparison(
                         st.session_state.df_long,
                         st.session_state.df_clean,
-                        selected_new_var,
+                        original_var,      # Original variable name
+                        selected_new_var,  # Processed variable name
                         "Data Cleaning"
                     )
                     
