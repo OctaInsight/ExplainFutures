@@ -15,6 +15,7 @@ sys.path.insert(0, str(project_root))
 
 from core.config import get_config, initialize_session_state
 from core.utils import display_error, display_warning, display_info, get_color_for_index
+from core.shared_sidebar import render_app_sidebar  
 from core.viz.plot_time import plot_single_variable
 
 # Initialize
