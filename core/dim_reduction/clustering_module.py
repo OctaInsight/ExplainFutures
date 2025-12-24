@@ -57,22 +57,39 @@ def run_hierarchical_clustering(df_wide, feature_cols):
             ["ward", "complete", "average", "single"],
             help="Ward: minimizes variance within clusters (recommended)"
         )
+        
+        # Show warning for Ward
+        if linkage_method == "ward":
+            st.info("ℹ️ Ward's method requires Euclidean distance (will auto-select)")
     
     with col2:
-        distance_metric = st.selectbox(
-            "Distance metric",
-            ["euclidean", "correlation", "cityblock"],
-            index=1,
-            help="Correlation: based on variable relationships (recommended)"
-        )
-        
-        # Display user-friendly name
-        metric_display = {
-            "euclidean": "Euclidean (straight-line distance)",
-            "correlation": "Correlation (similarity-based)",
-            "cityblock": "Manhattan/Cityblock (grid distance)"
-        }
-        st.caption(metric_display.get(distance_metric, distance_metric))
+        # If Ward is selected, force Euclidean distance
+        if linkage_method == "ward":
+            distance_metric = "euclidean"
+            st.selectbox(
+                "Distance metric",
+                ["euclidean"],
+                index=0,
+                help="Ward's method only works with Euclidean distance",
+                disabled=True,
+                key="distance_disabled"
+            )
+            st.caption("🔒 Locked to Euclidean (required by Ward)")
+        else:
+            distance_metric = st.selectbox(
+                "Distance metric",
+                ["euclidean", "correlation", "cityblock"],
+                index=1,
+                help="Correlation: based on variable relationships (recommended)"
+            )
+            
+            # Display user-friendly name
+            metric_display = {
+                "euclidean": "Euclidean (straight-line distance)",
+                "correlation": "Correlation (similarity-based)",
+                "cityblock": "Manhattan/Cityblock (grid distance)"
+            }
+            st.caption(metric_display.get(distance_metric, distance_metric))
     
     # Number of clusters
     n_clusters = st.slider(
@@ -96,6 +113,11 @@ def run_hierarchical_clustering(df_wide, feature_cols):
                 # Standardize
                 scaler = StandardScaler()
                 data_scaled = scaler.fit_transform(data_transposed)
+                
+                # Safety check: Ward only works with Euclidean
+                if linkage_method == "ward" and distance_metric != "euclidean":
+                    st.warning("⚠️ Ward's method requires Euclidean distance. Switching to Euclidean.")
+                    distance_metric = "euclidean"
                 
                 # Compute linkage
                 if distance_metric == "correlation":
