@@ -359,26 +359,37 @@ def apply_missing_value_treatment(df, variables, method, suffix):
         new_var_name = f"{var}{suffix}"
         new_columns.append(new_var_name)
         
-        # Get original data
+        # Get original data for this variable
         mask = df_copy['variable'] == var
         original_data = df_copy[mask].copy()
         
-        # Create cleaned version (copy of original)
-        cleaned_data = original_data.copy()
+        # Create a complete copy with all rows and columns (timestamp, variable, value, etc.)
+        cleaned_data = original_data.copy(deep=True)
+        
+        # Change the variable name to the new cleaned name
         cleaned_data['variable'] = new_var_name
         
-        # Apply treatment
+        # Now apply the treatment to the 'value' column only
         if "Drop" in method:
             # Remove rows with missing values
             cleaned_data = cleaned_data.dropna(subset=['value'])
         
         elif "Forward Fill" in method:
+            # Sort by timestamp first to ensure proper forward fill
+            time_col = 'timestamp' if 'timestamp' in cleaned_data.columns else 'time'
+            cleaned_data = cleaned_data.sort_values(time_col)
             cleaned_data['value'] = cleaned_data['value'].fillna(method='ffill')
         
         elif "Backward Fill" in method:
+            # Sort by timestamp first
+            time_col = 'timestamp' if 'timestamp' in cleaned_data.columns else 'time'
+            cleaned_data = cleaned_data.sort_values(time_col)
             cleaned_data['value'] = cleaned_data['value'].fillna(method='bfill')
         
         elif "Interpolate" in method:
+            # Sort by timestamp and interpolate
+            time_col = 'timestamp' if 'timestamp' in cleaned_data.columns else 'time'
+            cleaned_data = cleaned_data.sort_values(time_col)
             cleaned_data['value'] = cleaned_data['value'].interpolate(method='linear')
         
         elif "Mean" in method:
@@ -576,14 +587,17 @@ def apply_outlier_treatment(df, variables, method, suffix):
         new_var_name = f"{var}{suffix}"
         new_columns.append(new_var_name)
         
-        # Get original data
+        # Get original data for this variable
         mask = df_copy['variable'] == var
         original_data = df_copy[mask].copy()
         
-        # Create treated version
-        treated_data = original_data.copy()
+        # Create a complete copy with all rows and columns
+        treated_data = original_data.copy(deep=True)
+        
+        # Change the variable name
         treated_data['variable'] = new_var_name
         
+        # Get values for calculating bounds
         var_data = treated_data['value'].dropna()
         
         if len(var_data) > 4:
@@ -594,30 +608,30 @@ def apply_outlier_treatment(df, variables, method, suffix):
             upper_bound = Q3 + 3 * IQR
             
             if "Remove" in method:
-                # Remove rows with outliers
-                treated_data = treated_data[
-                    ~((treated_data['value'] < lower_bound) | (treated_data['value'] > upper_bound))
-                ]
+                # Remove rows with outliers (keeps timestamps for non-outliers)
+                outlier_mask = (treated_data['value'] < lower_bound) | (treated_data['value'] > upper_bound)
+                treated_data = treated_data[~outlier_mask]
             
             elif "Cap" in method:
-                # Clip values to bounds
+                # Clip values to bounds (keeps all timestamps)
                 treated_data['value'] = treated_data['value'].clip(
                     lower=lower_bound,
                     upper=upper_bound
                 )
             
             elif "Transform" in method:
-                # Log transformation (shift to positive if needed)
+                # Log transformation (keeps all timestamps)
                 min_val = treated_data['value'].min()
-                if min_val <= 0:
-                    treated_data['value'] = np.log1p(
-                        treated_data['value'] - min_val + 1
-                    )
-                else:
-                    treated_data['value'] = np.log(treated_data['value'])
+                if pd.notna(min_val):
+                    if min_val <= 0:
+                        treated_data['value'] = np.log1p(
+                            treated_data['value'] - min_val + 1
+                        )
+                    else:
+                        treated_data['value'] = np.log(treated_data['value'])
             
             elif "Winsorize" in method:
-                # Replace with 5th and 95th percentiles
+                # Replace with percentiles (keeps all timestamps)
                 p05 = var_data.quantile(0.05)
                 p95 = var_data.quantile(0.95)
                 treated_data['value'] = treated_data['value'].clip(
@@ -795,65 +809,82 @@ def apply_transformation(df, variables, transformation, suffix):
         new_var_name = f"{var}{suffix}"
         new_columns.append(new_var_name)
         
-        # Get original data
+        # Get original data for this variable
         mask = df_copy['variable'] == var
         original_data = df_copy[mask].copy()
         
-        # Create transformed version
-        transformed_data = original_data.copy()
+        # Create a complete copy with all rows and columns
+        transformed_data = original_data.copy(deep=True)
+        
+        # Change the variable name
         transformed_data['variable'] = new_var_name
         
+        # Get non-null values for calculations
         values = transformed_data['value'].dropna()
         
+        # Apply transformation only to non-null values
         if "Log -" in transformation:
             # Natural log
             min_val = values.min()
-            if min_val <= 0:
-                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
-                    np.log1p(transformed_data.loc[transformed_data['value'].notna(), 'value'] - min_val + 1)
-            else:
-                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
-                    np.log(transformed_data.loc[transformed_data['value'].notna(), 'value'])
+            if pd.notna(min_val):
+                if min_val <= 0:
+                    # Shift all values to be positive
+                    shift_amount = abs(min_val) + 1
+                    transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                        np.log1p(transformed_data.loc[transformed_data['value'].notna(), 'value'] + shift_amount)
+                else:
+                    transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                        np.log(transformed_data.loc[transformed_data['value'].notna(), 'value'])
         
         elif "Log10" in transformation:
             min_val = values.min()
-            if min_val <= 0:
-                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
-                    np.log10(transformed_data.loc[transformed_data['value'].notna(), 'value'] - min_val + 1)
-            else:
-                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
-                    np.log10(transformed_data.loc[transformed_data['value'].notna(), 'value'])
+            if pd.notna(min_val):
+                if min_val <= 0:
+                    shift_amount = abs(min_val) + 1
+                    transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                        np.log10(transformed_data.loc[transformed_data['value'].notna(), 'value'] + shift_amount)
+                else:
+                    transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                        np.log10(transformed_data.loc[transformed_data['value'].notna(), 'value'])
         
         elif "Square Root" in transformation:
             min_val = values.min()
-            if min_val < 0:
-                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
-                    np.sqrt(transformed_data.loc[transformed_data['value'].notna(), 'value'] - min_val)
-            else:
-                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
-                    np.sqrt(transformed_data.loc[transformed_data['value'].notna(), 'value'])
+            if pd.notna(min_val):
+                if min_val < 0:
+                    shift_amount = abs(min_val)
+                    transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                        np.sqrt(transformed_data.loc[transformed_data['value'].notna(), 'value'] + shift_amount)
+                else:
+                    transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                        np.sqrt(transformed_data.loc[transformed_data['value'].notna(), 'value'])
         
         elif "Standardize" in transformation:
             mean = values.mean()
             std = values.std()
-            if std > 0:
+            if pd.notna(mean) and pd.notna(std) and std > 0:
                 transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
                     (transformed_data.loc[transformed_data['value'].notna(), 'value'] - mean) / std
         
         elif "Min-Max" in transformation:
             min_val = values.min()
             max_val = values.max()
-            if max_val > min_val:
+            if pd.notna(min_val) and pd.notna(max_val) and max_val > min_val:
                 transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
                     (transformed_data.loc[transformed_data['value'].notna(), 'value'] - min_val) / (max_val - min_val)
         
         elif "Difference" in transformation:
+            # Sort by timestamp first
+            time_col = 'timestamp' if 'timestamp' in transformed_data.columns else 'time'
+            transformed_data = transformed_data.sort_values(time_col)
             transformed_data['value'] = transformed_data['value'].diff()
         
         elif "Percentage Change" in transformation:
+            # Sort by timestamp first
+            time_col = 'timestamp' if 'timestamp' in transformed_data.columns else 'time'
+            transformed_data = transformed_data.sort_values(time_col)
             transformed_data['value'] = transformed_data['value'].pct_change() * 100
         
-        # Add transformed data to dataframe
+        # Add transformed data to dataframe (keeps all timestamps)
         df_copy = pd.concat([df_copy, transformed_data], ignore_index=True)
     
     return df_copy, new_columns
@@ -961,6 +992,130 @@ def show_cleaning_summary():
                     st.text(f"• {var}")
             else:
                 st.caption("No new variables yet")
+    
+    st.markdown("---")
+    
+    # COMPREHENSIVE VISUALIZATION SECTION
+    st.subheader("📈 Visualize All Cleaned Variables")
+    
+    if st.session_state.df_clean is not None:
+        # Get all cleaned/transformed variables
+        all_vars = sorted(st.session_state.df_clean['variable'].unique())
+        original_vars = sorted(st.session_state.df_long['variable'].unique())
+        new_vars = [v for v in all_vars if v not in original_vars]
+        
+        if new_vars:
+            st.markdown("""
+            **Compare original vs cleaned/transformed variables:**
+            Select any processed variable to see the before/after comparison.
+            """)
+            
+            # Create a mapping of new variables to their original variables
+            var_mapping = {}
+            for new_var in new_vars:
+                # Try to find the original variable name
+                # Remove common suffixes
+                suffixes = ['_cleaned', '_outlier_treated', '_log', '_log10', '_square', 
+                           '_standardize', '_min', '_difference', '_percentage']
+                original_name = new_var
+                for suffix in suffixes:
+                    if suffix in new_var.lower():
+                        original_name = new_var.split(suffix)[0]
+                        break
+                
+                # Check if original exists
+                if original_name in original_vars:
+                    var_mapping[new_var] = original_name
+            
+            # Dropdown to select variable
+            col1, col2 = st.columns([1, 3])
+            
+            with col1:
+                selected_new_var = st.selectbox(
+                    "Select processed variable",
+                    new_vars,
+                    key="summary_viz_var",
+                    help="Choose which processed variable to visualize"
+                )
+                
+                # Show mapping
+                if selected_new_var in var_mapping:
+                    st.caption(f"**Original:** {var_mapping[selected_new_var]}")
+                    st.caption(f"**Processed:** {selected_new_var}")
+                    
+                    # Find which operation created this
+                    operation_type = "Unknown"
+                    for op in st.session_state.cleaning_history:
+                        if selected_new_var in op.get('details', {}).get('new_columns', []):
+                            operation_type = f"{op['type']} - {op['method']}"
+                            break
+                    st.caption(f"**Method:** {operation_type}")
+            
+            with col2:
+                if selected_new_var in var_mapping:
+                    original_var = var_mapping[selected_new_var]
+                    
+                    # Create comparison plot
+                    fig = plot_comparison(
+                        st.session_state.df_long,
+                        st.session_state.df_clean,
+                        selected_new_var,
+                        "Data Cleaning"
+                    )
+                    
+                    if fig:
+                        st.plotly_chart(fig, use_container_width=True)
+                    else:
+                        st.warning("Unable to create comparison plot")
+                else:
+                    st.info("Original variable not found for comparison")
+            
+            # Statistics table for selected variable
+            if selected_new_var in var_mapping:
+                st.markdown("#### Detailed Statistics Comparison")
+                
+                original_var = var_mapping[selected_new_var]
+                
+                # Get data
+                orig_vals = st.session_state.df_long[
+                    st.session_state.df_long['variable'] == original_var
+                ]['value'].dropna()
+                
+                new_vals = st.session_state.df_clean[
+                    st.session_state.df_clean['variable'] == selected_new_var
+                ]['value'].dropna()
+                
+                # Create comparison table
+                comparison_data = {
+                    "Metric": ["Count", "Mean", "Median", "Std Dev", "Min", "Max", "Missing"],
+                    "Original": [
+                        len(st.session_state.df_long[st.session_state.df_long['variable'] == original_var]),
+                        f"{orig_vals.mean():.2f}" if len(orig_vals) > 0 else "N/A",
+                        f"{orig_vals.median():.2f}" if len(orig_vals) > 0 else "N/A",
+                        f"{orig_vals.std():.2f}" if len(orig_vals) > 0 else "N/A",
+                        f"{orig_vals.min():.2f}" if len(orig_vals) > 0 else "N/A",
+                        f"{orig_vals.max():.2f}" if len(orig_vals) > 0 else "N/A",
+                        st.session_state.df_long[
+                            st.session_state.df_long['variable'] == original_var
+                        ]['value'].isna().sum()
+                    ],
+                    "Processed": [
+                        len(st.session_state.df_clean[st.session_state.df_clean['variable'] == selected_new_var]),
+                        f"{new_vals.mean():.2f}" if len(new_vals) > 0 else "N/A",
+                        f"{new_vals.median():.2f}" if len(new_vals) > 0 else "N/A",
+                        f"{new_vals.std():.2f}" if len(new_vals) > 0 else "N/A",
+                        f"{new_vals.min():.2f}" if len(new_vals) > 0 else "N/A",
+                        f"{new_vals.max():.2f}" if len(new_vals) > 0 else "N/A",
+                        st.session_state.df_clean[
+                            st.session_state.df_clean['variable'] == selected_new_var
+                        ]['value'].isna().sum()
+                    ]
+                }
+                
+                comparison_df = pd.DataFrame(comparison_data)
+                st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("ℹ️ No cleaned or transformed variables yet. Apply some operations in the tabs above.")
     
     st.markdown("---")
     
