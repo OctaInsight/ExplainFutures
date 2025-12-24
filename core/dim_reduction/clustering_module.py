@@ -61,10 +61,18 @@ def run_hierarchical_clustering(df_wide, feature_cols):
     with col2:
         distance_metric = st.selectbox(
             "Distance metric",
-            ["euclidean", "correlation", "manhattan"],
+            ["euclidean", "correlation", "cityblock"],
             index=1,
             help="Correlation: based on variable relationships (recommended)"
         )
+        
+        # Display user-friendly name
+        metric_display = {
+            "euclidean": "Euclidean (straight-line distance)",
+            "correlation": "Correlation (similarity-based)",
+            "cityblock": "Manhattan/Cityblock (grid distance)"
+        }
+        st.caption(metric_display.get(distance_metric, distance_metric))
     
     # Number of clusters
     n_clusters = st.slider(
