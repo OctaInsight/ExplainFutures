@@ -17,6 +17,39 @@ from core.config import get_config, initialize_session_state
 from core.utils import display_error, display_success, display_warning, display_info
 from core.shared_sidebar import render_app_sidebar
 
+# Try to import export functions
+try:
+    from core.viz.export import quick_export_buttons
+    EXPORT_AVAILABLE = True
+except ImportError:
+    EXPORT_AVAILABLE = False
+    # Fallback function if export module is not available
+    def quick_export_buttons(fig, filename_prefix="figure", show_formats=None):
+        """Fallback export function"""
+        st.info("💡 Export functionality requires the core.viz.export module")
+        
+        # Provide basic download buttons
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📥 PNG", key=f"png_{filename_prefix}"):
+                st.info("Export as PNG - functionality will be available when export module is loaded")
+        
+        with col2:
+            if st.button("📥 PDF", key=f"pdf_{filename_prefix}"):
+                st.info("Export as PDF - functionality will be available when export module is loaded")
+        
+        with col3:
+            if st.button("📥 HTML", key=f"html_{filename_prefix}"):
+                # HTML export always works with Plotly
+                html_string = fig.to_html(include_plotlyjs='cdn')
+                st.download_button(
+                    label="Download HTML",
+                    data=html_string,
+                    file_name=f"{filename_prefix}.html",
+                    mime="text/html"
+                )
+
 # Initialize
 initialize_session_state()
 config = get_config()
@@ -697,6 +730,15 @@ def render_single_plot(df_long, variables, plot_id):
         
         st.plotly_chart(plot_data['fig'], use_container_width=True)
         
+        # Export options
+        st.markdown("---")
+        with st.expander("💾 Export Figure", expanded=False):
+            quick_export_buttons(
+                plot_data['fig'],
+                filename_prefix=f"relationship_plot_{plot_id}",
+                show_formats=['png', 'pdf', 'html']
+            )
+        
         st.markdown("#### 📊 Statistical Analysis")
         
         x_data = plot_data['x_data']
@@ -864,6 +906,15 @@ def render_correlation_matrix(df_long, variables):
         )
         
         st.plotly_chart(fig, use_container_width=True)
+        
+        # Export options
+        st.markdown("---")
+        with st.expander("💾 Export Correlation Matrix", expanded=False):
+            quick_export_buttons(
+                fig,
+                filename_prefix=f"correlation_matrix_{matrix_data['method']}",
+                show_formats=['png', 'pdf', 'html']
+            )
         
         st.markdown("#### 🔝 Strongest Correlations (Excluding Self-Correlation)")
         
