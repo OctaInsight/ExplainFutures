@@ -29,12 +29,12 @@ initialize_session_state()
 config = get_config()
 
 # Page configuration
-st.set_page_config(page_title="Dimensionality Reduction", page_icon="🔬", layout="wide")
+st.set_page_config(page_title="Understand The System (Dimensionality Reduction)", page_icon="🔬", layout="wide")
 
 # Render shared sidebar
 render_app_sidebar()
 
-st.title("🔬 Dimensionality Reduction")
+st.title("🔬 Understand The System (Dimensionality Reduction)")
 st.markdown("*Simplify complex systems, stabilize models, and improve explainability*")
 st.markdown("---")
 
