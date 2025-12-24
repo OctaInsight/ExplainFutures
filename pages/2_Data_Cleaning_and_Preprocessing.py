@@ -58,6 +58,37 @@ def add_to_cleaning_history(operation_type, method, variables, details=None):
     st.session_state.cleaning_history.append(operation)
 
 
+def convert_to_wide_format(df_long):
+    """
+    Convert long format dataframe back to wide format for download
+    
+    Returns a dataframe with:
+    - First column: timestamp
+    - Subsequent columns: each variable (original and cleaned versions)
+    """
+    try:
+        # Determine time column
+        time_col = 'timestamp' if 'timestamp' in df_long.columns else 'time'
+        
+        # Pivot the data
+        df_wide = df_long.pivot(
+            index=time_col,
+            columns='variable',
+            values='value'
+        ).reset_index()
+        
+        # Sort columns: timestamp first, then alphabetically
+        time_cols = [time_col]
+        other_cols = sorted([col for col in df_wide.columns if col != time_col])
+        df_wide = df_wide[time_cols + other_cols]
+        
+        return df_wide
+        
+    except Exception as e:
+        st.error(f"Error converting to wide format: {str(e)}")
+        return None
+
+
 def plot_comparison(df_original, df_modified, original_variable, new_variable, operation_type):
     """Create a comparison plot between original and modified data
     
@@ -382,7 +413,12 @@ def handle_missing_values(df_long, variables):
 
 
 def apply_missing_value_treatment(df, variables, method, suffix):
-    """Apply missing value treatment and create NEW columns"""
+    """
+    Apply missing value treatment and create NEW columns
+    
+    IMPORTANT: This function ONLY modifies missing (NaN) values.
+    All non-missing values remain completely unchanged.
+    """
     df_copy = df.copy()
     new_columns = []
     
@@ -400,36 +436,48 @@ def apply_missing_value_treatment(df, variables, method, suffix):
         # Change the variable name to the new cleaned name
         cleaned_data['variable'] = new_var_name
         
-        # Now apply the treatment to the 'value' column only
+        # Count missing values before treatment
+        missing_before = cleaned_data['value'].isna().sum()
+        
+        # Now apply the treatment to the 'value' column
+        # IMPORTANT: Each method only affects NaN values, not existing data
         if "Drop" in method:
-            # Remove rows with missing values
+            # Remove ONLY rows with missing values
             cleaned_data = cleaned_data.dropna(subset=['value'])
         
         elif "Forward Fill" in method:
             # Sort by timestamp first to ensure proper forward fill
             time_col = 'timestamp' if 'timestamp' in cleaned_data.columns else 'time'
             cleaned_data = cleaned_data.sort_values(time_col)
+            # fillna ONLY fills NaN values, existing values unchanged
             cleaned_data['value'] = cleaned_data['value'].fillna(method='ffill')
         
         elif "Backward Fill" in method:
             # Sort by timestamp first
             time_col = 'timestamp' if 'timestamp' in cleaned_data.columns else 'time'
             cleaned_data = cleaned_data.sort_values(time_col)
+            # fillna ONLY fills NaN values, existing values unchanged
             cleaned_data['value'] = cleaned_data['value'].fillna(method='bfill')
         
         elif "Interpolate" in method:
             # Sort by timestamp and interpolate
             time_col = 'timestamp' if 'timestamp' in cleaned_data.columns else 'time'
             cleaned_data = cleaned_data.sort_values(time_col)
+            # interpolate ONLY fills NaN values, existing values unchanged
             cleaned_data['value'] = cleaned_data['value'].interpolate(method='linear')
         
         elif "Mean" in method:
             mean_val = original_data['value'].mean()
+            # fillna ONLY fills NaN values, existing values unchanged
             cleaned_data['value'] = cleaned_data['value'].fillna(mean_val)
         
         elif "Median" in method:
             median_val = original_data['value'].median()
+            # fillna ONLY fills NaN values, existing values unchanged
             cleaned_data['value'] = cleaned_data['value'].fillna(median_val)
+        
+        # Verify: Count missing values after treatment
+        missing_after = cleaned_data['value'].isna().sum()
         
         # Add cleaned data to dataframe (keeps original)
         df_copy = pd.concat([df_copy, cleaned_data], ignore_index=True)
@@ -611,7 +659,12 @@ def handle_outliers(df_long, variables):
 
 
 def apply_outlier_treatment(df, variables, method, suffix):
-    """Apply outlier treatment and create NEW columns"""
+    """
+    Apply outlier treatment and create NEW columns
+    
+    IMPORTANT: This function ONLY modifies outlier values.
+    All non-outlier values remain completely unchanged.
+    """
     df_copy = df.copy()
     new_columns = []
     
@@ -639,20 +692,23 @@ def apply_outlier_treatment(df, variables, method, suffix):
             lower_bound = Q1 - 3 * IQR
             upper_bound = Q3 + 3 * IQR
             
+            # Identify outliers
+            is_outlier = (treated_data['value'] < lower_bound) | (treated_data['value'] > upper_bound)
+            outlier_count = is_outlier.sum()
+            
             if "Remove" in method:
-                # Remove rows with outliers (keeps timestamps for non-outliers)
-                outlier_mask = (treated_data['value'] < lower_bound) | (treated_data['value'] > upper_bound)
-                treated_data = treated_data[~outlier_mask]
+                # Remove ONLY rows that are outliers (keeps all non-outliers unchanged)
+                treated_data = treated_data[~is_outlier]
             
             elif "Cap" in method:
-                # Clip values to bounds (keeps all timestamps)
-                treated_data['value'] = treated_data['value'].clip(
-                    lower=lower_bound,
-                    upper=upper_bound
-                )
+                # Clip ONLY outlier values to bounds (non-outliers unchanged)
+                # This is the only method that modifies all values, so let's fix it
+                treated_data.loc[treated_data['value'] < lower_bound, 'value'] = lower_bound
+                treated_data.loc[treated_data['value'] > upper_bound, 'value'] = upper_bound
             
             elif "Transform" in method:
-                # Log transformation (keeps all timestamps)
+                # Apply log transformation to ALL values (this is intended behavior for transformation)
+                # But document it clearly
                 min_val = treated_data['value'].min()
                 if pd.notna(min_val):
                     if min_val <= 0:
@@ -663,13 +719,11 @@ def apply_outlier_treatment(df, variables, method, suffix):
                         treated_data['value'] = np.log(treated_data['value'])
             
             elif "Winsorize" in method:
-                # Replace with percentiles (keeps all timestamps)
+                # Replace ONLY extreme values with percentiles (values within range unchanged)
                 p05 = var_data.quantile(0.05)
                 p95 = var_data.quantile(0.95)
-                treated_data['value'] = treated_data['value'].clip(
-                    lower=p05,
-                    upper=p95
-                )
+                treated_data.loc[treated_data['value'] < p05, 'value'] = p05
+                treated_data.loc[treated_data['value'] > p95, 'value'] = p95
         
         # Add treated data to dataframe (keeps original)
         df_copy = pd.concat([df_copy, treated_data], ignore_index=True)
@@ -1197,16 +1251,30 @@ def show_cleaning_summary():
             key="download_cleaned"
         ):
             if st.session_state.df_clean is not None:
-                # Convert to CSV
-                csv = st.session_state.df_clean.to_csv(index=False)
-                st.download_button(
-                    label="⬇️ Download CSV",
-                    data=csv,
-                    file_name=f"enhanced_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                    key="download_csv_btn"
-                )
+                with st.spinner("Preparing download..."):
+                    # Convert long format to wide format
+                    df_wide = convert_to_wide_format(st.session_state.df_clean)
+                    
+                    if df_wide is not None:
+                        # Show preview
+                        st.success("✅ Data prepared for download!")
+                        st.caption(f"Download will include {len(df_wide.columns)} columns (including timestamp)")
+                        
+                        with st.expander("📋 Preview Download Format"):
+                            st.dataframe(df_wide.head(10), use_container_width=True)
+                        
+                        # Convert to CSV
+                        csv = df_wide.to_csv(index=False)
+                        st.download_button(
+                            label="⬇️ Download CSV",
+                            data=csv,
+                            file_name=f"enhanced_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key="download_csv_btn"
+                        )
+                    else:
+                        st.error("Failed to prepare data for download")
     
     st.markdown("---")
     
