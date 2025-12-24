@@ -1,5 +1,5 @@
 """
-Page 3: Explore and Visualize
+Page 3: Data Exploration & Visualization
 Interactive visualization of time-series data
 """
 
@@ -22,9 +22,9 @@ initialize_session_state()
 config = get_config()
 
 # Page configuration
-st.set_page_config(page_title="Explore & Visualize", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Data Exploration & Visualization", page_icon="📊", layout="wide")
 
-st.title("📊 Explore & Visualize")
+st.title("📊 Data Exploration & Visualization")
 st.markdown("*Create interactive plots of your time-series data*")
 st.markdown("---")
 
