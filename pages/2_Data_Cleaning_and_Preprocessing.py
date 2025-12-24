@@ -341,27 +341,42 @@ def handle_missing_values(df_long, variables):
             st.warning("⚠️ No treatment selected or no variables selected")
     
     # Visualization comparison section
-    if st.session_state.get("last_missing_treatment"):
+    if st.session_state.get("last_missing_treatment") or any(
+        op['type'] == 'Missing Values' for op in st.session_state.cleaning_history
+    ):
         st.markdown("---")
         st.subheader("📈 Before/After Comparison")
         
-        treatment_info = st.session_state.last_missing_treatment
-        new_columns = treatment_info.get('new_columns', [])
-        original_vars = treatment_info.get('variables', [])
+        # Get ALL variables that have been cleaned for missing values (from history)
+        all_cleaned_vars = []
+        all_original_vars = []
         
-        if new_columns and original_vars:
+        for op in st.session_state.cleaning_history:
+            if op['type'] == 'Missing Values':
+                new_cols = op.get('details', {}).get('new_columns', [])
+                orig_vars = op.get('variables', [])
+                all_cleaned_vars.extend(new_cols)
+                all_original_vars.extend(orig_vars)
+        
+        if all_cleaned_vars and all_original_vars:
+            st.info(f"📊 {len(all_cleaned_vars)} variable(s) cleaned for missing values in this session")
+            
             # Let user select which variable to compare
             col1, col2 = st.columns([1, 3])
             
             with col1:
+                # Create display options showing both original and cleaned names
+                display_options = [f"{orig} → {clean}" for orig, clean in zip(all_original_vars, all_cleaned_vars)]
+                
                 selected_idx = st.selectbox(
                     "Select variable to visualize",
-                    range(len(original_vars)),
-                    format_func=lambda i: original_vars[i],
-                    key="missing_viz_var"
+                    range(len(display_options)),
+                    format_func=lambda i: display_options[i],
+                    key="missing_viz_var_all"
                 )
-                selected_orig = original_vars[selected_idx]
-                selected_new = new_columns[selected_idx]
+                
+                selected_orig = all_original_vars[selected_idx]
+                selected_new = all_cleaned_vars[selected_idx]
                 
                 st.caption(f"**Original:** {selected_orig}")
                 st.caption(f"**Cleaned:** {selected_new}")
@@ -389,10 +404,13 @@ def handle_missing_values(df_long, variables):
             
             with col2:
                 st.markdown(f"**Cleaned: {selected_new}**")
-                mod_stats = st.session_state.df_clean[
-                    st.session_state.df_clean['variable'] == selected_new
-                ]['value'].describe()
-                st.dataframe(mod_stats, use_container_width=True)
+                if selected_new in st.session_state.df_clean['variable'].values:
+                    mod_stats = st.session_state.df_clean[
+                        st.session_state.df_clean['variable'] == selected_new
+                    ]['value'].describe()
+                    st.dataframe(mod_stats, use_container_width=True)
+                else:
+                    st.warning("Cleaned variable not found in current data")
     
     # Save button
     st.markdown("---")
@@ -592,26 +610,41 @@ def handle_outliers(df_long, variables):
             st.warning("⚠️ No treatment selected or no variables selected")
     
     # Visualization comparison
-    if st.session_state.get("last_outlier_treatment"):
+    if st.session_state.get("last_outlier_treatment") or any(
+        op['type'] == 'Outliers' for op in st.session_state.cleaning_history
+    ):
         st.markdown("---")
         st.subheader("📈 Before/After Comparison")
         
-        treatment_info = st.session_state.last_outlier_treatment
-        new_columns = treatment_info.get('new_columns', [])
-        original_vars = treatment_info.get('variables', [])
+        # Get ALL variables that have been treated for outliers (from history)
+        all_treated_vars = []
+        all_original_vars = []
         
-        if new_columns and original_vars:
+        for op in st.session_state.cleaning_history:
+            if op['type'] == 'Outliers':
+                new_cols = op.get('details', {}).get('new_columns', [])
+                orig_vars = op.get('variables', [])
+                all_treated_vars.extend(new_cols)
+                all_original_vars.extend(orig_vars)
+        
+        if all_treated_vars and all_original_vars:
+            st.info(f"📊 {len(all_treated_vars)} variable(s) treated for outliers in this session")
+            
             col1, col2 = st.columns([1, 3])
             
             with col1:
+                # Create display options
+                display_options = [f"{orig} → {treat}" for orig, treat in zip(all_original_vars, all_treated_vars)]
+                
                 selected_idx = st.selectbox(
                     "Select variable to visualize",
-                    range(len(original_vars)),
-                    format_func=lambda i: original_vars[i],
-                    key="outlier_viz_var"
+                    range(len(display_options)),
+                    format_func=lambda i: display_options[i],
+                    key="outlier_viz_var_all"
                 )
-                selected_orig = original_vars[selected_idx]
-                selected_new = new_columns[selected_idx]
+                
+                selected_orig = all_original_vars[selected_idx]
+                selected_new = all_treated_vars[selected_idx]
                 
                 st.caption(f"**Original:** {selected_orig}")
                 st.caption(f"**Treated:** {selected_new}")
@@ -632,13 +665,16 @@ def handle_outliers(df_long, variables):
             col1, col2, col3 = st.columns(3)
             
             orig_data = df_long[df_long['variable'] == selected_orig]['value'].dropna()
-            mod_data = st.session_state.df_clean[
-                st.session_state.df_clean['variable'] == selected_new
-            ]['value'].dropna()
-            
-            col1.metric("Original Points", len(orig_data))
-            col2.metric("Treated Points", len(mod_data))
-            col3.metric("Points Removed/Changed", abs(len(orig_data) - len(mod_data)))
+            if selected_new in st.session_state.df_clean['variable'].values:
+                mod_data = st.session_state.df_clean[
+                    st.session_state.df_clean['variable'] == selected_new
+                ]['value'].dropna()
+                
+                col1.metric("Original Points", len(orig_data))
+                col2.metric("Treated Points", len(mod_data))
+                col3.metric("Points Removed/Changed", abs(len(orig_data) - len(mod_data)))
+            else:
+                st.warning("Treated variable not found in current data")
     
     # Save button
     st.markdown("---")
@@ -813,26 +849,41 @@ def handle_transformations(df_long, variables):
             st.warning("⚠️ No transformation selected or no variables selected")
     
     # Visualization comparison
-    if st.session_state.get("last_transformation"):
+    if st.session_state.get("last_transformation") or any(
+        op['type'] == 'Transformation' for op in st.session_state.cleaning_history
+    ):
         st.markdown("---")
         st.subheader("📈 Original vs Transformed")
         
-        transform_info = st.session_state.last_transformation
-        new_columns = transform_info.get('new_columns', [])
-        original_vars = transform_info.get('variables', [])
+        # Get ALL transformed variables (from history)
+        all_transformed_vars = []
+        all_original_vars = []
         
-        if new_columns and original_vars:
+        for op in st.session_state.cleaning_history:
+            if op['type'] == 'Transformation':
+                new_cols = op.get('details', {}).get('new_columns', [])
+                orig_vars = op.get('variables', [])
+                all_transformed_vars.extend(new_cols)
+                all_original_vars.extend(orig_vars)
+        
+        if all_transformed_vars and all_original_vars:
+            st.info(f"📊 {len(all_transformed_vars)} variable(s) transformed in this session")
+            
             col1, col2 = st.columns([1, 3])
             
             with col1:
+                # Create display options
+                display_options = [f"{orig} → {trans}" for orig, trans in zip(all_original_vars, all_transformed_vars)]
+                
                 selected_idx = st.selectbox(
                     "Select variable to visualize",
-                    range(len(original_vars)),
-                    format_func=lambda i: original_vars[i],
-                    key="transform_viz_var"
+                    range(len(display_options)),
+                    format_func=lambda i: display_options[i],
+                    key="transform_viz_var_all"
                 )
-                selected_orig = original_vars[selected_idx]
-                selected_new = new_columns[selected_idx]
+                
+                selected_orig = all_original_vars[selected_idx]
+                selected_new = all_transformed_vars[selected_idx]
                 
                 st.caption(f"**Original:** {selected_orig}")
                 st.caption(f"**Transformed:** {selected_new}")
@@ -853,21 +904,25 @@ def handle_transformations(df_long, variables):
             col1, col2 = st.columns(2)
             
             orig_vals = df_long[df_long['variable'] == selected_orig]['value'].dropna()
-            trans_vals = st.session_state.df_clean[
-                st.session_state.df_clean['variable'] == selected_new
-            ]['value'].dropna()
             
-            with col1:
-                st.markdown(f"**Original: {selected_orig}**")
-                st.metric("Mean", f"{orig_vals.mean():.2f}")
-                st.metric("Std Dev", f"{orig_vals.std():.2f}")
-                st.metric("Min/Max", f"{orig_vals.min():.2f} / {orig_vals.max():.2f}")
-            
-            with col2:
-                st.markdown(f"**Transformed: {selected_new}**")
-                st.metric("Mean", f"{trans_vals.mean():.2f}")
-                st.metric("Std Dev", f"{trans_vals.std():.2f}")
-                st.metric("Min/Max", f"{trans_vals.min():.2f} / {trans_vals.max():.2f}")
+            if selected_new in st.session_state.df_clean['variable'].values:
+                trans_vals = st.session_state.df_clean[
+                    st.session_state.df_clean['variable'] == selected_new
+                ]['value'].dropna()
+                
+                with col1:
+                    st.markdown(f"**Original: {selected_orig}**")
+                    st.metric("Mean", f"{orig_vals.mean():.2f}")
+                    st.metric("Std Dev", f"{orig_vals.std():.2f}")
+                    st.metric("Min/Max", f"{orig_vals.min():.2f} / {orig_vals.max():.2f}")
+                
+                with col2:
+                    st.markdown(f"**Transformed: {selected_new}**")
+                    st.metric("Mean", f"{trans_vals.mean():.2f}")
+                    st.metric("Std Dev", f"{trans_vals.std():.2f}")
+                    st.metric("Min/Max", f"{trans_vals.min():.2f} / {trans_vals.max():.2f}")
+            else:
+                st.warning("Transformed variable not found in current data")
     
     # Save button
     st.markdown("---")
@@ -1097,69 +1152,124 @@ def show_cleaning_summary():
             Select any processed variable to see the before/after comparison.
             """)
             
-            # Create a mapping of new variables to their original variables
+            # Create a better mapping of new variables to their original variables
             var_mapping = {}
             for new_var in new_vars:
-                # Try to find the original variable name
-                # Remove common suffixes
-                suffixes = ['_cleaned', '_outlier_treated', '_log', '_log10', '_square', 
-                           '_standardize', '_min', '_difference', '_percentage']
+                # Try to find the original variable name by removing common suffixes
                 original_name = new_var
-                for suffix in suffixes:
-                    if suffix in new_var.lower():
-                        original_name = new_var.split(suffix)[0]
+                
+                # List of all possible suffixes in order of specificity
+                suffixes_to_try = [
+                    '_cleaned',
+                    '_outlier_treated', 
+                    '_log',
+                    '_log10',
+                    '_square',
+                    '_standardize',
+                    '_min',
+                    '_difference',
+                    '_percentage'
+                ]
+                
+                # Try each suffix
+                found = False
+                for suffix in suffixes_to_try:
+                    if new_var.endswith(suffix):
+                        original_name = new_var[:-len(suffix)]
+                        found = True
                         break
                 
-                # Check if original exists
+                # If no suffix matched, try splitting by underscore and checking progressively
+                if not found:
+                    parts = new_var.split('_')
+                    for i in range(len(parts), 0, -1):
+                        potential_original = '_'.join(parts[:i])
+                        if potential_original in original_vars:
+                            original_name = potential_original
+                            break
+                
+                # Verify the original exists
                 if original_name in original_vars:
                     var_mapping[new_var] = original_name
+                else:
+                    # Last resort: check if any original variable is a substring
+                    for orig_var in original_vars:
+                        if new_var.startswith(orig_var):
+                            var_mapping[new_var] = orig_var
+                            break
+            
+            # Show available mappings for debugging
+            if st.checkbox("🔍 Show variable mapping details", key="show_mapping_debug"):
+                st.markdown("**Variable Mappings:**")
+                for new_v, orig_v in var_mapping.items():
+                    st.caption(f"✓ {new_v} → {orig_v}")
+                unmapped = [v for v in new_vars if v not in var_mapping]
+                if unmapped:
+                    st.warning(f"⚠️ Could not map: {', '.join(unmapped)}")
             
             # Dropdown to select variable
             col1, col2 = st.columns([1, 3])
             
             with col1:
-                selected_new_var = st.selectbox(
-                    "Select processed variable",
-                    new_vars,
-                    key="summary_viz_var",
-                    help="Choose which processed variable to visualize"
-                )
+                # Filter to only show variables that have mappings
+                mappable_vars = [v for v in new_vars if v in var_mapping]
                 
-                # Show mapping
-                if selected_new_var in var_mapping:
-                    st.caption(f"**Original:** {var_mapping[selected_new_var]}")
-                    st.caption(f"**Processed:** {selected_new_var}")
-                    
-                    # Find which operation created this
-                    operation_type = "Unknown"
-                    for op in st.session_state.cleaning_history:
-                        if selected_new_var in op.get('details', {}).get('new_columns', []):
-                            operation_type = f"{op['type']} - {op['method']}"
-                            break
-                    st.caption(f"**Method:** {operation_type}")
-            
-            with col2:
-                if selected_new_var in var_mapping:
-                    original_var = var_mapping[selected_new_var]
-                    
-                    # Create comparison plot
-                    fig = plot_comparison(
-                        st.session_state.df_long,
-                        st.session_state.df_clean,
-                        original_var,      # Original variable name
-                        selected_new_var,  # Processed variable name
-                        "Data Cleaning"
+                if not mappable_vars:
+                    st.error("❌ No processed variables found with original counterparts")
+                    st.info("This might be a bug. Please check the mapping details above.")
+                else:
+                    selected_new_var = st.selectbox(
+                        "Select processed variable",
+                        mappable_vars,
+                        key="summary_viz_var",
+                        help="Choose which processed variable to visualize"
                     )
                     
-                    if fig:
-                        st.plotly_chart(fig, use_container_width=True)
+                    # Show mapping
+                    if selected_new_var in var_mapping:
+                        original_var = var_mapping[selected_new_var]
+                        st.caption(f"**Original:** {original_var}")
+                        st.caption(f"**Processed:** {selected_new_var}")
+                        
+                        # Find which operation created this
+                        operation_type = "Unknown"
+                        for op in st.session_state.cleaning_history:
+                            if selected_new_var in op.get('details', {}).get('new_columns', []):
+                                operation_type = f"{op['type']} - {op['method']}"
+                                break
+                        st.caption(f"**Method:** {operation_type}")
+            
+            with col2:
+                if mappable_vars and selected_new_var in var_mapping:
+                    original_var = var_mapping[selected_new_var]
+                    
+                    # Debug: Check if variables exist in dataframes
+                    orig_exists = original_var in st.session_state.df_long['variable'].values
+                    new_exists = selected_new_var in st.session_state.df_clean['variable'].values
+                    
+                    if not orig_exists:
+                        st.error(f"❌ Original variable '{original_var}' not found in original data")
+                    elif not new_exists:
+                        st.error(f"❌ Processed variable '{selected_new_var}' not found in cleaned data")
                     else:
-                        st.warning("Unable to create comparison plot")
+                        # Create comparison plot
+                        fig = plot_comparison(
+                            st.session_state.df_long,
+                            st.session_state.df_clean,
+                            original_var,      # Original variable name
+                            selected_new_var,  # Processed variable name
+                            "Data Cleaning"
+                        )
+                        
+                        if fig:
+                            st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            st.warning("Unable to create comparison plot")
                 else:
-                    st.info("Original variable not found for comparison")
+                    st.info("Select a processed variable to see comparison")
             
             # Statistics table for selected variable
-            if selected_new_var in var_mapping:
+            if mappable_vars and selected_new_var in var_mapping:
                 st.markdown("#### Detailed Statistics Comparison")
                 
                 original_var = var_mapping[selected_new_var]
