@@ -1403,7 +1403,7 @@ def show_cleaning_summary():
         st.markdown("**🔬 Analyze**")
         st.markdown("Run PCA and analysis")
         if st.button("Go to Analysis", key="goto_analysis", use_container_width=True):
-            st.switch_page("pages/5_Dimensionality_Reduction.py")
+            st.switch_page("pages/5_Understand_The_System_(Dimensionality_Reduction).py")
     
     with col3:
         st.markdown("**🔄 Clear History**")
