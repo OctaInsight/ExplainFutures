@@ -237,27 +237,33 @@ def render_single_variable_plot(variables):
                 display_error("Failed to create plot")
                 return
             
-            # Display plot
-            st.plotly_chart(fig, use_container_width=True)
+            # Store figure and metadata in session state
+            st.session_state.single_var_fig = fig
+            st.session_state.single_var_name = selected_var
+            st.session_state.single_var_data = var_data
+    
+    # Display plot if it exists in session state
+    if st.session_state.get('single_var_fig') is not None:
+        st.plotly_chart(st.session_state.single_var_fig, use_container_width=True)
+        
+        # Export options
+        st.markdown("---")
+        with st.expander("💾 Export Figure", expanded=True):
+            quick_export_buttons(
+                st.session_state.single_var_fig, 
+                filename_prefix=f"single_var_{st.session_state.single_var_name}",
+                show_formats=['png', 'pdf', 'html']
+            )
+        
+        # Display statistics
+        with st.expander("📊 Variable Statistics"):
+            col1, col2, col3, col4 = st.columns(4)
             
-            # Export options
-            st.markdown("---")
-            with st.expander("💾 Export Figure", expanded=True):
-                quick_export_buttons(
-                    fig, 
-                    filename_prefix=f"single_var_{selected_var}",
-                    show_formats=['png', 'pdf', 'html']
-                )
-            
-            # Display statistics
-            with st.expander("📊 Variable Statistics"):
-                col1, col2, col3, col4 = st.columns(4)
-                
-                values = var_data['value'].dropna()
-                col1.metric("Count", len(values))
-                col2.metric("Mean", f"{values.mean():.2f}")
-                col3.metric("Std Dev", f"{values.std():.2f}")
-                col4.metric("Range", f"{values.min():.2f} to {values.max():.2f}")
+            values = st.session_state.single_var_data['value'].dropna()
+            col1.metric("Count", len(values))
+            col2.metric("Mean", f"{values.mean():.2f}")
+            col3.metric("Std Dev", f"{values.std():.2f}")
+            col4.metric("Range", f"{values.min():.2f} to {values.max():.2f}")
 
 
 def render_multi_variable_plot(variables):
@@ -429,41 +435,46 @@ def render_multi_variable_plot(variables):
                     display_error("Failed to create plot - figure is None")
                     return
                 
-                # Display plot
-                st.plotly_chart(fig, use_container_width=True)
+                # Store figure and metadata in session state
+                st.session_state.multi_var_fig = fig
+                st.session_state.multi_var_names = selected_vars
                 
-                # Export options
-                st.markdown("---")
-                with st.expander("💾 Export Figure", expanded=True):
-                    quick_export_buttons(
-                        fig,
-                        filename_prefix=f"multi_var_comparison",
-                        show_formats=['png', 'pdf', 'html']
-                    )
-                
-                # Display summary statistics
-                with st.expander("📊 Summary Statistics"):
-                    stats_data = []
-                    
-                    for var in selected_vars:
-                        var_data = get_data_for_variable(var)
-                        values = var_data['value'].dropna()
-                        
-                        stats_data.append({
-                            "Variable": var,
-                            "Count": len(values),
-                            "Mean": f"{values.mean():.2f}" if len(values) > 0 else "N/A",
-                            "Std Dev": f"{values.std():.2f}" if len(values) > 0 else "N/A",
-                            "Min": f"{values.min():.2f}" if len(values) > 0 else "N/A",
-                            "Max": f"{values.max():.2f}" if len(values) > 0 else "N/A"
-                        })
-                    
-                    stats_df = pd.DataFrame(stats_data)
-                    st.dataframe(stats_df, use_container_width=True, hide_index=True)
-                    
             except Exception as e:
                 display_error(f"Error creating plot: {str(e)}")
                 st.exception(e)
+    
+    # Display plot if it exists in session state
+    if st.session_state.get('multi_var_fig') is not None:
+        st.plotly_chart(st.session_state.multi_var_fig, use_container_width=True)
+        
+        # Export options
+        st.markdown("---")
+        with st.expander("💾 Export Figure", expanded=True):
+            quick_export_buttons(
+                st.session_state.multi_var_fig,
+                filename_prefix=f"multi_var_comparison",
+                show_formats=['png', 'pdf', 'html']
+            )
+        
+        # Display summary statistics
+        with st.expander("📊 Summary Statistics"):
+            stats_data = []
+            
+            for var in st.session_state.multi_var_names:
+                var_data = get_data_for_variable(var)
+                values = var_data['value'].dropna()
+                
+                stats_data.append({
+                    "Variable": var,
+                    "Count": len(values),
+                    "Mean": f"{values.mean():.2f}" if len(values) > 0 else "N/A",
+                    "Std Dev": f"{values.std():.2f}" if len(values) > 0 else "N/A",
+                    "Min": f"{values.min():.2f}" if len(values) > 0 else "N/A",
+                    "Max": f"{values.max():.2f}" if len(values) > 0 else "N/A"
+                })
+            
+            stats_df = pd.DataFrame(stats_data)
+            st.dataframe(stats_df, use_container_width=True, hide_index=True)
 
 
 def create_multi_axis_plot(variables, axis_config, show_legend=True, 
