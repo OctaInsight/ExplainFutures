@@ -13,7 +13,6 @@ import plotly.express as px
 from datetime import datetime
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from sklearn.feature_selection import VarianceThreshold
 from sklearn.linear_model import Lasso, ElasticNet, LassoCV, ElasticNetCV
 
 # Add project root to path
@@ -97,7 +96,7 @@ def main():
     try:
         df_wide, data_source = get_wide_format_data()
         time_col = 'timestamp' if 'timestamp' in df_wide.columns else 'time'
-        feature_cols = [col for col in df_wide.columns if col != time_col]
+        all_feature_cols = [col for col in df_wide.columns if col != time_col]
         
     except Exception as e:
         display_error(f"Error preparing data: {str(e)}")
@@ -107,8 +106,72 @@ def main():
     # Display overview
     st.success(f"✅ Data loaded from {data_source} dataset")
     
+    # === STEP 1: VARIABLE SELECTION (NEW - FIX #1) ===
+    st.subheader("📋 Step 1: Select Variables for Analysis")
+    
+    # Separate original and cleaned/transformed variables
+    original_vars = sorted(st.session_state.df_long['variable'].unique().tolist())
+    cleaned_vars = [v for v in all_feature_cols if v not in original_vars]
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        if cleaned_vars:
+            st.info(f"""
+            💡 **Available variables:**
+            - {len(original_vars)} original variables
+            - {len(cleaned_vars)} cleaned/transformed variables
+            
+            **Tip:** Select either original OR cleaned versions of the same variable, not both.
+            """)
+            
+            # Show variable types
+            with st.expander("📊 Show Variable Details"):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.markdown("**Original Variables:**")
+                    for v in original_vars[:10]:
+                        st.caption(f"• {v}")
+                    if len(original_vars) > 10:
+                        st.caption(f"... and {len(original_vars)-10} more")
+                
+                with col_b:
+                    st.markdown("**Cleaned/Transformed:**")
+                    for v in cleaned_vars[:10]:
+                        st.caption(f"• {v}")
+                    if len(cleaned_vars) > 10:
+                        st.caption(f"... and {len(cleaned_vars)-10} more")
+        
+        # Multi-select for variable selection
+        selected_features = st.multiselect(
+            "Select variables to use in dimensionality reduction",
+            all_feature_cols,
+            default=all_feature_cols if len(all_feature_cols) <= 10 else all_feature_cols[:10],
+            help="Choose which variables to include in the analysis",
+            key="dim_reduction_variables"
+        )
+    
+    with col2:
+        st.metric("Total Available", len(all_feature_cols))
+        st.metric("Selected", len(selected_features))
+        
+        if len(selected_features) < len(all_feature_cols):
+            excluded = len(all_feature_cols) - len(selected_features)
+            st.metric("Excluded", excluded)
+    
+    # Check minimum requirements
+    if len(selected_features) < 2:
+        st.error("❌ Please select at least 2 variables for dimensionality reduction")
+        return
+    
+    # Use only selected features
+    feature_cols = selected_features
+    
+    st.markdown("---")
+    
+    # Display current selection info
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Variables", len(feature_cols))
+    col1.metric("Selected Variables", len(feature_cols))
     col2.metric("Time Points", len(df_wide))
     col3.metric("Missing Values", df_wide[feature_cols].isna().sum().sum())
     col4.metric("Data Source", data_source.capitalize())
@@ -143,10 +206,9 @@ def main():
         This is an **optional analytical tool**, not a required step. You decide whether to apply it.
         """)
     
-    # Create tabs for each method
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    # Create tabs (FIX #3: Variance Filtering removed)
+    tab1, tab2, tab3, tab4 = st.tabs([
         "🔗 Correlation Filtering",
-        "📊 Variance Filtering",
         "🧮 PCA Analysis",
         "🎯 Regularization (Lasso/Elastic Net)",
         "📋 Summary & Export"
@@ -156,16 +218,13 @@ def main():
         handle_correlation_filtering(df_wide, feature_cols)
     
     with tab2:
-        handle_variance_filtering(df_wide, feature_cols)
-    
-    with tab3:
         handle_pca_analysis(df_wide, feature_cols)
     
-    with tab4:
+    with tab3:
         handle_regularization(df_wide, feature_cols)
     
-    with tab5:
-        show_reduction_summary(df_wide, feature_cols)
+    with tab4:
+        show_reduction_summary(df_wide, feature_cols, all_feature_cols)
 
 
 def handle_correlation_filtering(df_wide, feature_cols):
@@ -386,158 +445,72 @@ def create_correlation_heatmap(corr_matrix, features):
         return None
 
 
-def handle_variance_filtering(df_wide, feature_cols):
-    """Variance-based feature filtering"""
-    
-    st.header("📊 Variance-Based Feature Filtering")
-    st.markdown("*Remove low-variance (low-information) features*")
-    
-    # Check for missing values
-    if df_wide[feature_cols].isna().any().any():
-        st.warning("⚠️ Data contains missing values. They will be handled using forward-fill.")
-        df_clean = df_wide[feature_cols].fillna(method='ffill').fillna(method='bfill')
-    else:
-        df_clean = df_wide[feature_cols]
-    
-    st.subheader("Step 1: Analyze Feature Variance")
-    
-    # Calculate variances
-    variances = df_clean.var().sort_values(ascending=False)
-    
-    # Variance plot
-    fig = go.Figure()
-    
-    fig.add_trace(go.Bar(
-        x=variances.index,
-        y=variances.values,
-        marker_color='steelblue',
-        text=np.round(variances.values, 3),
-        textposition='outside'
-    ))
-    
-    fig.update_layout(
-        title="Feature Variances",
-        xaxis_title="Features",
-        yaxis_title="Variance",
-        height=500,
-        template='plotly_white',
-        showlegend=False
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    with st.expander("💾 Export Variance Plot"):
-        quick_export_buttons(fig, "variance_plot", ['png', 'pdf', 'html'])
-    
-    # Statistics
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Features", len(variances))
-    col2.metric("Max Variance", f"{variances.max():.3f}")
-    col3.metric("Min Variance", f"{variances.min():.3f}")
-    col4.metric("Mean Variance", f"{variances.mean():.3f}")
-    
-    st.markdown("---")
-    st.subheader("Step 2: Set Variance Threshold")
-    
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Suggest threshold based on data
-        suggested_threshold = variances.quantile(0.05)  # 5th percentile
+def create_pca_scatter_plot(components, pc_x, pc_y, results, point_size, point_color, show_time_gradient):
+    """Create PCA scatter plot (FIX #4)"""
+    try:
+        # Get indices
+        x_idx = int(pc_x.replace("PC", "")) - 1
+        y_idx = int(pc_y.replace("PC", "")) - 1
         
-        threshold = st.slider(
-            "Variance threshold",
-            min_value=0.0,
-            max_value=float(variances.max()),
-            value=float(max(0.01, suggested_threshold)),
-            step=0.001,
-            format="%.3f",
-            help="Remove features with variance below this threshold",
-            key="var_threshold"
+        # Extract data
+        x_data = components[:, x_idx]
+        y_data = components[:, y_idx]
+        
+        # Create figure
+        fig = go.Figure()
+        
+        if show_time_gradient:
+            # Color by time sequence
+            fig.add_trace(go.Scatter(
+                x=x_data,
+                y=y_data,
+                mode='markers',
+                marker=dict(
+                    size=point_size,
+                    color=np.arange(len(x_data)),
+                    colorscale='Viridis',
+                    showscale=True,
+                    colorbar=dict(title="Time<br>Sequence")
+                ),
+                text=[f"Point {i+1}" for i in range(len(x_data))],
+                hovertemplate=f'<b>%{{text}}</b><br>{pc_x}: %{{x:.3f}}<br>{pc_y}: %{{y:.3f}}<extra></extra>'
+            ))
+        else:
+            # Single color
+            fig.add_trace(go.Scatter(
+                x=x_data,
+                y=y_data,
+                mode='markers',
+                marker=dict(
+                    size=point_size,
+                    color=point_color
+                ),
+                text=[f"Point {i+1}" for i in range(len(x_data))],
+                hovertemplate=f'<b>%{{text}}</b><br>{pc_x}: %{{x:.3f}}<br>{pc_y}: %{{y:.3f}}<extra></extra>'
+            ))
+        
+        # Layout
+        var_x = results['explained_variance'][x_idx] * 100
+        var_y = results['explained_variance'][y_idx] * 100
+        
+        fig.update_layout(
+            title=f"PCA Scatter Plot: {pc_x} vs {pc_y}",
+            xaxis_title=f"{pc_x} ({var_x:.1f}% variance)",
+            yaxis_title=f"{pc_y} ({var_y:.1f}% variance)",
+            height=600,
+            template='plotly_white',
+            hovermode='closest'
         )
         
-        st.info(f"""
-        💡 **How it works:**
-        - Features with very low variance provide little information
-        - Nearly constant features don't help distinguish patterns
-        - Suggested threshold: {suggested_threshold:.3f} (5th percentile)
-        """)
+        # Add zero lines
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+        fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
+        
+        return fig
     
-    with col2:
-        # Preview impact
-        kept = (variances >= threshold).sum()
-        removed = (variances < threshold).sum()
-        
-        st.metric("Features to Keep", kept)
-        st.metric("Features to Remove", removed)
-        
-        if removed > 0:
-            reduction_pct = (removed / len(variances)) * 100
-            st.metric("Reduction", f"{reduction_pct:.1f}%")
-    
-    # Show which features will be removed
-    if removed > 0:
-        st.markdown("**Features below threshold:**")
-        low_var_features = variances[variances < threshold]
-        for feat, var in low_var_features.items():
-            st.caption(f"• {feat}: {var:.4f}")
-    
-    # Apply button
-    if st.button("📊 Apply Variance Filter", type="primary", key="apply_variance"):
-        with st.spinner("Filtering low-variance features..."):
-            try:
-                selected_features = variances[variances >= threshold].index.tolist()
-                removed_features = variances[variances < threshold].index.tolist()
-                
-                # Store results
-                st.session_state.reduction_results['variance'] = {
-                    'method': 'Variance Filtering',
-                    'threshold': threshold,
-                    'selected': selected_features,
-                    'removed': removed_features,
-                    'variances': variances.to_dict(),
-                    'timestamp': datetime.now()
-                }
-                
-                # Update selected features if not already set or if this gives better results
-                if not st.session_state.selected_features:
-                    st.session_state.selected_features = selected_features
-                
-                st.success(f"✅ Kept {len(selected_features)} features, removed {len(removed_features)}")
-                st.rerun()
-                
-            except Exception as e:
-                display_error(f"Error in variance filtering: {str(e)}")
-                st.exception(e)
-    
-    # Display results
-    if st.session_state.get('reduction_results', {}).get('variance'):
-        st.markdown("---")
-        st.subheader("📊 Filtering Results")
-        
-        results = st.session_state.reduction_results['variance']
-        
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Original Features", len(feature_cols))
-        col2.metric("Selected Features", len(results['selected']))
-        col3.metric("Removed Features", len(results['removed']))
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**✅ Kept Features (High Variance):**")
-            kept_vars = {k: v for k, v in results['variances'].items() if k in results['selected']}
-            for feat, var in sorted(kept_vars.items(), key=lambda x: x[1], reverse=True):
-                st.text(f"  • {feat}: {var:.4f}")
-        
-        with col2:
-            st.markdown("**❌ Removed (Low Variance):**")
-            if results['removed']:
-                removed_vars = {k: v for k, v in results['variances'].items() if k in results['removed']}
-                for feat, var in sorted(removed_vars.items(), key=lambda x: x[1], reverse=True):
-                    st.text(f"  • {feat}: {var:.4f}")
-            else:
-                st.caption("(none)")
+    except Exception as e:
+        st.error(f"Error creating PCA scatter plot: {str(e)}")
+        return None
 
 
 def handle_pca_analysis(df_wide, feature_cols):
@@ -574,7 +547,7 @@ def handle_pca_analysis(df_wide, feature_cols):
                 st.info(f"Using all {len(features_to_use)} features")
         else:
             features_to_use = feature_cols
-            st.info(f"💡 Tip: Apply variance or correlation filtering first for better results")
+            st.info(f"💡 Tip: Apply correlation filtering first for better results")
     
     with col2:
         n_components = st.slider(
@@ -663,9 +636,9 @@ def handle_pca_analysis(df_wide, feature_cols):
             index=results['features']
         )
         
-        # Display loadings
+        # FIX #2: Display loadings without matplotlib styling
         st.dataframe(
-            loadings_df.style.background_gradient(cmap='RdBu', vmin=-1, vmax=1, axis=None).format("{:.3f}"),
+            loadings_df.round(3),
             use_container_width=True
         )
         
@@ -690,6 +663,73 @@ def handle_pca_analysis(df_wide, feature_cols):
                     original_loading = loadings_df.loc[feat, f"PC{i+1}"]
                     direction = "+" if original_loading > 0 else "-"
                     st.text(f"  {direction} {feat}: {abs(original_loading):.3f}")
+        
+        st.markdown("---")
+        
+        # FIX #4: PCA SCATTER PLOT VISUALIZATION
+        st.markdown("#### PCA Scatter Plot Visualization")
+        
+        # Create scatter plot interface
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            pc_x = st.selectbox(
+                "X-axis",
+                [f"PC{i+1}" for i in range(results['n_components'])],
+                index=0,
+                key="pca_scatter_x"
+            )
+        
+        with col2:
+            pc_y = st.selectbox(
+                "Y-axis",
+                [f"PC{i+1}" for i in range(results['n_components'])],
+                index=min(1, results['n_components']-1),
+                key="pca_scatter_y"
+            )
+        
+        with col3:
+            point_size = st.slider(
+                "Point size",
+                min_value=3,
+                max_value=15,
+                value=8,
+                key="pca_point_size"
+            )
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            point_color = st.color_picker(
+                "Point color",
+                value="#1f77b4",
+                key="pca_point_color"
+            )
+        
+        with col2:
+            show_time_gradient = st.checkbox(
+                "Color by time sequence",
+                value=True,
+                help="Color points by their position in time series",
+                key="pca_time_gradient"
+            )
+        
+        # Create scatter plot
+        fig_scatter = create_pca_scatter_plot(
+            st.session_state.pca_components,
+            pc_x,
+            pc_y,
+            results,
+            point_size,
+            point_color,
+            show_time_gradient
+        )
+        
+        if fig_scatter:
+            st.plotly_chart(fig_scatter, use_container_width=True)
+            
+            with st.expander("💾 Export PCA Scatter Plot"):
+                quick_export_buttons(fig_scatter, f"pca_scatter_{pc_x}_vs_{pc_y}", ['png', 'pdf', 'html'])
         
         st.markdown("---")
         
@@ -787,7 +827,7 @@ def create_variance_plot(results):
             legend=dict(x=0.7, y=0.95)
         )
         
-        # Add 85% threshold line
+        # Add threshold lines
         fig.add_hline(y=85, line_dash="dash", line_color="green", 
                      annotation_text="85% (Excellent)", annotation_position="right")
         fig.add_hline(y=70, line_dash="dash", line_color="orange",
@@ -1068,8 +1108,8 @@ def handle_regularization(df_wide, feature_cols):
                 st.caption("(none)")
 
 
-def show_reduction_summary(df_wide, feature_cols):
-    """Summary of all dimensionality reduction results"""
+def show_reduction_summary(df_wide, feature_cols, all_feature_cols):
+    """Summary of all dimensionality reduction results (FIX #6: added all_feature_cols parameter)"""
     
     st.header("📋 Summary & Export")
     
@@ -1089,14 +1129,6 @@ def show_reduction_summary(df_wide, feature_cols):
             summary_data.append({
                 "Method": "Correlation Filtering",
                 "Details": f"Threshold: {results['threshold']:.2f}",
-                "Features": f"{len(results['selected'])} kept, {len(results['removed'])} removed",
-                "Applied": results['timestamp'].strftime("%Y-%m-%d %H:%M")
-            })
-        
-        elif method_name == 'variance':
-            summary_data.append({
-                "Method": "Variance Filtering",
-                "Details": f"Threshold: {results['threshold']:.3f}",
                 "Features": f"{len(results['selected'])} kept, {len(results['removed'])} removed",
                 "Applied": results['timestamp'].strftime("%Y-%m-%d %H:%M")
             })
@@ -1151,7 +1183,7 @@ def show_reduction_summary(df_wide, feature_cols):
         **Features selected:** {len(st.session_state.selected_features)}
         
         **Why:**
-        - Reduced from {len(feature_cols)} original features
+        - Reduced from {len(all_feature_cols)} original features
         - Low-information and redundant features removed
         - Preserves interpretability of original variables
         
@@ -1165,7 +1197,7 @@ def show_reduction_summary(df_wide, feature_cols):
         Will use all original features. Consider:
         - High risk of multicollinearity
         - Potentially unstable models
-        - Recommend applying at least correlation or variance filtering
+        - Recommend applying at least correlation filtering
         """)
     
     st.markdown("---")
@@ -1223,7 +1255,7 @@ def show_reduction_summary(df_wide, feature_cols):
     st.markdown("---")
     st.markdown("**Analysis Report:**")
     
-    report = create_analysis_report(st.session_state.reduction_results, feature_cols)
+    report = create_analysis_report(st.session_state.reduction_results, all_feature_cols)
     
     st.download_button(
         label="📄 Download Analysis Report (TXT)",
@@ -1276,26 +1308,11 @@ def create_analysis_report(results, original_features):
             report.append(f"\nRemoved (redundant): {', '.join(corr['removed'])}")
         report.append("\n")
     
-    # Variance Filtering
-    if 'variance' in results:
-        var = results['variance']
-        report.append("-"*70)
-        report.append("2. VARIANCE-BASED FILTERING")
-        report.append("-"*70)
-        report.append(f"Threshold: {var['threshold']:.4f}")
-        report.append(f"Selected features: {len(var['selected'])}")
-        report.append(f"Removed features: {len(var['removed'])}")
-        report.append(f"Reduction: {len(var['removed'])/len(original_features)*100:.1f}%")
-        report.append(f"\nKept: {', '.join(var['selected'])}")
-        if var['removed']:
-            report.append(f"\nRemoved (low variance): {', '.join(var['removed'])}")
-        report.append("\n")
-    
     # PCA
     if 'pca' in results:
         pca = results['pca']
         report.append("-"*70)
-        report.append("3. PRINCIPAL COMPONENT ANALYSIS (PCA)")
+        report.append("2. PRINCIPAL COMPONENT ANALYSIS (PCA)")
         report.append("-"*70)
         report.append(f"Components extracted: {pca['n_components']}")
         report.append(f"Total variance explained: {pca['cumulative_variance'][-1]*100:.2f}%")
@@ -1310,7 +1327,7 @@ def create_analysis_report(results, original_features):
     if 'regularization' in results:
         reg = results['regularization']
         report.append("-"*70)
-        report.append("4. REGULARIZATION-BASED SELECTION")
+        report.append("3. REGULARIZATION-BASED SELECTION")
         report.append("-"*70)
         report.append(f"Method: {reg['method']}")
         report.append(f"Target variable: {reg['target']}")
