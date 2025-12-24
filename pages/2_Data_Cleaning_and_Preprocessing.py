@@ -24,6 +24,9 @@ config = get_config()
 # Page configuration
 st.set_page_config(page_title="Data Cleaning & Preprocessing", page_icon="🧹", layout="wide")
 
+# Render shared sidebar
+render_app_sidebar()  
+
 st.title("🧹 Data Cleaning & Preprocessing")
 st.markdown("*Clean and prepare your data for analysis*")
 st.markdown("---")
