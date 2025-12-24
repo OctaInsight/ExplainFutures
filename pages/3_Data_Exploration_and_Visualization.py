@@ -25,6 +25,9 @@ config = get_config()
 # Page configuration
 st.set_page_config(page_title="Data Exploration & Visualization", page_icon="📊", layout="wide")
 
+# Render shared sidebar
+render_app_sidebar()  
+
 st.title("📊 Data Exploration & Visualization")
 st.markdown("*Create interactive plots of your time-series data*")
 st.markdown("---")
