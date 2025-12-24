@@ -38,6 +38,65 @@ st.markdown("*Upload your time-series data and assess data quality*")
 st.markdown("---")
 
 
+def calculate_data_health_score(health_report):
+    """
+    Calculate overall data health score (0-100)
+    Returns: (score, category, issues)
+    """
+    score = 100
+    issues = []
+    
+    # Missing values penalty
+    if health_report.get("missing_values"):
+        total_missing = 0
+        total_values = 0
+        for var, info in health_report["missing_values"].items():
+            total_missing += info["count"]
+            missing_pct = info["percentage"]
+            
+            if missing_pct > 0.20:  # >20% missing
+                score -= 15
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing data (critical)")
+            elif missing_pct > 0.05:  # >5% missing
+                score -= 5
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing data")
+    
+    # Outliers check
+    if health_report.get("outliers"):
+        outlier_count = sum(info["count"] for info in health_report["outliers"].values())
+        if outlier_count > 0:
+            score -= 5
+            issues.append(f"📊 {outlier_count} outliers detected across variables")
+    
+    # Time series issues
+    if "time_metadata" in health_report:
+        time_meta = health_report["time_metadata"]
+        if time_meta.get("duplicate_count", 0) > 0:
+            score -= 10
+            issues.append(f"⏰ {time_meta['duplicate_count']} duplicate timestamps found")
+    
+    # Warnings
+    if health_report.get("warnings"):
+        score -= len(health_report["warnings"]) * 5
+        for warning in health_report["warnings"]:
+            issues.append(f"⚠️ {warning}")
+    
+    # Ensure score is between 0 and 100
+    score = max(0, min(100, score))
+    
+    # Categorize
+    if score >= 85:
+        category = "excellent"
+    elif score >= 70:
+        category = "good"
+    elif score >= 50:
+        category = "fair"
+    else:
+        category = "poor"
+    
+    return score, category, issues
+
+
 def main():
     """Main page function"""
     
@@ -74,12 +133,12 @@ def render_upload_section():
             - **One or more numeric columns** (variables to analyze)
             
             Example CSV:
-            ```
+```
             Date,Temperature,Humidity,Pressure
             2023-01-01,22.5,65.2,1013.2
             2023-01-02,23.1,68.5,1012.8
             2023-01-03,21.8,70.1,1014.3
-            ```
+```
             """)
         
         return
@@ -231,7 +290,7 @@ def render_data_configuration():
         value_columns = st.multiselect(
             "Select variables to analyze",
             [col for col in df.columns if col != time_column],
-            default=default_vars[:10] if len(default_vars) > 10 else default_vars,  # Limit to 10 by default
+            default=default_vars[:10] if len(default_vars) > 10 else default_vars,
             help="Choose numeric columns to include in analysis"
         )
         
@@ -327,7 +386,7 @@ def process_data(df, time_column, value_columns, datetime_format):
     
     # Store in session state
     st.session_state.df_long = df_long
-    st.session_state.df_clean = df_long.copy()  # Start with unprocessed
+    st.session_state.df_clean = df_long.copy()
     st.session_state.time_column = time_column
     st.session_state.value_columns = value_columns
     st.session_state.health_report = health_report
@@ -365,6 +424,50 @@ def render_health_report_section():
     health = st.session_state.health_report
     df_long = st.session_state.df_long
     
+    # Calculate health score
+    health_score, health_category, issues = calculate_data_health_score(health)
+    
+    # Health Score Dashboard
+    st.markdown("### 📊 Overall Data Health")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col1:
+        # Health score with color
+        if health_category == "excellent":
+            score_color = "🟢"
+            score_text = "Excellent"
+        elif health_category == "good":
+            score_color = "🟡"
+            score_text = "Good"
+        elif health_category == "fair":
+            score_color = "🟠"
+            score_text = "Fair"
+        else:
+            score_color = "🔴"
+            score_text = "Poor"
+        
+        st.metric("Health Score", f"{health_score}/100")
+        st.markdown(f"### {score_color} {score_text}")
+    
+    with col2:
+        # Health issues summary
+        if issues:
+            st.markdown("**Issues Detected:**")
+            for issue in issues[:5]:  # Show top 5 issues
+                st.caption(issue)
+            if len(issues) > 5:
+                st.caption(f"... and {len(issues) - 5} more issues")
+        else:
+            st.success("✅ No significant issues detected!")
+    
+    with col3:
+        # Quick stats
+        st.metric("Variables", len(st.session_state.value_columns))
+        st.metric("Data Points", len(df_long))
+    
+    st.markdown("---")
+    
     # Time metadata
     if "time_metadata" in health:
         st.subheader("⏰ Time Series Information")
@@ -384,7 +487,9 @@ def render_health_report_section():
         
         with col3:
             if "duplicate_count" in time_meta and time_meta["duplicate_count"] > 0:
-                st.metric("Duplicate Timestamps", time_meta["duplicate_count"], delta="Warning", delta_color="off")
+                st.metric("Duplicate Timestamps", time_meta["duplicate_count"], delta="Warning", delta_color="inverse")
+            else:
+                st.metric("Duplicate Timestamps", "0", delta="Good", delta_color="normal")
     
     st.markdown("---")
     
@@ -465,25 +570,135 @@ def render_health_report_section():
         st.subheader("⚠️ Warnings")
         for warning in health["warnings"]:
             st.warning(warning)
+        st.markdown("---")
+    
+    # INTELLIGENT RECOMMENDATIONS & NEXT STEPS
+    st.markdown("---")
+    st.header("🎯 What's Next?")
+    
+    # Provide intelligent recommendations
+    st.markdown("### 💡 Recommendations Based on Data Health")
+    
+    if health_score >= 85:
+        st.success("""
+        **Excellent Data Quality! ✨**
+        
+        Your data is in great shape and ready for analysis:
+        - ✅ Minimal missing values
+        - ✅ Clean time series
+        - ✅ Good data coverage
+        
+        **Recommended:** Proceed directly to visualization and analysis.
+        """)
+        primary_action = "visualize"
+        
+    elif health_score >= 70:
+        st.info("""
+        **Good Data Quality 👍**
+        
+        Your data is generally good but has minor issues:
+        - Some missing values or outliers detected
+        - Overall structure is sound
+        
+        **Options:**
+        - Proceed to visualization if issues are acceptable
+        - Or clean the data first for optimal results
+        """)
+        primary_action = "either"
+        
+    elif health_score >= 50:
+        st.warning("""
+        **Fair Data Quality ⚠️**
+        
+        Your data has noticeable quality issues:
+        - Significant missing values or outliers
+        - May affect analysis quality
+        
+        **Recommended:** Clean and preprocess your data before analysis.
+        """)
+        primary_action = "clean"
+        
+    else:
+        st.error("""
+        **Poor Data Quality 🔴**
+        
+        Your data has serious quality issues:
+        - High missing data percentages
+        - Multiple structural problems
+        
+        **Strongly Recommended:** 
+        1. Clean and preprocess the data, OR
+        2. Upload a better quality dataset
+        """)
+        primary_action = "clean"
+    
+    st.markdown("---")
     
     # Action buttons
-    st.markdown("---")
-    st.subheader("Next Steps")
+    st.markdown("### 🚀 Choose Your Next Step")
+    st.markdown("*Select what you'd like to do next:*")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.markdown("**📊 Ready to visualize?**")
-        st.page_link("pages/2_Explore_and_Visualize.py", label="Go to Visualizations →", icon="📊")
+        st.markdown("#### 📊 Visualize Data")
+        if health_score >= 70:
+            st.success("✅ Recommended")
+        st.markdown("Explore your data with interactive charts and plots.")
+        
+        if st.button("📊 Go to Visualization", 
+                     use_container_width=True, 
+                     type="primary" if primary_action == "visualize" else "secondary",
+                     key="btn_visualize"):
+            st.switch_page("pages/3_Data_Exploration_and_Visualization.py")
     
     with col2:
-        st.markdown("**🔄 Need to reload?**")
-        if st.button("Clear Data & Start Over"):
+        st.markdown("#### 🧹 Clean Data")
+        if health_score < 70:
+            st.warning("⚠️ Recommended")
+        st.markdown("Handle missing values, outliers, and preprocess data.")
+        
+        if st.button("🧹 Go to Data Cleaning", 
+                     use_container_width=True,
+                     type="primary" if primary_action == "clean" else "secondary",
+                     key="btn_clean"):
+            st.switch_page("pages/2_Data_Cleaning_and_Preprocessing.py")
+    
+    with col3:
+        st.markdown("#### 📁 Upload New Data")
+        st.markdown("Start over with a different dataset or re-upload.")
+        
+        if st.button("📁 Upload Different File", 
+                     use_container_width=True,
+                     key="btn_reupload"):
+            # Clear current data
             st.session_state.data_loaded = False
             st.session_state.df_raw = None
             st.session_state.df_long = None
             st.session_state.health_report = None
             st.rerun()
+    
+    st.markdown("---")
+    
+    # Optional: Save to database (inactive for now)
+    st.markdown("### 💾 Data Persistence")
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        st.info("""
+        **Database Integration** (Coming in Phase 4)
+        
+        Once activated, your data will be automatically saved to Supabase database 
+        for persistent storage and easy access across sessions.
+        """)
+    
+    with col2:
+        if st.button("💾 Save to Database", 
+                     disabled=True, 
+                     use_container_width=True,
+                     help="Feature available in Phase 4"):
+            pass  # Placeholder for future implementation
 
 
 if __name__ == "__main__":
