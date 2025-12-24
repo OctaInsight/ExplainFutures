@@ -19,6 +19,7 @@ from core.utils import (
     detect_datetime_columns, detect_numeric_columns, format_percentage,
     format_number
 )
+from core.shared_sidebar import render_app_sidebar  
 from core.io.loaders import load_file_smart, convert_to_long_format, preview_dataframe, get_excel_sheet_names
 from core.io.validators import parse_time_column, validate_time_series, check_numeric_columns, detect_and_report_issues
 
