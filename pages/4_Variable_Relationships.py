@@ -118,6 +118,10 @@ def initialize_plot_configs():
         st.session_state.num_plots = 2
     if "plot_configs" not in st.session_state:
         st.session_state.plot_configs = {}
+    if "generated_plots" not in st.session_state:
+        st.session_state.generated_plots = {}
+    if "correlation_matrix_data" not in st.session_state:
+        st.session_state.correlation_matrix_data = None
 
 
 def create_combined_variable(df, variables, operation):
@@ -671,66 +675,89 @@ def render_single_plot(df_long, variables, plot_id):
             }
             
             fig = create_scatter_plot(x_data, y_data, x_label, y_label, plot_config)
-            st.plotly_chart(fig, use_container_width=True)
             
-            st.markdown("#### 📊 Statistical Analysis")
+            # Store plot data in session state for persistence
+            st.session_state.generated_plots[plot_id] = {
+                'fig': fig,
+                'x_data': x_data,
+                'y_data': y_data,
+                'x_label': x_label,
+                'y_label': y_label,
+                'show_correlation': show_correlation,
+                'corr_method': corr_method if show_correlation else None,
+                'show_regression': show_regression,
+                'regression_type': regression_type if show_regression else None,
+                'show_ml': show_ml,
+                'ml_model_type': ml_model_type if show_ml else None
+            }
+    
+    # Display the plot if it exists in session state
+    if plot_id in st.session_state.generated_plots:
+        plot_data = st.session_state.generated_plots[plot_id]
+        
+        st.plotly_chart(plot_data['fig'], use_container_width=True)
+        
+        st.markdown("#### 📊 Statistical Analysis")
+        
+        x_data = plot_data['x_data']
+        y_data = plot_data['y_data']
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("**Descriptive Statistics**")
+            st.metric("Data Points", len(x_data))
+            st.metric("X Mean", f"{np.mean(x_data):.4f}")
+            st.metric("Y Mean", f"{np.mean(y_data):.4f}")
+            st.metric("X Std Dev", f"{np.std(x_data):.4f}")
+            st.metric("Y Std Dev", f"{np.std(y_data):.4f}")
+        
+        with col2:
+            st.markdown("**Correlation Analysis**")
+            if plot_data['show_correlation']:
+                coef, p_value = calculate_correlation(x_data, y_data, plot_data['corr_method'])
+                if coef is not None:
+                    st.metric(f"{plot_data['corr_method'].capitalize()} ρ", f"{coef:.4f}")
+                    st.metric("p-value", f"{p_value:.4e}")
+                    
+                    if abs(coef) > 0.7:
+                        strength = "Strong"
+                        st.success(f"✅ {strength}")
+                    elif abs(coef) > 0.4:
+                        strength = "Moderate"
+                        st.info(f"ℹ️ {strength}")
+                    else:
+                        strength = "Weak"
+                        st.warning(f"⚠️ {strength}")
+                    
+                    direction = "positive" if coef > 0 else "negative"
+                    st.caption(f"{strength} {direction} correlation")
+        
+        with col3:
+            st.markdown("**Model Performance**")
+            if plot_data['show_regression']:
+                _, _, equation, metrics = fit_regression_model(x_data, y_data, plot_data['regression_type'])
+                if metrics:
+                    st.metric("Regression R²", f"{metrics['R²']:.4f}")
+                    st.metric("RMSE", f"{metrics['RMSE']:.4f}")
+                    st.metric("MAE", f"{metrics['MAE']:.4f}")
+                    
+                    # Show full equation in expander
+                    with st.expander("📐 View Equation"):
+                        st.code(equation, language=None)
             
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.markdown("**Descriptive Statistics**")
-                st.metric("Data Points", len(x_data))
-                st.metric("X Mean", f"{np.mean(x_data):.4f}")
-                st.metric("Y Mean", f"{np.mean(y_data):.4f}")
-                st.metric("X Std Dev", f"{np.std(x_data):.4f}")
-                st.metric("Y Std Dev", f"{np.std(y_data):.4f}")
-            
-            with col2:
-                st.markdown("**Correlation Analysis**")
-                if show_correlation:
-                    coef, p_value = calculate_correlation(x_data, y_data, corr_method)
-                    if coef is not None:
-                        st.metric(f"{corr_method.capitalize()} ρ", f"{coef:.4f}")
-                        st.metric("p-value", f"{p_value:.4e}")
-                        
-                        if abs(coef) > 0.7:
-                            strength = "Strong"
-                            st.success(f"✅ {strength}")
-                        elif abs(coef) > 0.4:
-                            strength = "Moderate"
-                            st.info(f"ℹ️ {strength}")
-                        else:
-                            strength = "Weak"
-                            st.warning(f"⚠️ {strength}")
-                        
-                        direction = "positive" if coef > 0 else "negative"
-                        st.caption(f"{strength} {direction} correlation")
-            
-            with col3:
-                st.markdown("**Model Performance**")
-                if show_regression:
-                    _, _, equation, metrics = fit_regression_model(x_data, y_data, regression_type)
-                    if metrics:
-                        st.metric("Regression R²", f"{metrics['R²']:.4f}")
-                        st.metric("RMSE", f"{metrics['RMSE']:.4f}")
-                        st.metric("MAE", f"{metrics['MAE']:.4f}")
-                        
-                        # Show full equation in expander
-                        with st.expander("📐 View Equation"):
-                            st.code(equation, language=None)
-                
-                if show_ml:
-                    _, _, ml_metrics = fit_ml_model(x_data, y_data, ml_model_type)
-                    if ml_metrics:
-                        st.markdown(f"**ML: {ml_metrics['Model']}**")
-                        st.metric("ML R²", f"{ml_metrics['R²']:.4f}")
-                        st.metric("ML RMSE", f"{ml_metrics['RMSE']:.4f}")
-                        
-                        # Show model-specific details
-                        with st.expander("🤖 Model Details"):
-                            for key, value in ml_metrics.items():
-                                if key not in ['R²', 'RMSE', 'MAE', 'Model']:
-                                    st.write(f"**{key}:** {value if isinstance(value, int) else f'{value:.4f}'}")
+            if plot_data['show_ml']:
+                _, _, ml_metrics = fit_ml_model(x_data, y_data, plot_data['ml_model_type'])
+                if ml_metrics:
+                    st.markdown(f"**ML: {ml_metrics['Model']}**")
+                    st.metric("ML R²", f"{ml_metrics['R²']:.4f}")
+                    st.metric("ML RMSE", f"{ml_metrics['RMSE']:.4f}")
+                    
+                    # Show model-specific details
+                    with st.expander("🤖 Model Details"):
+                        for key, value in ml_metrics.items():
+                            if key not in ['R²', 'RMSE', 'MAE', 'Model']:
+                                st.write(f"**{key}:** {value if isinstance(value, int) else f'{value:.4f}'}")
 
 
 def render_correlation_matrix(df_long, variables):
@@ -756,21 +783,30 @@ def render_correlation_matrix(df_long, variables):
             with st.spinner("Calculating correlations..."):
                 
                 try:
-                    # Check if 'time' column exists, otherwise use index
+                    # Create wide format dataframe properly
+                    # Group by time and variable, taking mean of duplicate entries
                     if 'time' in df_long.columns:
                         df_wide = df_long.pivot_table(
                             index='time',
                             columns='variable',
-                            values='value'
+                            values='value',
+                            aggfunc='mean'  # Handle duplicates by taking mean
                         )
                     else:
-                        # Use reset index if time is not a column
-                        df_temp = df_long.reset_index()
+                        # Create a temporary index if time column doesn't exist
+                        df_temp = df_long.copy()
+                        df_temp['temp_index'] = df_temp.groupby('variable').cumcount()
                         df_wide = df_temp.pivot_table(
-                            index='index',
+                            index='temp_index',
                             columns='variable',
-                            values='value'
+                            values='value',
+                            aggfunc='mean'
                         )
+                    
+                    # Ensure we have data
+                    if df_wide.empty or len(df_wide.columns) < 2:
+                        st.error("❌ Not enough variables or data to calculate correlation matrix")
+                        return
                     
                     # Calculate correlation matrix
                     if corr_method == 'pearson':
@@ -780,41 +816,92 @@ def render_correlation_matrix(df_long, variables):
                     else:
                         corr_matrix = df_wide.corr(method='kendall')
                     
-                    # Create heatmap
-                    fig = go.Figure(data=go.Heatmap(
-                        z=corr_matrix.values,
-                        x=corr_matrix.columns,
-                        y=corr_matrix.columns,
-                        colorscale='RdBu',
-                        zmid=0,
-                        text=corr_matrix.values if show_values else None,
-                        texttemplate='%{text:.2f}' if show_values else None,
-                        textfont={"size": 10},
-                        colorbar=dict(title="Correlation")
-                    ))
-                    
-                    fig.update_layout(
-                        title=f"Correlation Matrix ({corr_method.capitalize()})",
-                        xaxis_title="Variables",
-                        yaxis_title="Variables",
-                        height=600
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    st.markdown("#### 🔝 Strongest Correlations")
-                    
-                    # Get upper triangle (avoid duplicates and diagonal)
-                    mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
-                    corr_pairs = corr_matrix.where(mask).stack().reset_index()
-                    corr_pairs.columns = ['Variable 1', 'Variable 2', 'Correlation']
-                    corr_pairs = corr_pairs.sort_values('Correlation', key=abs, ascending=False)
-                    
-                    st.dataframe(corr_pairs.head(10), use_container_width=True, hide_index=True)
+                    # Store in session state for persistence
+                    st.session_state.correlation_matrix_data = {
+                        'matrix': corr_matrix,
+                        'method': corr_method,
+                        'show_values': show_values
+                    }
                 
                 except Exception as e:
                     st.error(f"Error creating correlation matrix: {str(e)}")
                     st.info("💡 Tip: Make sure your data has at least 2 variables with valid values")
+                    import traceback
+                    st.code(traceback.format_exc())
+                    return
+    
+    # Display correlation matrix if it exists in session state
+    if st.session_state.correlation_matrix_data is not None:
+        matrix_data = st.session_state.correlation_matrix_data
+        corr_matrix = matrix_data['matrix']
+        
+        # Create heatmap with REVERSED color scale (red=strong, blue=weak)
+        fig = go.Figure(data=go.Heatmap(
+            z=corr_matrix.values,
+            x=corr_matrix.columns,
+            y=corr_matrix.columns,
+            colorscale='RdBu_r',  # Reversed: Red=high, Blue=low
+            zmid=0,
+            zmin=-1,
+            zmax=1,
+            text=corr_matrix.values if matrix_data['show_values'] else None,
+            texttemplate='%{text:.2f}' if matrix_data['show_values'] else None,
+            textfont={"size": 10},
+            colorbar=dict(
+                title="Correlation",
+                tickvals=[-1, -0.5, 0, 0.5, 1],
+                ticktext=['-1.0<br>Strong<br>Negative', '-0.5', '0<br>No<br>Correlation', '0.5', '1.0<br>Strong<br>Positive']
+            )
+        ))
+        
+        fig.update_layout(
+            title=f"Correlation Matrix ({matrix_data['method'].capitalize()}) - Red=Strong, Blue=Weak",
+            xaxis_title="Variables",
+            yaxis_title="Variables",
+            height=600,
+            xaxis={'side': 'bottom'},
+            yaxis={'side': 'left'}
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.markdown("#### 🔝 Strongest Correlations (Excluding Self-Correlation)")
+        
+        # Get upper triangle (avoid duplicates and diagonal)
+        mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
+        corr_pairs = corr_matrix.where(mask).stack().reset_index()
+        corr_pairs.columns = ['Variable 1', 'Variable 2', 'Correlation']
+        
+        # Sort by absolute value of correlation (strongest first)
+        corr_pairs = corr_pairs.sort_values('Correlation', key=abs, ascending=False)
+        
+        # Color code the correlations
+        def color_correlation(val):
+            if abs(val) > 0.7:
+                return f'🔴 {val:.4f}'
+            elif abs(val) > 0.4:
+                return f'🟡 {val:.4f}'
+            else:
+                return f'🔵 {val:.4f}'
+        
+        corr_pairs['Correlation Strength'] = corr_pairs['Correlation'].apply(color_correlation)
+        
+        st.dataframe(
+            corr_pairs[['Variable 1', 'Variable 2', 'Correlation', 'Correlation Strength']].head(10),
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # Summary statistics
+        col1, col2, col3 = st.columns(3)
+        
+        strong_corr = corr_pairs[corr_pairs['Correlation'].abs() > 0.7]
+        moderate_corr = corr_pairs[(corr_pairs['Correlation'].abs() > 0.4) & (corr_pairs['Correlation'].abs() <= 0.7)]
+        weak_corr = corr_pairs[corr_pairs['Correlation'].abs() <= 0.4]
+        
+        col1.metric("🔴 Strong Correlations", len(strong_corr), help="|ρ| > 0.7")
+        col2.metric("🟡 Moderate Correlations", len(moderate_corr), help="0.4 < |ρ| ≤ 0.7")
+        col3.metric("🔵 Weak Correlations", len(weak_corr), help="|ρ| ≤ 0.4")
 
 
 if __name__ == "__main__":
