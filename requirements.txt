@@ -16,3 +16,6 @@ xlrd>=2.0.1      # For old Excel files (.xls)
 # Optional but recommended
 python-dateutil>=2.8.2
 
+# Image export for Plotly figures
+kaleido==0.2.1
+
