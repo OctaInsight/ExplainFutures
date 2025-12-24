@@ -255,9 +255,11 @@ def fit_regression_model(x, y, model_type='linear'):
         return None, None, None, None
 
 
-def fit_ml_model(x, y):
-    """Fit Random Forest model"""
-    from sklearn.ensemble import RandomForestRegressor
+def fit_ml_model(x, y, model_type='random_forest'):
+    """Fit machine learning models with multiple algorithms"""
+    from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+    from sklearn.svm import SVR
+    from sklearn.neighbors import KNeighborsRegressor
     from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
     
     mask = ~(np.isnan(x) | np.isnan(y))
@@ -268,22 +270,81 @@ def fit_ml_model(x, y):
         return None, None, None
     
     try:
-        model = RandomForestRegressor(n_estimators=100, random_state=42, max_depth=10)
+        # Select model based on type
+        if model_type == 'random_forest':
+            model = RandomForestRegressor(
+                n_estimators=100, 
+                random_state=42, 
+                max_depth=10,
+                min_samples_split=5
+            )
+            model_name = "Random Forest"
+            
+        elif model_type == 'gradient_boosting':
+            model = GradientBoostingRegressor(
+                n_estimators=100,
+                random_state=42,
+                max_depth=5,
+                learning_rate=0.1
+            )
+            model_name = "Gradient Boosting"
+            
+        elif model_type == 'svr':
+            model = SVR(
+                kernel='rbf',
+                C=1.0,
+                epsilon=0.1
+            )
+            model_name = "Support Vector Regression"
+            
+        elif model_type == 'knn':
+            n_neighbors = min(5, len(x_clean) - 1)
+            model = KNeighborsRegressor(
+                n_neighbors=n_neighbors,
+                weights='distance'
+            )
+            model_name = "K-Nearest Neighbors"
+        
+        else:
+            return None, None, None
+        
+        # Fit model
         model.fit(x_clean, y_clean)
         y_pred = model.predict(x_clean)
         
+        # Calculate metrics
         r2 = r2_score(y_clean, y_pred)
         rmse = np.sqrt(mean_squared_error(y_clean, y_pred))
         mae = mean_absolute_error(y_clean, y_pred)
         
-        metrics = {'R²': r2, 'RMSE': rmse, 'MAE': mae}
+        # Calculate additional metrics
+        metrics = {
+            'R²': r2,
+            'RMSE': rmse,
+            'MAE': mae,
+            'Model': model_name
+        }
         
+        # Add model-specific info
+        if model_type == 'random_forest':
+            metrics['Feature Importance'] = model.feature_importances_[0]
+            metrics['N Trees'] = model.n_estimators
+            
+        elif model_type == 'gradient_boosting':
+            metrics['Feature Importance'] = model.feature_importances_[0]
+            metrics['N Estimators'] = model.n_estimators
+            
+        elif model_type == 'knn':
+            metrics['N Neighbors'] = model.n_neighbors
+        
+        # Sort for plotting
         sort_idx = np.argsort(x_clean.flatten())
         x_sorted = x_clean[sort_idx].flatten()
         y_pred_sorted = y_pred[sort_idx]
         
         return x_sorted, y_pred_sorted, metrics
-    except:
+        
+    except Exception as e:
         return None, None, None
 
 
@@ -307,6 +368,9 @@ def create_scatter_plot(x_data, y_data, x_label, y_label, config):
         hovertemplate='%{text}<extra></extra>'
     ))
     
+    # Track annotations for vertical positioning
+    annotation_y_position = 0.95
+    
     if config.get('show_regression'):
         model_type = config.get('regression_type', 'linear')
         x_sorted, y_pred, equation, metrics = fit_regression_model(x_data, y_data, model_type)
@@ -322,26 +386,60 @@ def create_scatter_plot(x_data, y_data, x_label, y_label, config):
             
             if equation:
                 fig.add_annotation(
-                    x=0.05, y=0.95,
-                    xref='paper', yref='paper',
-                    text=f"{equation}<br>R² = {metrics['R²']:.4f}",
+                    x=0.02,
+                    y=annotation_y_position,
+                    xref='paper',
+                    yref='paper',
+                    text=f"<b>{equation}</b><br>R² = {metrics['R²']:.4f}<br>RMSE = {metrics['RMSE']:.4f}",
                     showarrow=False,
-                    bgcolor='rgba(255,255,255,0.8)',
+                    bgcolor='rgba(255, 255, 255, 0.95)',
                     bordercolor='red',
-                    borderwidth=1
+                    borderwidth=2,
+                    font=dict(color='black', size=11),
+                    align='left',
+                    xanchor='left',
+                    yanchor='top'
                 )
+                annotation_y_position -= 0.18
     
     if config.get('show_ml'):
-        x_sorted, y_pred, metrics = fit_ml_model(x_data, y_data)
+        ml_model_type = config.get('ml_model_type', 'random_forest')
+        x_sorted, y_pred, metrics = fit_ml_model(x_data, y_data, ml_model_type)
         
         if x_sorted is not None:
+            # Choose color based on model type
+            ml_colors = {
+                'random_forest': 'green',
+                'gradient_boosting': 'purple',
+                'svr': 'orange',
+                'knn': 'brown'
+            }
+            ml_color = ml_colors.get(ml_model_type, 'green')
+            
             fig.add_trace(go.Scatter(
                 x=x_sorted,
                 y=y_pred,
                 mode='lines',
-                name='ML: Random Forest',
-                line=dict(color='green', width=2, dash='dash')
+                name=f'ML: {ml_model_type.replace("_", " ").title()}',
+                line=dict(color=ml_color, width=2, dash='dash')
             ))
+            
+            # Add ML metrics annotation
+            fig.add_annotation(
+                x=0.02,
+                y=annotation_y_position,
+                xref='paper',
+                yref='paper',
+                text=f"<b>ML: {ml_model_type.replace('_', ' ').title()}</b><br>R² = {metrics['R²']:.4f}<br>RMSE = {metrics['RMSE']:.4f}",
+                showarrow=False,
+                bgcolor='rgba(255, 255, 255, 0.95)',
+                bordercolor=ml_color,
+                borderwidth=2,
+                font=dict(color='black', size=11),
+                align='left',
+                xanchor='left',
+                yanchor='top'
+            )
     
     fig.update_layout(
         xaxis_title=x_label,
@@ -505,6 +603,20 @@ def render_single_plot(df_long, variables, plot_id):
     
     with col3:
         show_ml = st.checkbox("Show ML prediction", key=f"show_ml_{plot_id}")
+        
+        if show_ml:
+            ml_model_type = st.selectbox(
+                "ML algorithm",
+                ["random_forest", "gradient_boosting", "svr", "knn"],
+                key=f"ml_type_{plot_id}",
+                format_func=lambda x: {
+                    'random_forest': 'Random Forest',
+                    'gradient_boosting': 'Gradient Boosting',
+                    'svr': 'Support Vector Regression',
+                    'knn': 'K-Nearest Neighbors'
+                }[x],
+                help="Select machine learning algorithm for prediction"
+            )
     
     st.markdown("---")
     
@@ -554,7 +666,8 @@ def render_single_plot(df_long, variables, plot_id):
                 'y_max': y_max,
                 'show_regression': show_regression,
                 'regression_type': regression_type if show_regression else None,
-                'show_ml': show_ml
+                'show_ml': show_ml,
+                'ml_model_type': ml_model_type if show_ml else None
             }
             
             fig = create_scatter_plot(x_data, y_data, x_label, y_label, plot_config)
@@ -569,6 +682,8 @@ def render_single_plot(df_long, variables, plot_id):
                 st.metric("Data Points", len(x_data))
                 st.metric("X Mean", f"{np.mean(x_data):.4f}")
                 st.metric("Y Mean", f"{np.mean(y_data):.4f}")
+                st.metric("X Std Dev", f"{np.std(x_data):.4f}")
+                st.metric("Y Std Dev", f"{np.std(y_data):.4f}")
             
             with col2:
                 st.markdown("**Correlation Analysis**")
@@ -580,29 +695,42 @@ def render_single_plot(df_long, variables, plot_id):
                         
                         if abs(coef) > 0.7:
                             strength = "Strong"
+                            st.success(f"✅ {strength}")
                         elif abs(coef) > 0.4:
                             strength = "Moderate"
+                            st.info(f"ℹ️ {strength}")
                         else:
                             strength = "Weak"
+                            st.warning(f"⚠️ {strength}")
                         
                         direction = "positive" if coef > 0 else "negative"
                         st.caption(f"{strength} {direction} correlation")
             
             with col3:
-                st.markdown("**Regression Metrics**")
+                st.markdown("**Model Performance**")
                 if show_regression:
                     _, _, equation, metrics = fit_regression_model(x_data, y_data, regression_type)
                     if metrics:
-                        st.metric("R²", f"{metrics['R²']:.4f}")
+                        st.metric("Regression R²", f"{metrics['R²']:.4f}")
                         st.metric("RMSE", f"{metrics['RMSE']:.4f}")
                         st.metric("MAE", f"{metrics['MAE']:.4f}")
+                        
+                        # Show full equation in expander
+                        with st.expander("📐 View Equation"):
+                            st.code(equation, language=None)
                 
                 if show_ml:
-                    _, _, ml_metrics = fit_ml_model(x_data, y_data)
+                    _, _, ml_metrics = fit_ml_model(x_data, y_data, ml_model_type)
                     if ml_metrics:
-                        st.markdown("**ML Metrics (RF)**")
-                        st.metric("R²", f"{ml_metrics['R²']:.4f}")
-                        st.metric("RMSE", f"{ml_metrics['RMSE']:.4f}")
+                        st.markdown(f"**ML: {ml_metrics['Model']}**")
+                        st.metric("ML R²", f"{ml_metrics['R²']:.4f}")
+                        st.metric("ML RMSE", f"{ml_metrics['RMSE']:.4f}")
+                        
+                        # Show model-specific details
+                        with st.expander("🤖 Model Details"):
+                            for key, value in ml_metrics.items():
+                                if key not in ['R²', 'RMSE', 'MAE', 'Model']:
+                                    st.write(f"**{key}:** {value if isinstance(value, int) else f'{value:.4f}'}")
 
 
 def render_correlation_matrix(df_long, variables):
@@ -627,48 +755,66 @@ def render_correlation_matrix(df_long, variables):
         if st.button("📊 Generate Correlation Matrix", type="primary"):
             with st.spinner("Calculating correlations..."):
                 
-                df_wide = df_long.pivot_table(
-                    index='time',
-                    columns='variable',
-                    values='value'
-                )
+                try:
+                    # Check if 'time' column exists, otherwise use index
+                    if 'time' in df_long.columns:
+                        df_wide = df_long.pivot_table(
+                            index='time',
+                            columns='variable',
+                            values='value'
+                        )
+                    else:
+                        # Use reset index if time is not a column
+                        df_temp = df_long.reset_index()
+                        df_wide = df_temp.pivot_table(
+                            index='index',
+                            columns='variable',
+                            values='value'
+                        )
+                    
+                    # Calculate correlation matrix
+                    if corr_method == 'pearson':
+                        corr_matrix = df_wide.corr(method='pearson')
+                    elif corr_method == 'spearman':
+                        corr_matrix = df_wide.corr(method='spearman')
+                    else:
+                        corr_matrix = df_wide.corr(method='kendall')
+                    
+                    # Create heatmap
+                    fig = go.Figure(data=go.Heatmap(
+                        z=corr_matrix.values,
+                        x=corr_matrix.columns,
+                        y=corr_matrix.columns,
+                        colorscale='RdBu',
+                        zmid=0,
+                        text=corr_matrix.values if show_values else None,
+                        texttemplate='%{text:.2f}' if show_values else None,
+                        textfont={"size": 10},
+                        colorbar=dict(title="Correlation")
+                    ))
+                    
+                    fig.update_layout(
+                        title=f"Correlation Matrix ({corr_method.capitalize()})",
+                        xaxis_title="Variables",
+                        yaxis_title="Variables",
+                        height=600
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.markdown("#### 🔝 Strongest Correlations")
+                    
+                    # Get upper triangle (avoid duplicates and diagonal)
+                    mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
+                    corr_pairs = corr_matrix.where(mask).stack().reset_index()
+                    corr_pairs.columns = ['Variable 1', 'Variable 2', 'Correlation']
+                    corr_pairs = corr_pairs.sort_values('Correlation', key=abs, ascending=False)
+                    
+                    st.dataframe(corr_pairs.head(10), use_container_width=True, hide_index=True)
                 
-                if corr_method == 'pearson':
-                    corr_matrix = df_wide.corr(method='pearson')
-                elif corr_method == 'spearman':
-                    corr_matrix = df_wide.corr(method='spearman')
-                else:
-                    corr_matrix = df_wide.corr(method='kendall')
-                
-                fig = go.Figure(data=go.Heatmap(
-                    z=corr_matrix.values,
-                    x=corr_matrix.columns,
-                    y=corr_matrix.columns,
-                    colorscale='RdBu',
-                    zmid=0,
-                    text=corr_matrix.values if show_values else None,
-                    texttemplate='%{text:.2f}' if show_values else None,
-                    textfont={"size": 10},
-                    colorbar=dict(title="Correlation")
-                ))
-                
-                fig.update_layout(
-                    title=f"Correlation Matrix ({corr_method.capitalize()})",
-                    xaxis_title="Variables",
-                    yaxis_title="Variables",
-                    height=600
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-                
-                st.markdown("#### 🔝 Strongest Correlations")
-                
-                mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
-                corr_pairs = corr_matrix.where(mask).stack().reset_index()
-                corr_pairs.columns = ['Variable 1', 'Variable 2', 'Correlation']
-                corr_pairs = corr_pairs.sort_values('Correlation', key=abs, ascending=False)
-                
-                st.dataframe(corr_pairs.head(10), use_container_width=True, hide_index=True)
+                except Exception as e:
+                    st.error(f"Error creating correlation matrix: {str(e)}")
+                    st.info("💡 Tip: Make sure your data has at least 2 variables with valid values")
 
 
 if __name__ == "__main__":
