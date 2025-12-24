@@ -1,5 +1,5 @@
 """
-Page 1: Upload and Data Health
+Page 1: Upload & Data Diagnostics
 Handles file upload, time column selection, data validation, and health reporting
 """
 
@@ -27,9 +27,9 @@ initialize_session_state()
 config = get_config()
 
 # Page configuration
-st.set_page_config(page_title="Upload & Data Health", page_icon="📁", layout="wide")
+st.set_page_config(page_title="Upload & Data Diagnostics", page_icon="📁", layout="wide")
 
-st.title("📁 Upload & Data Health")
+st.title("📁 Upload & Data Diagnostics")
 st.markdown("*Upload your time-series data and assess data quality*")
 st.markdown("---")
 
