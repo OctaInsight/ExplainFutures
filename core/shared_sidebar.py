@@ -16,7 +16,9 @@ def render_app_sidebar():
     # Logo and Title at the very top (always visible)
     st.sidebar.markdown("""
         <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
-            <div style='font-size: 3rem; margin-bottom: 0.5rem;'>🔮</div>
+            <div style='font-size: 3rem; margin-bottom: 0.5rem;'>🔮</div>  # Replace this logo with the following one 
+            # <img src='assets/logo.png' style='width: 80px; height: 80px;'/> 
+            
             <h2 style='margin: 0; color: white; font-weight: 600;'>ExplainFutures</h2>
             <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
         </div>
