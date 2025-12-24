@@ -1,14 +1,12 @@
 """
 ExplainFutures - Main Application Entry Point
-Phase 1: Data Ingestion, Health Check, and Visualization
-
-Author: Development Team
-Version: 1.0.0-phase1
+Enhanced with Login/Logout and Interactive Sidebar
 """
 
 import streamlit as st
 from pathlib import Path
 import sys
+from datetime import datetime
 
 # Add project root to path
 project_root = Path(__file__).parent
@@ -34,131 +32,322 @@ def main():
     # Initialize session state
     initialize_session_state()
     
+    # Initialize login state if not exists
+    if "logged_in" not in st.session_state:
+        st.session_state.logged_in = False
+    if "username" not in st.session_state:
+        st.session_state.username = None
+    if "login_time" not in st.session_state:
+        st.session_state.login_time = None
+    
+    # Render interactive sidebar
+    render_sidebar()
+    
+    # Main content
+    if not st.session_state.logged_in:
+        render_login_page()
+    else:
+        render_home_page()
+
+
+def render_sidebar():
+    """Render interactive sidebar with status information"""
+    
+    st.sidebar.title("🔮 ExplainFutures")
+    st.sidebar.markdown("---")
+    
+    # Login/Logout section
+    if st.session_state.logged_in:
+        st.sidebar.success(f"✅ Logged in as: **{st.session_state.username}**")
+        
+        # Show login duration
+        if st.session_state.login_time:
+            duration = datetime.now() - st.session_state.login_time
+            minutes = int(duration.total_seconds() / 60)
+            st.sidebar.caption(f"Session: {minutes} min")
+        
+        if st.sidebar.button("🚪 Logout", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.username = None
+            st.session_state.login_time = None
+            st.rerun()
+    else:
+        st.sidebar.warning("⚠️ Not logged in")
+        st.sidebar.caption("Please login to access features")
+    
+    st.sidebar.markdown("---")
+    
+    # Project Information
+    st.sidebar.markdown("### 📊 Current Project")
+    
+    if st.session_state.get("project_name"):
+        st.sidebar.info(f"**{st.session_state.project_name}**")
+    else:
+        st.sidebar.caption("No project loaded")
+    
+    # Data Status
+    if st.session_state.get("data_loaded", False):
+        st.sidebar.success("✅ Data loaded")
+        
+        # Show data metrics
+        if st.session_state.get("df_long") is not None:
+            df = st.session_state.df_long
+            n_vars = len(df['variable'].unique())
+            n_points = len(df)
+            
+            col1, col2 = st.sidebar.columns(2)
+            col1.metric("Variables", n_vars, label_visibility="collapsed")
+            col2.metric("Points", n_points, label_visibility="collapsed")
+            
+            if st.session_state.uploaded_file_name:
+                st.sidebar.caption(f"📄 {st.session_state.uploaded_file_name}")
+    else:
+        st.sidebar.caption("📥 No data loaded")
+    
+    st.sidebar.markdown("---")
+    
+    # Database Status (placeholder)
+    st.sidebar.markdown("### 🗄️ Database")
+    
+    if st.session_state.get("database_connected", False):
+        st.sidebar.success("✅ Connected to Supabase")
+    else:
+        st.sidebar.info("ℹ️ Database: Phase 4")
+        st.sidebar.caption("Currently using in-memory storage")
+    
+    st.sidebar.markdown("---")
+    
+    # Navigation Help
+    with st.sidebar.expander("ℹ️ Navigation Guide"):
+        st.markdown("""
+        **Workflow:**
+        1. Upload data
+        2. Clean & preprocess
+        3. Explore & visualize
+        4. Analyze relationships
+        5. Build models
+        6. Make projections
+        
+        Use the page links above to navigate! 👆
+        """)
+    
+    st.sidebar.markdown("---")
+    
+    # Footer with app info
+    st.sidebar.caption(f"**ExplainFutures** {config['version']}")
+    st.sidebar.caption("Powered by Octa Insight")
+
+
+def render_login_page():
+    """Render login page"""
+    
+    # Center the login form
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown("## 🔐 Welcome to ExplainFutures")
+        st.markdown("*Please login to continue*")
+        st.markdown("---")
+        
+        # Login form
+        with st.form("login_form"):
+            username = st.text_input(
+                "Username",
+                placeholder="Enter your username",
+                key="login_username_input"
+            )
+            
+            password = st.text_input(
+                "Password",
+                type="password",
+                placeholder="Enter your password",
+                key="login_password_input"
+            )
+            
+            col1, col2, col3 = st.columns([1, 1, 1])
+            
+            with col2:
+                submit = st.form_submit_button(
+                    "🔓 Login",
+                    use_container_width=True,
+                    type="primary"
+                )
+            
+            if submit:
+                # Simple authentication (replace with real auth in production)
+                if username and password:
+                    # For demo: accept any non-empty credentials
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.session_state.login_time = datetime.now()
+                    st.success("✅ Login successful!")
+                    st.rerun()
+                else:
+                    st.error("❌ Please enter both username and password")
+        
+        st.markdown("---")
+        
+        # Info box
+        st.info("""
+        **Demo Mode:** For now, enter any username and password to login.
+        
+        **Production:** Authentication will be integrated with Supabase in Phase 4.
+        """)
+
+
+def render_home_page():
+    """Render home page content"""
+    
     # Application header
     st.title("🔮 ExplainFutures")
-    st.markdown("*Data-Driven Future Exploration Platform*")
+    st.markdown("### Data-Driven Future Exploration Platform")
     st.markdown("---")
     
-    # Main content area
-    show_home()
+    # Welcome message
+    st.markdown(f"## Welcome back, {st.session_state.username}! 👋")
     
-    # Sidebar info
-    render_sidebar_info()
-
-
-def show_home():
-    """Display home page with Phase 1 introduction"""
+    # Quick stats
+    col1, col2, col3, col4 = st.columns(4)
     
+    with col1:
+        if st.session_state.get("data_loaded"):
+            st.metric("Data Status", "✅ Loaded")
+        else:
+            st.metric("Data Status", "⚠️ Not loaded")
+    
+    with col2:
+        if st.session_state.get("df_long") is not None:
+            n_vars = len(st.session_state.df_long['variable'].unique())
+            st.metric("Variables", n_vars)
+        else:
+            st.metric("Variables", "0")
+    
+    with col3:
+        if st.session_state.get("preprocessing_applied"):
+            st.metric("Preprocessing", "✅ Applied")
+        else:
+            st.metric("Preprocessing", "Not applied")
+    
+    with col4:
+        # Placeholder for models
+        st.metric("Models Trained", "0")
+    
+    st.markdown("---")
+    
+    # Main content
     col1, col2 = st.columns([2, 1])
     
     with col1:
+        st.markdown("## 🚀 Getting Started")
+        
         st.markdown("""
-        ## Welcome to ExplainFutures! 🚀
+        ### Current Implementation (Phase 1)
         
-        ExplainFutures helps you understand and explore the future behavior of complex systems 
-        through data-driven analysis and interactive modeling.
+        ✅ **Available Features:**
+        1. **Upload & Data Diagnostics** - Load and validate your data
+        2. **Data Cleaning & Preprocessing** - Handle missing values, outliers
+        3. **Data Exploration & Visualization** - Interactive plots and charts
+        4. **Dimensionality Reduction** - PCA analysis (basic interface)
         
-        ### Phase 1 Features (Current MVP)
+        🔜 **Coming in Future Phases:**
+        5. Variable Relationships (pairwise analysis)
+        6. Time-based models
+        7. Model evaluation & reliability
+        8. Future projections & what-if analysis
+        9. Scenario analysis
         
-        This minimal viable product includes:
+        ### 📍 Recommended Workflow
         
-        1. **📁 Data Upload & Parsing**
-           - Upload CSV, TXT, or Excel files
-           - Automatic time column detection
-           - Variable selection and type assignment
-           - Conversion to standardized long format
+        1. **Start Here:** Upload & Data Diagnostics
+        2. **Then:** Clean your data if needed
+        3. **Explore:** Create visualizations
+        4. **Analyze:** Run PCA and other analyses
+        5. **Model:** (Coming in Phase 2+)
         
-        2. **🔍 Data Health Report**
-           - Missing values analysis
-           - Duplicate detection
-           - Time coverage assessment
-           - Sampling frequency evaluation
-           - Basic outlier detection
-        
-        3. **📊 Interactive Visualization**
-           - Single variable time plots
-           - Multi-variable comparison with independent Y-axes
-           - Customizable colors, scales, and axis limits
-           - Interactive Plotly charts
-        
-        ### Getting Started
-        
-        Use the **sidebar navigation** to access:
-        - **Upload & Data Health** - Load and assess your data
-        - **Explore & Visualize** - Create interactive plots
-        
-        ---
-        
-        ### Data Requirements
-        
-        Your dataset should include:
-        - ✅ A time/date column (any standard datetime format)
-        - ✅ One or more numeric variables
-        - ✅ Consistent time indexing
-        
-        ### Supported Formats
-        - CSV (`.csv`)
-        - Text files (`.txt`)
-        - Excel (`.xlsx`, `.xls`)
+        👈 **Use the sidebar to navigate between pages!**
         """)
     
     with col2:
-        st.info("""
-        **💡 Quick Tips**
+        st.markdown("## 💡 Quick Actions")
         
-        1. Start with a clean, time-indexed dataset
-        2. Review the data health report before analysis
-        3. Use multi-axis plots to compare variables with different scales
-        4. All data stays in memory during your session
-        """)
-        
-        # Display session status
-        if st.session_state.get("data_loaded", False):
-            st.success("✅ **Data Loaded**")
-            if "df_long" in st.session_state and st.session_state.df_long is not None:
-                df = st.session_state.df_long
-                st.metric("Variables", len(df['variable'].unique()))
-                st.metric("Data Points", len(df))
-                if 'timestamp' in df.columns:
-                    time_range = f"{df['timestamp'].min().date()} to {df['timestamp'].max().date()}"
-                    st.caption(f"📅 {time_range}")
+        if not st.session_state.get("data_loaded"):
+            st.info("**Next Step:** Upload your data")
+            st.page_link(
+                "pages/1_Upload_and_Data_Diagnostics.py",
+                label="📁 Go to Upload",
+                icon="📁"
+            )
         else:
-            st.warning("⚠️ No data loaded yet")
-            st.caption("Upload data to get started")
-
-
-def render_sidebar_info():
-    """Render sidebar information"""
-    
-    st.sidebar.title("📍 Navigation")
-    st.sidebar.markdown("Use the pages in the sidebar to navigate")
-    
-    st.sidebar.markdown("---")
-    
-    st.sidebar.markdown("### 📦 Phase 1 Status")
-    st.sidebar.markdown("""
-    - ✅ Data Upload & Parsing
-    - ✅ Data Health Report
-    - ✅ Single Variable Plots
-    - ✅ Multi-Variable Plots
-    """)
-    
-    st.sidebar.markdown("---")
-    
-    # Display current session info
-    if st.session_state.get("data_loaded", False):
-        st.sidebar.success("📊 Data Loaded")
+            st.success("**Data loaded!**")
+            
+            if not st.session_state.get("preprocessing_applied"):
+                st.info("**Suggested:** Clean your data")
+                st.page_link(
+                    "pages/2_Data_Cleaning_and_Preprocessing.py",
+                    label="🧹 Go to Cleaning",
+                    icon="🧹"
+                )
+            else:
+                st.info("**Ready to:** Explore and visualize")
+                st.page_link(
+                    "pages/3_Data_Exploration_and_Visualization.py",
+                    label="📊 Go to Visualization",
+                    icon="📊"
+                )
         
-        if st.session_state.uploaded_file_name:
-            st.sidebar.caption(f"📄 {st.session_state.uploaded_file_name}")
+        st.markdown("---")
         
-        if st.session_state.preprocessing_applied:
-            st.sidebar.info("🧹 Preprocessing Applied")
-    else:
-        st.sidebar.info("📥 Awaiting Data Upload")
+        # Phase status
+        st.markdown("### 📦 Current Phase")
+        st.info("""
+        **Phase 1: MVP**
+        - ✅ Data upload
+        - ✅ Data diagnostics
+        - ✅ Visualization
+        - ✅ Basic cleaning UI
+        - ✅ PCA interface
+        """)
     
-    st.sidebar.markdown("---")
-    st.sidebar.caption("ExplainFutures v1.0.0-phase1")
+    st.markdown("---")
+    
+    # Footer
+    st.markdown("## 📚 Learn More")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        with st.expander("📖 About ExplainFutures"):
+            st.markdown("""
+            ExplainFutures is a modular, data-driven application designed to help users 
+            understand, model, and actively explore the future behavior of complex systems.
+            
+            **Key Features:**
+            - Time-series data analysis
+            - Interactive visualizations
+            - Interpretable models with equations
+            - Future exploration ("what-if" scenarios)
+            - Natural language scenario processing
+            
+            **Built for:** Researchers, analysts, and decision-makers working with 
+            time-indexed data in economics, sustainability, climate, and social systems.
+            """)
+    
+    with col2:
+        with st.expander("🏢 About Octa Insight"):
+            st.markdown("""
+            Octa Insight specializes in data-driven decision support systems and 
+            advanced analytics solutions.
+            
+            **Services:**
+            - Custom analytics platforms
+            - Data science consulting
+            - AI/ML implementation
+            - Decision support systems
+            
+            **Contact:** [info@octainsight.com](mailto:info@octainsight.com)
+            
+            *Turning data into actionable insights since 2020.*
+            """)
 
 
 if __name__ == "__main__":
