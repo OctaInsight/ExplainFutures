@@ -13,8 +13,9 @@ project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
 # Import core modules
-from core.config import load_config, initialize_session_state, get_config
+from core.config import load_config, initialize_session_state
 from core.utils import setup_page_config
+from core.shared_sidebar import render_app_sidebar
 
 def main():
     """Main application entry point"""
@@ -41,7 +42,7 @@ def main():
         st.session_state.login_time = None
     
     # Render interactive sidebar
-    render_sidebar()
+    render_app_sidebar()
     
     # Main content
     if not st.session_state.logged_in:
@@ -54,7 +55,7 @@ def render_sidebar():
     """Render interactive sidebar with status information"""
     
     # Logo and Title at the very top (always visible)
-    # Note: For now using emoji, replace with actual logo later
+    # Using HTML/CSS for better control and icon from image
     st.sidebar.markdown("""
         <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
             <div style='font-size: 3rem; margin-bottom: 0.5rem;'>🔮</div>
@@ -149,7 +150,7 @@ def render_sidebar():
         </div>
     """, unsafe_allow_html=True)
     
-    # About sections in sidebar
+    # About sections
     with st.sidebar.expander("📖 About ExplainFutures"):
         st.markdown("""
         **Version:** 1.0.0-phase1
@@ -162,7 +163,7 @@ def render_sidebar():
         - Scenario planning
         """)
     
-    with st.sidebar.expander("🏢 About Octa Insight"):
+    with st.expander("🏢 About Octa Insight"):
         st.markdown("""
         **Octa Insight** specializes in data-driven decision support systems.
         
@@ -175,13 +176,8 @@ def render_sidebar():
     
     # Footer
     st.sidebar.markdown("<br>", unsafe_allow_html=True)
-    try:
-        config_data = get_config()
-        version = config_data.get('version', '1.0.0')
-    except:
-        version = '1.0.0'
-    
-    st.sidebar.caption(f"ExplainFutures v{version}")
+    config_data = get_config()
+    st.sidebar.caption(f"ExplainFutures v{config_data.get('version', '1.0.0')}")
     st.sidebar.caption("© 2024 Octa Insight")
 
 
@@ -357,24 +353,44 @@ def render_home_page():
     
     st.markdown("---")
     
-    # Footer - About ExplainFutures ONLY (Octa Insight moved to sidebar)
-    st.markdown("## 📚 About the Platform")
+    # Footer
+    st.markdown("## 📚 Learn More")
     
-    with st.expander("📖 Learn More About ExplainFutures"):
-        st.markdown("""
-        ExplainFutures is a modular, data-driven application designed to help users 
-        understand, model, and actively explore the future behavior of complex systems.
-        
-        **Key Features:**
-        - Time-series data analysis
-        - Interactive visualizations
-        - Interpretable models with equations
-        - Future exploration ("what-if" scenarios)
-        - Natural language scenario processing
-        
-        **Built for:** Researchers, analysts, and decision-makers working with 
-        time-indexed data in economics, sustainability, climate, and social systems.
-        """)
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        with st.expander("📖 About ExplainFutures"):
+            st.markdown("""
+            ExplainFutures is a modular, data-driven application designed to help users 
+            understand, model, and actively explore the future behavior of complex systems.
+            
+            **Key Features:**
+            - Time-series data analysis
+            - Interactive visualizations
+            - Interpretable models with equations
+            - Future exploration ("what-if" scenarios)
+            - Natural language scenario processing
+            
+            **Built for:** Researchers, analysts, and decision-makers working with 
+            time-indexed data in economics, sustainability, climate, and social systems.
+            """)
+    
+    with col2:
+        with st.expander("🏢 About Octa Insight"):
+            st.markdown("""
+            Octa Insight specializes in data-driven decision support systems and 
+            advanced analytics solutions.
+            
+            **Services:**
+            - Custom analytics platforms
+            - Data science consulting
+            - AI/ML implementation
+            - Decision support systems
+            
+            **Contact:** [info@octainsight.com](mailto:info@octainsight.com)
+            
+            *Turning data into actionable insights since 2020.*
+            """)
 
 
 if __name__ == "__main__":
