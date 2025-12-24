@@ -869,14 +869,26 @@ def render_correlation_matrix(df_long, variables):
         
         # Get upper triangle (avoid duplicates and diagonal)
         mask = np.triu(np.ones_like(corr_matrix, dtype=bool), k=1)
-        corr_pairs = corr_matrix.where(mask).stack().reset_index()
-        corr_pairs.columns = ['Variable 1', 'Variable 2', 'Correlation']
+        
+        # Extract correlation pairs more carefully
+        correlations_list = []
+        for i in range(len(corr_matrix.columns)):
+            for j in range(i + 1, len(corr_matrix.columns)):
+                correlations_list.append({
+                    'Variable 1': corr_matrix.columns[i],
+                    'Variable 2': corr_matrix.columns[j],
+                    'Correlation': corr_matrix.iloc[i, j]
+                })
+        
+        corr_pairs = pd.DataFrame(correlations_list)
         
         # Sort by absolute value of correlation (strongest first)
         corr_pairs = corr_pairs.sort_values('Correlation', key=abs, ascending=False)
         
         # Color code the correlations
         def color_correlation(val):
+            if pd.isna(val):
+                return '⚪ NaN'
             if abs(val) > 0.7:
                 return f'🔴 {val:.4f}'
             elif abs(val) > 0.4:
@@ -895,9 +907,12 @@ def render_correlation_matrix(df_long, variables):
         # Summary statistics
         col1, col2, col3 = st.columns(3)
         
-        strong_corr = corr_pairs[corr_pairs['Correlation'].abs() > 0.7]
-        moderate_corr = corr_pairs[(corr_pairs['Correlation'].abs() > 0.4) & (corr_pairs['Correlation'].abs() <= 0.7)]
-        weak_corr = corr_pairs[corr_pairs['Correlation'].abs() <= 0.4]
+        # Filter out NaN values before counting
+        valid_corr = corr_pairs['Correlation'].dropna()
+        
+        strong_corr = valid_corr[valid_corr.abs() > 0.7]
+        moderate_corr = valid_corr[(valid_corr.abs() > 0.4) & (valid_corr.abs() <= 0.7)]
+        weak_corr = valid_corr[valid_corr.abs() <= 0.4]
         
         col1.metric("🔴 Strong Correlations", len(strong_corr), help="|ρ| > 0.7")
         col2.metric("🟡 Moderate Correlations", len(moderate_corr), help="0.4 < |ρ| ≤ 0.7")
