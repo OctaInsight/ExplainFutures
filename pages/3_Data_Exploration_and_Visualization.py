@@ -82,7 +82,8 @@ def main():
         st.warning("⚠️ No data loaded yet!")
         st.info("👈 Please go to **Upload & Data Diagnostics** to load your data first")
         
-        st.page_link("pages/1_Upload_and_Data_Diagnostics.py", label="Go to Upload Page", icon="📁")
+        if st.button("📁 Go to Upload Page"):
+            st.switch_page("pages/1_Upload_and_Data_Health.py")
         return
     
     # Get all available variables
