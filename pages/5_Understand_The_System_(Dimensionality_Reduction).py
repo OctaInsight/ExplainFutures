@@ -1,5 +1,5 @@
 """
-Page 5: Dimensionality Reduction
+Page 5: Understand The System (Dimensionality Reduction)
 Reduce complexity, stabilize models, and improve explainability
 """
 
@@ -9,11 +9,7 @@ import numpy as np
 import sys
 from pathlib import Path
 import plotly.graph_objects as go
-import plotly.express as px
 from datetime import datetime
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import Lasso, ElasticNet, LassoCV, ElasticNetCV
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -24,18 +20,28 @@ from core.utils import display_error, display_success, display_warning, display_
 from core.shared_sidebar import render_app_sidebar
 from core.viz.export import quick_export_buttons
 
+# Import dimensionality reduction modules
+from core.dim_reduction.pca_module import run_pca_analysis
+from core.dim_reduction.factor_analysis_module import run_factor_analysis
+from core.dim_reduction.ica_module import run_ica_analysis
+from core.dim_reduction.clustering_module import run_hierarchical_clustering
+
 # Initialize
 initialize_session_state()
 config = get_config()
 
 # Page configuration
-st.set_page_config(page_title="Understand The System (Dimensionality Reduction)", page_icon="🔬", layout="wide")
+st.set_page_config(
+    page_title="Understand The System", 
+    page_icon="🔬", 
+    layout="wide"
+)
 
 # Render shared sidebar
 render_app_sidebar()
 
-st.title("🔬 Understand The System (Dimensionality Reduction)")
-st.markdown("*Simplify complex systems, stabilize models, and improve explainability*")
+st.title("🔬 Understand The System")
+st.markdown("*Dimensionality Reduction for System Understanding & Model Stabilization*")
 st.markdown("---")
 
 
@@ -106,7 +112,7 @@ def main():
     # Display overview
     st.success(f"✅ Data loaded from {data_source} dataset")
     
-    # === STEP 1: VARIABLE SELECTION (NEW - FIX #1) ===
+    # === STEP 1: VARIABLE SELECTION ===
     st.subheader("📋 Step 1: Select Variables for Analysis")
     
     # Separate original and cleaned/transformed variables
@@ -202,15 +208,25 @@ def main():
         - Variables are clearly independent
         - Univariate time series modeling
         
+        ### Available Methods
+        
+        **🔗 Correlation Filtering:** Remove redundant variables (simplest)
+        **🧮 PCA:** Find orthogonal components (most common)
+        **🎯 Factor Analysis:** Discover latent factors (most interpretable)
+        **🔬 ICA:** Find independent sources (most sophisticated)
+        **🌳 Clustering:** Group similar variables (most visual)
+        
         ### Philosophy
         This is an **optional analytical tool**, not a required step. You decide whether to apply it.
         """)
     
-    # Create tabs (FIX #3: Variance Filtering removed)
-    tab1, tab2, tab3, tab4 = st.tabs([
+    # Create tabs
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🔗 Correlation Filtering",
         "🧮 PCA Analysis",
-        "🎯 Regularization (Lasso/Elastic Net)",
+        "🎯 Factor Analysis",
+        "🔬 Independent Component Analysis",
+        "🌳 Hierarchical Clustering",
         "📋 Summary & Export"
     ])
     
@@ -218,12 +234,18 @@ def main():
         handle_correlation_filtering(df_wide, feature_cols)
     
     with tab2:
-        handle_pca_analysis(df_wide, feature_cols)
+        run_pca_analysis(df_wide, feature_cols)
     
     with tab3:
-        handle_regularization(df_wide, feature_cols)
+        run_factor_analysis(df_wide, feature_cols)
     
     with tab4:
+        run_ica_analysis(df_wide, feature_cols)
+    
+    with tab5:
+        run_hierarchical_clustering(df_wide, feature_cols)
+    
+    with tab6:
         show_reduction_summary(df_wide, feature_cols, all_feature_cols)
 
 
@@ -445,825 +467,44 @@ def create_correlation_heatmap(corr_matrix, features):
         return None
 
 
-def create_pca_scatter_plot(components, pc_x, pc_y, results, point_size, point_color, show_time_gradient):
-    """Create PCA scatter plot (FIX #4)"""
-    try:
-        # Get indices
-        x_idx = int(pc_x.replace("PC", "")) - 1
-        y_idx = int(pc_y.replace("PC", "")) - 1
-        
-        # Extract data
-        x_data = components[:, x_idx]
-        y_data = components[:, y_idx]
-        
-        # Create figure
-        fig = go.Figure()
-        
-        if show_time_gradient:
-            # Color by time sequence
-            fig.add_trace(go.Scatter(
-                x=x_data,
-                y=y_data,
-                mode='markers',
-                marker=dict(
-                    size=point_size,
-                    color=np.arange(len(x_data)),
-                    colorscale='Viridis',
-                    showscale=True,
-                    colorbar=dict(title="Time<br>Sequence")
-                ),
-                text=[f"Point {i+1}" for i in range(len(x_data))],
-                hovertemplate=f'<b>%{{text}}</b><br>{pc_x}: %{{x:.3f}}<br>{pc_y}: %{{y:.3f}}<extra></extra>'
-            ))
-        else:
-            # Single color
-            fig.add_trace(go.Scatter(
-                x=x_data,
-                y=y_data,
-                mode='markers',
-                marker=dict(
-                    size=point_size,
-                    color=point_color
-                ),
-                text=[f"Point {i+1}" for i in range(len(x_data))],
-                hovertemplate=f'<b>%{{text}}</b><br>{pc_x}: %{{x:.3f}}<br>{pc_y}: %{{y:.3f}}<extra></extra>'
-            ))
-        
-        # Layout
-        var_x = results['explained_variance'][x_idx] * 100
-        var_y = results['explained_variance'][y_idx] * 100
-        
-        fig.update_layout(
-            title=f"PCA Scatter Plot: {pc_x} vs {pc_y}",
-            xaxis_title=f"{pc_x} ({var_x:.1f}% variance)",
-            yaxis_title=f"{pc_y} ({var_y:.1f}% variance)",
-            height=600,
-            template='plotly_white',
-            hovermode='closest'
-        )
-        
-        # Add zero lines
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
-        fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
-        
-        return fig
-    
-    except Exception as e:
-        st.error(f"Error creating PCA scatter plot: {str(e)}")
-        return None
-
-
-def handle_pca_analysis(df_wide, feature_cols):
-    """Principal Component Analysis with accept/reject option"""
-    
-    st.header("🧮 Principal Component Analysis (PCA)")
-    st.markdown("*Identify dominant patterns and create orthogonal components*")
-    
-    # Check for missing values
-    if df_wide[feature_cols].isna().any().any():
-        st.warning("⚠️ Data contains missing values. They will be handled using forward-fill.")
-        df_clean = df_wide[feature_cols].fillna(method='ffill').fillna(method='bfill')
-    else:
-        df_clean = df_wide[feature_cols]
-    
-    st.subheader("Step 1: Configure PCA")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Use selected features if available
-        if st.session_state.selected_features:
-            use_selected = st.checkbox(
-                f"Use filtered features ({len(st.session_state.selected_features)})",
-                value=True,
-                help="Use features from previous filtering steps"
-            )
-            
-            if use_selected:
-                features_to_use = st.session_state.selected_features
-                st.success(f"✅ Using {len(features_to_use)} filtered features")
-            else:
-                features_to_use = feature_cols
-                st.info(f"Using all {len(features_to_use)} features")
-        else:
-            features_to_use = feature_cols
-            st.info(f"💡 Tip: Apply correlation filtering first for better results")
-    
-    with col2:
-        n_components = st.slider(
-            "Number of components",
-            min_value=2,
-            max_value=min(10, len(features_to_use)),
-            value=min(3, len(features_to_use)),
-            help="Number of principal components to extract"
-        )
-    
-    # Apply PCA button
-    if st.button("🧮 Run PCA Analysis", type="primary", key="run_pca"):
-        with st.spinner("Running PCA..."):
-            try:
-                # Prepare data
-                data_for_pca = df_clean[features_to_use].dropna()
-                
-                if len(data_for_pca) < 2:
-                    display_error("Not enough data points for PCA")
-                    return
-                
-                # Standardize
-                scaler = StandardScaler()
-                data_scaled = scaler.fit_transform(data_for_pca)
-                
-                # Run PCA
-                pca = PCA(n_components=n_components)
-                components = pca.fit_transform(data_scaled)
-                
-                # Store results
-                st.session_state.pca_model = pca
-                st.session_state.pca_scaler = scaler
-                st.session_state.pca_components = components
-                st.session_state.pca_features = features_to_use
-                st.session_state.reduction_results['pca'] = {
-                    'n_components': n_components,
-                    'explained_variance': pca.explained_variance_ratio_,
-                    'cumulative_variance': np.cumsum(pca.explained_variance_ratio_),
-                    'loadings': pca.components_,
-                    'features': features_to_use,
-                    'timestamp': datetime.now()
-                }
-                
-                st.success(f"✅ PCA completed with {n_components} components")
-                st.rerun()
-                
-            except Exception as e:
-                display_error(f"Error in PCA: {str(e)}")
-                st.exception(e)
-    
-    # Display results
-    if st.session_state.get('reduction_results', {}).get('pca'):
-        st.markdown("---")
-        st.subheader("📊 PCA Results")
-        
-        results = st.session_state.reduction_results['pca']
-        
-        # Metrics
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Components", results['n_components'])
-        col2.metric(
-            "Total Variance Explained", 
-            f"{results['cumulative_variance'][-1]*100:.1f}%"
-        )
-        col3.metric(
-            "First Component", 
-            f"{results['explained_variance'][0]*100:.1f}%"
-        )
-        
-        # Variance explained plot
-        st.markdown("#### Variance Explained by Component")
-        fig = create_variance_plot(results)
-        if fig:
-            st.plotly_chart(fig, use_container_width=True)
-            
-            with st.expander("💾 Export Variance Plot"):
-                quick_export_buttons(fig, "pca_variance", ['png', 'pdf', 'html'])
-        
-        # Component loadings
-        st.markdown("#### Component Loadings")
-        st.markdown("*Shows how original features contribute to each component*")
-        
-        loadings_df = pd.DataFrame(
-            results['loadings'].T,
-            columns=[f"PC{i+1}" for i in range(results['n_components'])],
-            index=results['features']
-        )
-        
-        # FIX #2: Display loadings without matplotlib styling
-        st.dataframe(
-            loadings_df.round(3),
-            use_container_width=True
-        )
-        
-        # Loadings heatmap
-        fig = create_loadings_heatmap(loadings_df)
-        if fig:
-            st.plotly_chart(fig, use_container_width=True)
-            
-            with st.expander("💾 Export Loadings Heatmap"):
-                quick_export_buttons(fig, "pca_loadings", ['png', 'pdf', 'html'])
-        
-        # Component interpretation
-        st.markdown("#### Component Interpretation")
-        for i in range(results['n_components']):
-            with st.expander(f"PC{i+1} - Top Contributing Features", expanded=(i==0)):
-                loadings = loadings_df[f"PC{i+1}"].abs().sort_values(ascending=False)
-                
-                st.markdown(f"**Variance Explained:** {results['explained_variance'][i]*100:.2f}%")
-                st.markdown("**Top 5 Contributors:**")
-                
-                for feat, loading in loadings.head(5).items():
-                    original_loading = loadings_df.loc[feat, f"PC{i+1}"]
-                    direction = "+" if original_loading > 0 else "-"
-                    st.text(f"  {direction} {feat}: {abs(original_loading):.3f}")
-        
-        st.markdown("---")
-        
-        # FIX #4: PCA SCATTER PLOT VISUALIZATION
-        st.markdown("#### PCA Scatter Plot Visualization")
-        
-        # Create scatter plot interface
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            pc_x = st.selectbox(
-                "X-axis",
-                [f"PC{i+1}" for i in range(results['n_components'])],
-                index=0,
-                key="pca_scatter_x"
-            )
-        
-        with col2:
-            pc_y = st.selectbox(
-                "Y-axis",
-                [f"PC{i+1}" for i in range(results['n_components'])],
-                index=min(1, results['n_components']-1),
-                key="pca_scatter_y"
-            )
-        
-        with col3:
-            point_size = st.slider(
-                "Point size",
-                min_value=3,
-                max_value=15,
-                value=8,
-                key="pca_point_size"
-            )
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            point_color = st.color_picker(
-                "Point color",
-                value="#1f77b4",
-                key="pca_point_color"
-            )
-        
-        with col2:
-            show_time_gradient = st.checkbox(
-                "Color by time sequence",
-                value=True,
-                help="Color points by their position in time series",
-                key="pca_time_gradient"
-            )
-        
-        # Create scatter plot
-        fig_scatter = create_pca_scatter_plot(
-            st.session_state.pca_components,
-            pc_x,
-            pc_y,
-            results,
-            point_size,
-            point_color,
-            show_time_gradient
-        )
-        
-        if fig_scatter:
-            st.plotly_chart(fig_scatter, use_container_width=True)
-            
-            with st.expander("💾 Export PCA Scatter Plot"):
-                quick_export_buttons(fig_scatter, f"pca_scatter_{pc_x}_vs_{pc_y}", ['png', 'pdf', 'html'])
-        
-        st.markdown("---")
-        
-        # Accept/Reject PCA for modeling
-        st.subheader("✅ Accept PCA for Modeling?")
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.markdown("""
-            **Decision Guide:**
-            
-            ✅ **Accept PCA if:**
-            - Cumulative variance ≥ 85% (excellent)
-            - Cumulative variance ≥ 70% (good)
-            - Components have clear interpretation
-            - Building multivariate models
-            
-            ❌ **Reject PCA if:**
-            - Cumulative variance < 70% (too many dimensions lost)
-            - Components are hard to interpret
-            - Working with few variables already
-            - Need to preserve original features
-            """)
-        
-        with col2:
-            current_status = st.session_state.get('pca_accepted', False)
-            
-            if current_status:
-                st.success("✅ PCA Accepted for Modeling")
-                if st.button("❌ Reject PCA", key="reject_pca"):
-                    st.session_state.pca_accepted = False
-                    st.success("PCA rejected - will use original features")
-                    st.rerun()
-            else:
-                st.info("🤔 PCA Not Yet Accepted")
-                if st.button("✅ Accept PCA for Modeling", key="accept_pca", type="primary"):
-                    st.session_state.pca_accepted = True
-                    st.success("PCA accepted - components will be used in modeling")
-                    st.rerun()
-        
-        # Show what will be used
-        if st.session_state.pca_accepted:
-            st.success(f"""
-            📊 **Modeling will use:** {results['n_components']} PCA components (PC1 to PC{results['n_components']})
-            
-            **Benefits:**
-            - Orthogonal (uncorrelated) features
-            - Reduced dimensionality
-            - Captures {results['cumulative_variance'][-1]*100:.1f}% of variance
-            """)
-        else:
-            st.info(f"""
-            📊 **Modeling will use:** Original {len(results['features'])} features
-            
-            **Note:** PCA analysis available for reference, but won't be used in models
-            """)
-
-
-def create_variance_plot(results):
-    """Create variance explained plot"""
-    try:
-        fig = go.Figure()
-        
-        # Individual variance
-        fig.add_trace(go.Bar(
-            x=[f"PC{i+1}" for i in range(results['n_components'])],
-            y=results['explained_variance'] * 100,
-            name='Individual',
-            marker_color='steelblue',
-            text=[f"{v*100:.1f}%" for v in results['explained_variance']],
-            textposition='outside'
-        ))
-        
-        # Cumulative variance
-        fig.add_trace(go.Scatter(
-            x=[f"PC{i+1}" for i in range(results['n_components'])],
-            y=results['cumulative_variance'] * 100,
-            name='Cumulative',
-            mode='lines+markers',
-            line=dict(color='red', width=3),
-            marker=dict(size=10),
-            text=[f"{v*100:.1f}%" for v in results['cumulative_variance']],
-            textposition='top center'
-        ))
-        
-        fig.update_layout(
-            title="Variance Explained by Principal Components",
-            xaxis_title="Principal Component",
-            yaxis_title="Variance Explained (%)",
-            height=450,
-            template='plotly_white',
-            hovermode='x unified',
-            showlegend=True,
-            legend=dict(x=0.7, y=0.95)
-        )
-        
-        # Add threshold lines
-        fig.add_hline(y=85, line_dash="dash", line_color="green", 
-                     annotation_text="85% (Excellent)", annotation_position="right")
-        fig.add_hline(y=70, line_dash="dash", line_color="orange",
-                     annotation_text="70% (Good)", annotation_position="right")
-        
-        return fig
-    
-    except Exception as e:
-        st.error(f"Error creating variance plot: {str(e)}")
-        return None
-
-
-def create_loadings_heatmap(loadings_df):
-    """Create component loadings heatmap"""
-    try:
-        fig = go.Figure(data=go.Heatmap(
-            z=loadings_df.T.values,
-            x=loadings_df.index,
-            y=loadings_df.columns,
-            colorscale='RdBu',
-            zmid=0,
-            zmin=-1,
-            zmax=1,
-            text=np.round(loadings_df.T.values, 2),
-            texttemplate='%{text}',
-            textfont={"size": 9},
-            colorbar=dict(title="Loading")
-        ))
-        
-        fig.update_layout(
-            title="PCA Component Loadings",
-            xaxis_title="Original Features",
-            yaxis_title="Principal Components",
-            height=400,
-            template='plotly_white'
-        )
-        
-        return fig
-    
-    except Exception as e:
-        st.error(f"Error creating loadings heatmap: {str(e)}")
-        return None
-
-
-def handle_regularization(df_wide, feature_cols):
-    """Feature selection using Lasso and Elastic Net regularization"""
-    
-    st.header("🎯 Regularization-Based Feature Selection")
-    st.markdown("*Use Lasso or Elastic Net to identify important features*")
-    
-    # Check for missing values
-    if df_wide[feature_cols].isna().any().any():
-        st.warning("⚠️ Data contains missing values. They will be handled using forward-fill.")
-        df_clean = df_wide[feature_cols].fillna(method='ffill').fillna(method='bfill')
-    else:
-        df_clean = df_wide[feature_cols]
-    
-    st.info("""
-    💡 **Regularization methods:**
-    - **Lasso (L1):** Drives weak feature coefficients to exactly zero
-    - **Elastic Net:** Combines L1 and L2, handles correlated features better
-    - Both methods automatically select important features
-    """)
-    
-    st.subheader("Step 1: Select Target Variable")
-    
-    # Target selection
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        # Use selected features if available
-        if st.session_state.selected_features:
-            use_selected = st.checkbox(
-                f"Use filtered features ({len(st.session_state.selected_features)})",
-                value=True,
-                key="reg_use_selected",
-                help="Use features from previous filtering steps"
-            )
-            features_to_use = st.session_state.selected_features if use_selected else feature_cols
-        else:
-            features_to_use = feature_cols
-        
-        target_var = st.selectbox(
-            "Target variable (to predict)",
-            features_to_use,
-            help="Select the variable you want to predict or model"
-        )
-        
-        predictor_vars = [f for f in features_to_use if f != target_var]
-        
-        st.caption(f"Will use {len(predictor_vars)} features to predict {target_var}")
-    
-    with col2:
-        st.metric("Predictor Features", len(predictor_vars))
-        st.metric("Data Points", len(df_clean))
-    
-    if len(predictor_vars) < 2:
-        st.warning("⚠️ Need at least 2 predictor features for regularization")
-        return
-    
-    st.markdown("---")
-    st.subheader("Step 2: Configure Regularization")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        method = st.radio(
-            "Regularization method",
-            ["Lasso (L1)", "Elastic Net (L1 + L2)"],
-            help="Lasso for sparse selection, Elastic Net for correlated features"
-        )
-    
-    with col2:
-        use_cv = st.checkbox(
-            "Use cross-validation",
-            value=True,
-            help="Automatically find optimal regularization strength"
-        )
-        
-        if not use_cv:
-            alpha = st.slider(
-                "Regularization strength (alpha)",
-                min_value=0.001,
-                max_value=10.0,
-                value=1.0,
-                step=0.1,
-                format="%.3f",
-                help="Higher = more regularization = fewer features"
-            )
-        
-        if "Elastic" in method:
-            l1_ratio = st.slider(
-                "L1 ratio",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.5,
-                step=0.1,
-                help="1.0 = pure Lasso, 0.0 = pure Ridge, 0.5 = balanced"
-            )
-    
-    # Apply regularization
-    if st.button("🎯 Apply Regularization", type="primary", key="apply_regularization"):
-        with st.spinner(f"Running {method}..."):
-            try:
-                # Prepare data
-                X = df_clean[predictor_vars].values
-                y = df_clean[target_var].values
-                
-                # Remove any remaining NaN
-                mask = ~(np.isnan(X).any(axis=1) | np.isnan(y))
-                X = X[mask]
-                y = y[mask]
-                
-                if len(X) < 10:
-                    display_error("Not enough valid data points (need at least 10)")
-                    return
-                
-                # Standardize
-                scaler_X = StandardScaler()
-                scaler_y = StandardScaler()
-                X_scaled = scaler_X.fit_transform(X)
-                y_scaled = scaler_y.fit_transform(y.reshape(-1, 1)).ravel()
-                
-                # Run regularization
-                if "Lasso" in method and method == "Lasso (L1)":
-                    if use_cv:
-                        model = LassoCV(cv=5, random_state=42, max_iter=10000)
-                        model.fit(X_scaled, y_scaled)
-                        best_alpha = model.alpha_
-                    else:
-                        model = Lasso(alpha=alpha, random_state=42, max_iter=10000)
-                        model.fit(X_scaled, y_scaled)
-                        best_alpha = alpha
-                
-                else:  # Elastic Net
-                    if use_cv:
-                        model = ElasticNetCV(l1_ratio=l1_ratio, cv=5, random_state=42, max_iter=10000)
-                        model.fit(X_scaled, y_scaled)
-                        best_alpha = model.alpha_
-                    else:
-                        model = ElasticNet(alpha=alpha, l1_ratio=l1_ratio, random_state=42, max_iter=10000)
-                        model.fit(X_scaled, y_scaled)
-                        best_alpha = alpha
-                
-                # Get feature importance
-                coefficients = model.coef_
-                
-                # Select non-zero features
-                selected_features = [predictor_vars[i] for i, coef in enumerate(coefficients) if abs(coef) > 1e-10]
-                selected_features.append(target_var)  # Include target
-                
-                removed_features = [f for f in predictor_vars if f not in selected_features]
-                
-                # Store results
-                st.session_state.reduction_results['regularization'] = {
-                    'method': method,
-                    'target': target_var,
-                    'alpha': best_alpha,
-                    'coefficients': dict(zip(predictor_vars, coefficients)),
-                    'selected': selected_features,
-                    'removed': removed_features,
-                    'score': model.score(X_scaled, y_scaled),
-                    'timestamp': datetime.now()
-                }
-                
-                st.success(f"✅ Selected {len(selected_features)-1} predictors (+ target) using {method}")
-                st.rerun()
-                
-            except Exception as e:
-                display_error(f"Error in regularization: {str(e)}")
-                st.exception(e)
-    
-    # Display results
-    if st.session_state.get('reduction_results', {}).get('regularization'):
-        st.markdown("---")
-        st.subheader("📊 Regularization Results")
-        
-        results = st.session_state.reduction_results['regularization']
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Selected Features", len(results['selected'])-1)  # Exclude target
-        col2.metric("Removed Features", len(results['removed']))
-        col3.metric("Alpha Used", f"{results['alpha']:.4f}")
-        col4.metric("R² Score", f"{results['score']:.3f}")
-        
-        # Feature importance plot
-        st.markdown("#### Feature Importance (Coefficients)")
-        
-        coef_df = pd.DataFrame(list(results['coefficients'].items()), columns=['Feature', 'Coefficient'])
-        coef_df['Abs_Coefficient'] = coef_df['Coefficient'].abs()
-        coef_df = coef_df.sort_values('Abs_Coefficient', ascending=True)
-        
-        fig = go.Figure()
-        
-        colors = ['red' if c < 0 else 'steelblue' for c in coef_df['Coefficient']]
-        
-        fig.add_trace(go.Bar(
-            y=coef_df['Feature'],
-            x=coef_df['Coefficient'],
-            orientation='h',
-            marker_color=colors,
-            text=[f"{c:.3f}" for c in coef_df['Coefficient']],
-            textposition='outside'
-        ))
-        
-        fig.update_layout(
-            title=f"Feature Coefficients (predicting {results['target']})",
-            xaxis_title="Coefficient",
-            yaxis_title="Feature",
-            height=max(400, len(coef_df) * 25),
-            template='plotly_white',
-            showlegend=False
-        )
-        
-        fig.add_vline(x=0, line_dash="dash", line_color="gray")
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        with st.expander("💾 Export Feature Importance"):
-            quick_export_buttons(fig, "regularization_importance", ['png', 'pdf', 'html'])
-        
-        # Show selected vs removed
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("**✅ Selected Features (Non-Zero):**")
-            selected_coefs = {k: v for k, v in results['coefficients'].items() 
-                            if k in results['selected'] and k != results['target']}
-            for feat, coef in sorted(selected_coefs.items(), key=lambda x: abs(x[1]), reverse=True):
-                st.text(f"  • {feat}: {coef:.4f}")
-        
-        with col2:
-            st.markdown("**❌ Removed Features (Zero Coefficients):**")
-            if results['removed']:
-                for feat in results['removed']:
-                    st.text(f"  • {feat}")
-            else:
-                st.caption("(none)")
-
-
 def show_reduction_summary(df_wide, feature_cols, all_feature_cols):
-    """Summary of all dimensionality reduction results (FIX #6: added all_feature_cols parameter)"""
+    """Comprehensive summary of all dimensionality reduction analyses"""
     
-    st.header("📋 Summary & Export")
+    st.header("📋 Summary & Comprehensive Analysis")
     
     if not st.session_state.reduction_results:
         st.info("ℹ️ No dimensionality reduction has been performed yet")
-        st.markdown("Apply one or more methods in the tabs above to see results here")
+        st.markdown("Apply one or more methods in the tabs above to see comprehensive analysis here")
         return
     
     st.success(f"✅ {len(st.session_state.reduction_results)} method(s) applied")
     
-    # Summary table
-    st.subheader("Methods Applied")
-    
-    summary_data = []
-    for method_name, results in st.session_state.reduction_results.items():
-        if method_name == 'correlation':
-            summary_data.append({
-                "Method": "Correlation Filtering",
-                "Details": f"Threshold: {results['threshold']:.2f}",
-                "Features": f"{len(results['selected'])} kept, {len(results['removed'])} removed",
-                "Applied": results['timestamp'].strftime("%Y-%m-%d %H:%M")
-            })
-        
-        elif method_name == 'pca':
-            accepted = "✅ Accepted" if st.session_state.pca_accepted else "⏸️ Not Accepted"
-            summary_data.append({
-                "Method": f"PCA ({accepted})",
-                "Details": f"{results['n_components']} components",
-                "Features": f"{results['cumulative_variance'][-1]*100:.1f}% variance explained",
-                "Applied": results['timestamp'].strftime("%Y-%m-%d %H:%M")
-            })
-        
-        elif method_name == 'regularization':
-            summary_data.append({
-                "Method": results['method'],
-                "Details": f"Target: {results['target']}, α={results['alpha']:.4f}",
-                "Features": f"{len(results['selected'])-1} selected, R²={results['score']:.3f}",
-                "Applied": results['timestamp'].strftime("%Y-%m-%d %H:%M")
-            })
-    
-    if summary_data:
-        summary_df = pd.DataFrame(summary_data)
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
-    
+    # === COMPREHENSIVE ANALYSIS SECTION ===
     st.markdown("---")
+    st.subheader("🔍 Comprehensive Analysis")
     
-    # Final recommendation
-    st.subheader("💡 Recommendations for Modeling")
+    # Analysis tabs
+    analysis_tab1, analysis_tab2, analysis_tab3 = st.tabs([
+        "📊 Method Comparison",
+        "💡 Key Insights",
+        "🎯 Recommendations"
+    ])
     
-    # Determine best approach
-    if st.session_state.pca_accepted and 'pca' in st.session_state.reduction_results:
-        pca_results = st.session_state.reduction_results['pca']
-        variance = pca_results['cumulative_variance'][-1]
-        
-        st.success(f"""
-        ✅ **Recommended: Use PCA Components**
-        
-        **Why:**
-        - {pca_results['n_components']} components explain {variance*100:.1f}% of variance
-        - Orthogonal (uncorrelated) features
-        - Reduced multicollinearity
-        - User accepted for modeling
-        
-        **For modeling, use:** PC1 to PC{pca_results['n_components']}
-        """)
+    with analysis_tab1:
+        display_method_comparison(all_feature_cols)
     
-    elif st.session_state.selected_features:
-        st.info(f"""
-        💡 **Recommended: Use Filtered Features**
-        
-        **Features selected:** {len(st.session_state.selected_features)}
-        
-        **Why:**
-        - Reduced from {len(all_feature_cols)} original features
-        - Low-information and redundant features removed
-        - Preserves interpretability of original variables
-        
-        **For modeling, use:** Selected {len(st.session_state.selected_features)} features
-        """)
+    with analysis_tab2:
+        display_key_insights(all_feature_cols)
     
-    else:
-        st.warning("""
-        ⚠️ **No dimensionality reduction accepted**
-        
-        Will use all original features. Consider:
-        - High risk of multicollinearity
-        - Potentially unstable models
-        - Recommend applying at least correlation filtering
-        """)
+    with analysis_tab3:
+        display_recommendations()
     
     st.markdown("---")
     
     # Export options
-    st.subheader("💾 Export Reduced Data")
+    st.subheader("💾 Export Reduced Data & Reports")
     
-    time_col = 'timestamp' if 'timestamp' in df_wide.columns else 'time'
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**Filtered Features:**")
-        
-        if st.session_state.selected_features:
-            # Create reduced dataset with selected features
-            reduced_df = df_wide[[time_col] + st.session_state.selected_features]
-            
-            csv = reduced_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download Filtered Features (CSV)",
-                data=csv,
-                file_name=f"filtered_features_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        else:
-            st.caption("No filtered features available")
-    
-    with col2:
-        st.markdown("**PCA Components:**")
-        
-        if st.session_state.pca_accepted and 'pca' in st.session_state.reduction_results:
-            pca_results = st.session_state.reduction_results['pca']
-            
-            # Create PCA components dataframe
-            pca_df = pd.DataFrame(
-                st.session_state.pca_components,
-                columns=[f"PC{i+1}" for i in range(pca_results['n_components'])]
-            )
-            pca_df.insert(0, time_col, df_wide[time_col].values[:len(pca_df)])
-            
-            csv = pca_df.to_csv(index=False)
-            st.download_button(
-                label="📥 Download PCA Components (CSV)",
-                data=csv,
-                file_name=f"pca_components_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        else:
-            st.caption("PCA not accepted for modeling")
-    
-    # Analysis report
-    st.markdown("---")
-    st.markdown("**Analysis Report:**")
-    
-    report = create_analysis_report(st.session_state.reduction_results, all_feature_cols)
-    
-    st.download_button(
-        label="📄 Download Analysis Report (TXT)",
-        data=report,
-        file_name=f"dimensionality_reduction_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-        mime="text/plain",
-        use_container_width=True
-    )
+    display_export_options(df_wide, all_feature_cols)
     
     # Clear results
     st.markdown("---")
@@ -1281,91 +522,485 @@ def show_reduction_summary(df_wide, feature_cols, all_feature_cols):
             st.rerun()
 
 
-def create_analysis_report(results, original_features):
-    """Create a text report of dimensionality reduction analysis"""
+def display_method_comparison(all_feature_cols):
+    """Display method comparison table"""
+    
+    st.markdown("### Method Comparison")
+    
+    # Create comprehensive summary table
+    summary_data = []
+    
+    if 'correlation' in st.session_state.reduction_results:
+        corr = st.session_state.reduction_results['correlation']
+        reduction_pct = len(corr['removed']) / len(all_feature_cols) * 100
+        summary_data.append({
+            "Method": "🔗 Correlation Filtering",
+            "Purpose": "Remove redundant variables",
+            "Input Features": len(all_feature_cols),
+            "Output": f"{len(corr['selected'])} features",
+            "Reduction": f"{reduction_pct:.1f}%",
+            "Key Result": f"Removed {len(corr['removed'])} correlated vars",
+            "Status": "✅ Complete"
+        })
+    
+    if 'pca' in st.session_state.reduction_results:
+        pca = st.session_state.reduction_results['pca']
+        status = "✅ Accepted" if st.session_state.pca_accepted else "⏸️ Not Accepted"
+        summary_data.append({
+            "Method": "🧮 PCA",
+            "Purpose": "Find orthogonal components",
+            "Input Features": len(pca['features']),
+            "Output": f"{pca['n_components']} components",
+            "Reduction": f"{pca['cumulative_variance'][-1]*100:.1f}% var explained",
+            "Key Result": f"PC1 explains {pca['explained_variance'][0]*100:.1f}%",
+            "Status": status
+        })
+    
+    if 'factor_analysis' in st.session_state.reduction_results:
+        fa = st.session_state.reduction_results['factor_analysis']
+        avg_comm = np.mean(fa['communalities'])
+        summary_data.append({
+            "Method": "🎯 Factor Analysis",
+            "Purpose": "Discover latent factors",
+            "Input Features": len(fa['features']),
+            "Output": f"{fa['n_factors']} factors",
+            "Reduction": f"Avg communality: {avg_comm:.3f}",
+            "Key Result": f"Rotation: {fa['rotation']}",
+            "Status": "✅ Complete"
+        })
+    
+    if 'ica' in st.session_state.reduction_results:
+        ica = st.session_state.reduction_results['ica']
+        summary_data.append({
+            "Method": "🔬 ICA",
+            "Purpose": "Find independent sources",
+            "Input Features": len(ica['features']),
+            "Output": f"{ica['n_components']} components",
+            "Reduction": f"{ica['n_components']}/{len(ica['features'])} components",
+            "Key Result": "Independent drivers identified",
+            "Status": "✅ Complete"
+        })
+    
+    if 'clustering' in st.session_state.reduction_results:
+        clust = st.session_state.reduction_results['clustering']
+        summary_data.append({
+            "Method": "🌳 Hierarchical Clustering",
+            "Purpose": "Group similar variables",
+            "Input Features": len(clust['features']),
+            "Output": f"{clust['n_clusters']} clusters",
+            "Reduction": f"Method: {clust['linkage_method']}",
+            "Key Result": f"Metric: {clust['distance_metric']}",
+            "Status": "✅ Complete"
+        })
+    
+    if summary_data:
+        summary_df = pd.DataFrame(summary_data)
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+
+def display_key_insights(all_feature_cols):
+    """Display key insights across methods"""
+    
+    st.markdown("### Key Insights Across Methods")
+    
+    # Variable importance analysis
+    if 'pca' in st.session_state.reduction_results or 'factor_analysis' in st.session_state.reduction_results:
+        st.markdown("#### 🎯 Most Important Variables")
+        
+        important_vars = {}
+        
+        # From PCA
+        if 'pca' in st.session_state.reduction_results:
+            pca = st.session_state.reduction_results['pca']
+            loadings = pca['loadings'][0]  # First component
+            for i, feat in enumerate(pca['features']):
+                important_vars[feat] = important_vars.get(feat, 0) + abs(loadings[i])
+        
+        # From Factor Analysis
+        if 'factor_analysis' in st.session_state.reduction_results:
+            fa = st.session_state.reduction_results['factor_analysis']
+            for i, feat in enumerate(fa['features']):
+                important_vars[feat] = important_vars.get(feat, 0) + fa['communalities'][i]
+        
+        if important_vars:
+            sorted_vars = sorted(important_vars.items(), key=lambda x: x[1], reverse=True)
+            
+            st.markdown("**Top 5 Most Influential Variables:**")
+            for i, (var, score) in enumerate(sorted_vars[:5], 1):
+                st.text(f"{i}. {var} (importance: {score:.3f})")
+    
+    # System complexity analysis
+    st.markdown("---")
+    st.markdown("#### 📊 System Complexity Assessment")
+    
+    if 'pca' in st.session_state.reduction_results:
+        pca = st.session_state.reduction_results['pca']
+        variance = pca['cumulative_variance'][-1]
+        
+        if variance >= 0.85:
+            st.success(f"""
+            **Low Complexity System ✅**
+            - {pca['n_components']} components explain {variance*100:.1f}% of variance
+            - System has clear dominant patterns
+            - Good candidate for dimensionality reduction
+            - Forecasting should be stable
+            """)
+        elif variance >= 0.70:
+            st.info(f"""
+            **Moderate Complexity System 💡**
+            - {pca['n_components']} components explain {variance*100:.1f}% of variance
+            - System has multiple important patterns
+            - Some dimensionality reduction possible
+            - Forecasting moderately stable
+            """)
+        else:
+            st.warning(f"""
+            **High Complexity System ⚠️**
+            - Only {variance*100:.1f}% variance explained by {pca['n_components']} components
+            - System is genuinely high-dimensional
+            - Many independent patterns present
+            - Forecasting may be challenging
+            - Consider domain expertise for variable selection
+            """)
+    
+    # Correlation structure
+    if 'correlation' in st.session_state.reduction_results:
+        st.markdown("---")
+        st.markdown("#### 🔗 Correlation Structure")
+        
+        corr = st.session_state.reduction_results['correlation']
+        if len(corr['removed']) > 0:
+            removal_pct = len(corr['removed']) / len(all_feature_cols) * 100
+            
+            if removal_pct > 30:
+                st.warning(f"""
+                **High Redundancy Detected ⚠️**
+                - {removal_pct:.0f}% of variables are highly correlated
+                - Significant multicollinearity present
+                - Dimensionality reduction highly recommended
+                """)
+            elif removal_pct > 15:
+                st.info(f"""
+                **Moderate Redundancy 💡**
+                - {removal_pct:.0f}% of variables are highly correlated
+                - Some multicollinearity present
+                - Dimensionality reduction beneficial
+                """)
+            else:
+                st.success(f"""
+                **Low Redundancy ✅**
+                - Only {removal_pct:.0f}% of variables highly correlated
+                - Variables are relatively independent
+                - Limited multicollinearity
+                """)
+    
+    # Clustering insights
+    if 'clustering' in st.session_state.reduction_results:
+        st.markdown("---")
+        st.markdown("#### 🌳 Variable Groupings")
+        
+        clust = st.session_state.reduction_results['clustering']
+        
+        st.markdown("**Natural Variable Groups:**")
+        for cluster_name, variables in clust['clusters'].items():
+            if len(variables) > 1:
+                st.text(f"• {cluster_name}: {len(variables)} similar variables")
+        
+        st.info("💡 Variables in the same cluster show similar behavior and could potentially be represented by a single feature")
+
+
+def display_recommendations():
+    """Display recommendations for modeling"""
+    
+    st.markdown("### Recommendations for ExplainFutures")
+    
+    # Determine best approach
+    recommendations = []
+    
+    # Check PCA acceptance
+    if st.session_state.pca_accepted and 'pca' in st.session_state.reduction_results:
+        pca = st.session_state.reduction_results['pca']
+        variance = pca['cumulative_variance'][-1]
+        
+        recommendations.append({
+            'priority': 1,
+            'method': 'PCA Components',
+            'action': f"Use {pca['n_components']} principal components",
+            'reason': f"{variance*100:.1f}% variance explained, orthogonal features, user accepted",
+            'benefit': "Reduced multicollinearity, stable models, simplified interpretation"
+        })
+    
+    # Check correlation filtering
+    if 'correlation' in st.session_state.reduction_results:
+        corr = st.session_state.reduction_results['correlation']
+        if len(corr['removed']) > 0:
+            recommendations.append({
+                'priority': 2,
+                'method': 'Filtered Features',
+                'action': f"Use {len(corr['selected'])} correlation-filtered features",
+                'reason': f"Removed {len(corr['removed'])} redundant variables",
+                'benefit': "Maintains interpretability while reducing multicollinearity"
+            })
+    
+    # Check factor analysis
+    if 'factor_analysis' in st.session_state.reduction_results:
+        fa = st.session_state.reduction_results['factor_analysis']
+        recommendations.append({
+            'priority': 3,
+            'method': 'Factor Analysis',
+            'action': f"Consider {fa['n_factors']} latent factors for scenario analysis",
+            'reason': "Factors represent meaningful underlying drivers",
+            'benefit': "Excellent for scenario planning and what-if analysis"
+        })
+    
+    # Check ICA
+    if 'ica' in st.session_state.reduction_results:
+        ica = st.session_state.reduction_results['ica']
+        recommendations.append({
+            'priority': 4,
+            'method': 'Independent Components',
+            'action': f"Use {ica['n_components']} independent components for multi-driver scenarios",
+            'reason': "Identifies statistically independent driving forces",
+            'benefit': "Best for modeling systems with multiple independent drivers"
+        })
+    
+    # Check clustering
+    if 'clustering' in st.session_state.reduction_results:
+        clust = st.session_state.reduction_results['clustering']
+        recommendations.append({
+            'priority': 5,
+            'method': 'Clustered Representatives',
+            'action': f"Select representative variables from each of {clust['n_clusters']} clusters",
+            'reason': "Natural groupings identified",
+            'benefit': "Maintains domain interpretability, one feature per cluster"
+        })
+    
+    # Display recommendations
+    if recommendations:
+        st.markdown("#### 🎯 Prioritized Recommendations")
+        
+        for rec in sorted(recommendations, key=lambda x: x['priority']):
+            with st.expander(f"**{rec['priority']}. {rec['method']}**", expanded=(rec['priority']==1)):
+                st.markdown(f"**Action:** {rec['action']}")
+                st.markdown(f"**Reason:** {rec['reason']}")
+                st.markdown(f"**Benefit:** {rec['benefit']}")
+    
+    # Overall strategy
+    st.markdown("---")
+    st.markdown("#### 📋 Recommended Strategy")
+    
+    if st.session_state.pca_accepted and 'pca' in st.session_state.reduction_results:
+        pca = st.session_state.reduction_results['pca']
+        st.success(f"""
+        **PRIMARY STRATEGY: Use PCA Components**
+        
+        **For Forecasting Models:**
+        1. Use PCA components as input features
+        2. Build models on orthogonal components
+        3. Backtransform predictions if needed
+        
+        **For Scenario Analysis:**
+        1. Each PC represents a scenario dimension
+        2. Create scenarios by varying component values
+        3. Interpret using component loadings
+        
+        **Benefits:**
+        - Maximum variance retention ({pca['cumulative_variance'][-1]*100:.1f}%)
+        - No multicollinearity
+        - Stable coefficient estimation
+        - User-accepted approach
+        """)
+    
+    elif st.session_state.selected_features:
+        st.info(f"""
+        **ALTERNATIVE STRATEGY: Use Filtered Features**
+        
+        **For Forecasting Models:**
+        1. Use correlation-filtered features directly
+        2. Monitor VIF (Variance Inflation Factor)
+        3. Consider further reduction if needed
+        
+        **For Scenario Analysis:**
+        1. Each feature represents a scenario lever
+        2. Easier to explain to stakeholders
+        3. Maintain original variable meanings
+        
+        **Benefits:**
+        - Direct interpretability
+        - No transformation needed
+        - Stakeholder-friendly
+        - {len(st.session_state.selected_features)} features selected
+        """)
+    
+    else:
+        st.warning("""
+        **FALLBACK: Use All Variables with Caution**
+        
+        ⚠️ **Risks:**
+        - High multicollinearity possible
+        - Unstable model coefficients
+        - Difficult to validate
+        
+        **Recommendations:**
+        1. Apply at least correlation filtering
+        2. Monitor model diagnostics closely
+        3. Use regularization techniques
+        4. Cross-validate extensively
+        
+        **Next Steps:**
+        - Go back to Correlation Filtering tab
+        - Or accept PCA results
+        """)
+
+
+def display_export_options(df_wide, all_feature_cols):
+    """Display export options for reduced data"""
+    
+    time_col = 'timestamp' if 'timestamp' in df_wide.columns else 'time'
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("**Filtered Features:**")
+        
+        if st.session_state.selected_features:
+            # Create reduced dataset with selected features
+            reduced_df = df_wide[[time_col] + st.session_state.selected_features]
+            
+            csv = reduced_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Filtered Features CSV",
+                data=csv,
+                file_name=f"filtered_features_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.caption("No filtered features")
+    
+    with col2:
+        st.markdown("**PCA Components:**")
+        
+        if st.session_state.pca_accepted and 'pca' in st.session_state.reduction_results:
+            pca_results = st.session_state.reduction_results['pca']
+            
+            # Create PCA components dataframe
+            pca_df = pd.DataFrame(
+                st.session_state.pca_components,
+                columns=[f"PC{i+1}" for i in range(pca_results['n_components'])]
+            )
+            pca_df.insert(0, time_col, df_wide[time_col].values[:len(pca_df)])
+            
+            csv = pca_df.to_csv(index=False)
+            st.download_button(
+                label="📥 PCA Components CSV",
+                data=csv,
+                file_name=f"pca_components_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        else:
+            st.caption("PCA not accepted")
+    
+    with col3:
+        st.markdown("**Comprehensive Report:**")
+        
+        report = create_comprehensive_report(st.session_state.reduction_results, all_feature_cols)
+        
+        st.download_button(
+            label="📄 Full Analysis Report",
+            data=report,
+            file_name=f"dimension_reduction_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+
+
+def create_comprehensive_report(results, original_features):
+    """Create comprehensive analysis report"""
     
     report = []
-    report.append("="*70)
-    report.append("DIMENSIONALITY REDUCTION ANALYSIS REPORT")
-    report.append("ExplainFutures - Stabilize Models & Improve Explainability")
-    report.append("="*70)
+    report.append("="*80)
+    report.append("COMPREHENSIVE DIMENSIONALITY REDUCTION ANALYSIS REPORT")
+    report.append("ExplainFutures - System Understanding & Model Stabilization")
+    report.append("="*80)
     report.append(f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    report.append(f"Original features: {len(original_features)}")
+    report.append(f"Original features analyzed: {len(original_features)}")
     report.append("\n")
     
-    # Correlation Filtering
-    if 'correlation' in results:
-        corr = results['correlation']
-        report.append("-"*70)
-        report.append("1. CORRELATION-BASED FILTERING")
-        report.append("-"*70)
-        report.append(f"Threshold: {corr['threshold']:.2f}")
-        report.append(f"Selected features: {len(corr['selected'])}")
-        report.append(f"Removed features: {len(corr['removed'])}")
-        report.append(f"Reduction: {len(corr['removed'])/len(original_features)*100:.1f}%")
-        report.append(f"\nKept: {', '.join(corr['selected'])}")
-        if corr['removed']:
-            report.append(f"\nRemoved (redundant): {', '.join(corr['removed'])}")
-        report.append("\n")
+    # Executive Summary
+    report.append("="*80)
+    report.append("EXECUTIVE SUMMARY")
+    report.append("="*80)
     
-    # PCA
-    if 'pca' in results:
-        pca = results['pca']
-        report.append("-"*70)
-        report.append("2. PRINCIPAL COMPONENT ANALYSIS (PCA)")
-        report.append("-"*70)
-        report.append(f"Components extracted: {pca['n_components']}")
-        report.append(f"Total variance explained: {pca['cumulative_variance'][-1]*100:.2f}%")
-        report.append(f"Status: {'ACCEPTED for modeling' if st.session_state.pca_accepted else 'Not accepted'}")
-        report.append("\nVariance by component:")
-        for i, var in enumerate(pca['explained_variance']):
-            cum_var = pca['cumulative_variance'][i]
-            report.append(f"  PC{i+1}: {var*100:.2f}% (cumulative: {cum_var*100:.2f}%)")
-        report.append("\n")
-    
-    # Regularization
-    if 'regularization' in results:
-        reg = results['regularization']
-        report.append("-"*70)
-        report.append("3. REGULARIZATION-BASED SELECTION")
-        report.append("-"*70)
-        report.append(f"Method: {reg['method']}")
-        report.append(f"Target variable: {reg['target']}")
-        report.append(f"Alpha: {reg['alpha']:.4f}")
-        report.append(f"R² Score: {reg['score']:.3f}")
-        report.append(f"Selected features: {len(reg['selected'])-1} (+ target)")
-        report.append(f"Removed features: {len(reg['removed'])}")
-        report.append(f"\nSelected: {', '.join([f for f in reg['selected'] if f != reg['target']])}")
-        if reg['removed']:
-            report.append(f"\nRemoved: {', '.join(reg['removed'])}")
-        report.append("\n")
-    
-    # Final Recommendation
-    report.append("="*70)
-    report.append("RECOMMENDATION FOR MODELING")
-    report.append("="*70)
+    methods_applied = list(results.keys())
+    report.append(f"\nMethods Applied: {', '.join(methods_applied)}")
     
     if st.session_state.pca_accepted and 'pca' in results:
         pca = results['pca']
-        report.append(f"\n✅ USE PCA COMPONENTS")
-        report.append(f"   - {pca['n_components']} components")
-        report.append(f"   - {pca['cumulative_variance'][-1]*100:.1f}% variance explained")
-        report.append(f"   - Orthogonal features, reduced multicollinearity")
+        report.append(f"\nRECOMMENDATION: Use {pca['n_components']} PCA components")
+        report.append(f"Variance Explained: {pca['cumulative_variance'][-1]*100:.2f}%")
+        report.append("Status: Accepted for modeling")
     elif st.session_state.selected_features:
-        report.append(f"\n💡 USE FILTERED FEATURES")
-        report.append(f"   - {len(st.session_state.selected_features)} features")
-        report.append(f"   - Redundant and low-information features removed")
-        report.append(f"   - Preserves interpretability")
+        report.append(f"\nRECOMMENDATION: Use {len(st.session_state.selected_features)} filtered features")
+        report.append("Approach: Correlation-based filtering")
     else:
-        report.append(f"\n⚠️  NO REDUCTION APPLIED")
-        report.append(f"   - Using all {len(original_features)} original features")
-        report.append(f"   - Risk of multicollinearity and overfitting")
-        report.append(f"   - Consider applying filtering")
+        report.append("\nRECOMMENDATION: Apply dimensionality reduction before modeling")
+        report.append("Reason: High risk of multicollinearity")
     
     report.append("\n")
-    report.append("="*70)
+    
+    # Add details for each method
+    if 'correlation' in results:
+        corr = results['correlation']
+        report.append("\n" + "="*80)
+        report.append("CORRELATION-BASED FILTERING")
+        report.append("="*80)
+        report.append(f"Threshold: {corr['threshold']:.2f}")
+        report.append(f"Features kept: {len(corr['selected'])}")
+        report.append(f"Features removed: {len(corr['removed'])}")
+        report.append(f"\nKept: {', '.join(corr['selected'])}")
+        if corr['removed']:
+            report.append(f"Removed: {', '.join(corr['removed'])}")
+    
+    if 'pca' in results:
+        pca = results['pca']
+        report.append("\n" + "="*80)
+        report.append("PRINCIPAL COMPONENT ANALYSIS")
+        report.append("="*80)
+        report.append(f"Components: {pca['n_components']}")
+        report.append(f"Total variance: {pca['cumulative_variance'][-1]*100:.2f}%")
+        report.append(f"Status: {'Accepted' if st.session_state.pca_accepted else 'Not accepted'}")
+    
+    if 'factor_analysis' in results:
+        fa = results['factor_analysis']
+        report.append("\n" + "="*80)
+        report.append("FACTOR ANALYSIS")
+        report.append("="*80)
+        report.append(f"Factors: {fa['n_factors']}")
+        report.append(f"Rotation: {fa['rotation']}")
+        report.append(f"Avg communality: {np.mean(fa['communalities']):.3f}")
+    
+    if 'ica' in results:
+        ica = results['ica']
+        report.append("\n" + "="*80)
+        report.append("INDEPENDENT COMPONENT ANALYSIS")
+        report.append("="*80)
+        report.append(f"Components: {ica['n_components']}")
+        report.append(f"Features analyzed: {len(ica['features'])}")
+    
+    if 'clustering' in results:
+        clust = results['clustering']
+        report.append("\n" + "="*80)
+        report.append("HIERARCHICAL CLUSTERING")
+        report.append("="*80)
+        report.append(f"Clusters: {clust['n_clusters']}")
+        report.append(f"Method: {clust['linkage_method']}")
+        report.append(f"Metric: {clust['distance_metric']}")
+    
+    report.append("\n" + "="*80)
     report.append("END OF REPORT")
-    report.append("="*70)
+    report.append("="*80)
     
     return "\n".join(report)
 
