@@ -53,12 +53,21 @@ def main():
 def render_sidebar():
     """Render interactive sidebar with status information"""
     
-    st.sidebar.title("🔮 ExplainFutures")
+    # Logo and Title at the very top (always visible)
+    # Using HTML/CSS for better control and icon from image
+    st.sidebar.markdown("""
+        <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
+            <img src='assets/logo.png' style='width: 80px; height: 80px; margin-bottom: 0.5rem;'/>
+            <h2 style='margin: 0; color: white; font-weight: 600;'>ExplainFutures</h2>
+            <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
     st.sidebar.markdown("---")
     
     # Login/Logout section
     if st.session_state.logged_in:
-        st.sidebar.success(f"✅ Logged in as: **{st.session_state.username}**")
+        st.sidebar.success(f"✅ Logged in: **{st.session_state.username}**")
         
         # Show login duration
         if st.session_state.login_time:
@@ -66,7 +75,7 @@ def render_sidebar():
             minutes = int(duration.total_seconds() / 60)
             st.sidebar.caption(f"Session: {minutes} min")
         
-        if st.sidebar.button("🚪 Logout", use_container_width=True):
+        if st.sidebar.button("🚪 Logout", use_container_width=True, key="logout_btn"):
             st.session_state.logged_in = False
             st.session_state.username = None
             st.session_state.login_time = None
@@ -77,13 +86,18 @@ def render_sidebar():
     
     st.sidebar.markdown("---")
     
-    # Project Information
-    st.sidebar.markdown("### 📊 Current Project")
+    # Main Menu Section
+    st.sidebar.markdown("""
+        <div style='background-color: #f0f2f6; padding: 1rem; border-radius: 8px; margin-bottom: 1rem;'>
+            <h3 style='margin: 0 0 0.5rem 0; font-size: 1rem; color: #31333F;'>📊 Project Status</h3>
+        </div>
+    """, unsafe_allow_html=True)
     
+    # Project Information
     if st.session_state.get("project_name"):
-        st.sidebar.info(f"**{st.session_state.project_name}**")
+        st.sidebar.info(f"**Project:** {st.session_state.project_name}")
     else:
-        st.sidebar.caption("No project loaded")
+        st.sidebar.caption("📁 No project loaded")
     
     # Data Status
     if st.session_state.get("data_loaded", False):
@@ -96,46 +110,74 @@ def render_sidebar():
             n_points = len(df)
             
             col1, col2 = st.sidebar.columns(2)
-            col1.metric("Variables", n_vars, label_visibility="collapsed")
-            col2.metric("Points", n_points, label_visibility="collapsed")
+            col1.metric("Variables", n_vars)
+            col2.metric("Points", n_points)
             
             if st.session_state.uploaded_file_name:
                 st.sidebar.caption(f"📄 {st.session_state.uploaded_file_name}")
     else:
         st.sidebar.caption("📥 No data loaded")
     
-    st.sidebar.markdown("---")
-    
-    # Database Status (placeholder)
-    st.sidebar.markdown("### 🗄️ Database")
-    
+    # Database Status
+    st.sidebar.markdown("")  # Small spacer
     if st.session_state.get("database_connected", False):
-        st.sidebar.success("✅ Connected to Supabase")
+        st.sidebar.success("🗄️ Database: Connected")
     else:
-        st.sidebar.info("ℹ️ Database: Phase 4")
-        st.sidebar.caption("Currently using in-memory storage")
+        st.sidebar.caption("🗄️ Database: Phase 4 (in-memory)")
     
     st.sidebar.markdown("---")
     
-    # Navigation Help
-    with st.sidebar.expander("ℹ️ Navigation Guide"):
+    # Navigation Help (collapsible)
+    with st.sidebar.expander("ℹ️ Quick Guide"):
         st.markdown("""
         **Workflow:**
-        1. Upload data
-        2. Clean & preprocess
-        3. Explore & visualize
-        4. Analyze relationships
-        5. Build models
-        6. Make projections
-        
-        Use the page links above to navigate! 👆
+        1. 📁 Upload data
+        2. 🧹 Clean & preprocess
+        3. 📊 Visualize
+        4. 🔬 Analyze
+        5. 🤖 Model
+        6. 🔮 Project
         """)
     
-    st.sidebar.markdown("---")
+    # Large spacer before extra information
+    st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
     
-    # Footer with app info
-    st.sidebar.caption(f"**ExplainFutures** {config['version']}")
-    st.sidebar.caption("Powered by Octa Insight")
+    # Extra Information Section (clearly separated)
+    st.sidebar.markdown("""
+        <div style='background-color: #e8eaf6; padding: 1rem; border-radius: 8px; margin-top: 2rem;'>
+            <h4 style='margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #31333F;'>📚 Additional Information</h4>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    # About sections
+    with st.sidebar.expander("📖 About ExplainFutures"):
+        st.markdown("""
+        **Version:** 1.0.0-phase1
+        
+        A modular platform for:
+        - Time-series analysis
+        - Interactive visualizations
+        - Predictive modeling
+        - Future exploration
+        - Scenario planning
+        """)
+    
+    with st.expander("🏢 About Octa Insight"):
+        st.markdown("""
+        **Octa Insight** specializes in data-driven decision support systems.
+        
+        - Analytics platforms
+        - AI/ML solutions
+        - Consulting services
+        
+        📧 info@octainsight.com
+        """)
+    
+    # Footer
+    st.sidebar.markdown("<br>", unsafe_allow_html=True)
+    config_data = get_config()
+    st.sidebar.caption(f"ExplainFutures v{config_data.get('version', '1.0.0')}")
+    st.sidebar.caption("© 2024 Octa Insight")
 
 
 def render_login_page():
