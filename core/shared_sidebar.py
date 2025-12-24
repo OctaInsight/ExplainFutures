@@ -101,12 +101,7 @@ def render_app_sidebar():
     # Large spacer before extra information
     st.sidebar.markdown("<br><br>", unsafe_allow_html=True)
     
-    # Extra Information Section (clearly separated)
-    st.sidebar.markdown("""
-        <div style='background-color: #e8eaf6; padding: 1rem; border-radius: 8px; margin-top: 2rem;'>
-            <h4 style='margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #31333F;'>📚 Additional Information</h4>
-        </div>
-    """, unsafe_allow_html=True)
+
     
     # About sections in sidebar
     with st.sidebar.expander("📖 About ExplainFutures"):
