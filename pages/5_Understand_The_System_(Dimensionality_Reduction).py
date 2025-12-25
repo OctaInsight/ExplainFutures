@@ -30,12 +30,6 @@ from core.dim_reduction.clustering_module import run_hierarchical_clustering
 initialize_session_state()
 config = get_config()
 
-# Page configuration
-st.set_page_config(
-    page_title="Understand The System", 
-    page_icon="🔬", 
-    layout="wide"
-)
 
 # Render shared sidebar
 render_app_sidebar()
