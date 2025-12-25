@@ -67,167 +67,280 @@ def initialize_scenario_state():
 
 def display_editable_comparison_table():
     """
-    Display FULLY EDITABLE comparison table
-    Users can edit parameter names, values, units, directions, and delete parameters
+    Display comparison table in PIVOT format:
+    - Parameters in ROWS (first column)
+    - Scenarios in COLUMNS (header row)
+    - Each cell shows: value, direction, unit
+    - Click cell to edit all three at once
     """
     
-    st.markdown("### 🔍 Interactive Parameter Comparison")
-    st.caption("Edit parameter names, values, units, and directions directly in the table. Changes apply to the original scenarios.")
+    st.markdown("### 🔍 Parameter Comparison Table")
+    st.caption("Compare parameters across scenarios. Click any cell to edit value, direction, and unit.")
     
     scenarios = st.session_state.detected_scenarios
     
-    # Build editable table data
-    # Each row = one parameter from one scenario
-    table_rows = []
-    row_id = 0
+    # Collect all unique parameters
+    all_params = set()
+    scenario_data = {}  # {scenario_id: {param: item}}
     
     for scenario in scenarios:
         scenario_id = scenario['id']
-        scenario_title = scenario['title']
+        scenario_data[scenario_id] = {}
         
-        for item_idx, item in enumerate(scenario['items']):
-            table_rows.append({
-                'row_id': row_id,
-                'scenario_id': scenario_id,
-                'item_idx': item_idx,
-                'Scenario': scenario_title,
-                'Parameter': item.get('parameter_canonical', item.get('parameter', '')),
-                'Direction': item.get('direction', 'target'),
-                'Value': item.get('value', 0.0) if item.get('value') is not None else 0.0,
-                'Unit': item.get('unit', ''),
-            })
-            row_id += 1
+        for item in scenario['items']:
+            param_name = item.get('parameter_canonical', item.get('parameter', ''))
+            all_params.add(param_name)
+            scenario_data[scenario_id][param_name] = item
     
-    if not table_rows:
+    all_params = sorted(list(all_params))
+    
+    if not all_params:
         st.info("No parameters to compare")
         return
     
-    # Convert to DataFrame
-    df_editable = pd.DataFrame(table_rows)
+    # === BUILD PIVOT TABLE ===
+    st.markdown("---")
     
-    # Store original for comparison
-    if 'comparison_table_original' not in st.session_state:
-        st.session_state.comparison_table_original = df_editable.copy()
+    # Direction symbols
+    direction_symbols = {
+        'increase': '↑',
+        'decrease': '↓',
+        'target': '→',
+        'stable': '═',
+        'double': '⇈',
+        'halve': '⇊'
+    }
     
-    # === DISPLAY EDITABLE TABLE ===
-    st.markdown("**Edit table directly:** (Click cells to edit)")
+    # Build table data for display
+    table_data = []
+    for param in all_params:
+        row = {'Parameter': param}
+        
+        for scenario in scenarios:
+            scenario_title = scenario['title']
+            scenario_id = scenario['id']
+            
+            if param in scenario_data[scenario_id]:
+                item = scenario_data[scenario_id][param]
+                symbol = direction_symbols.get(item.get('direction', ''), '?')
+                value = item.get('value')
+                unit = item.get('unit', '')
+                
+                if value is not None:
+                    if unit == '%':
+                        cell_value = f"{symbol} {value:.1f}%"
+                    elif unit:
+                        cell_value = f"{symbol} {value:.2f} {unit}"
+                    else:
+                        cell_value = f"{symbol} {value:.2f}"
+                else:
+                    cell_value = f"{symbol} (no value)"
+            else:
+                cell_value = "—"
+            
+            row[scenario_title] = cell_value
+        
+        table_data.append(row)
     
-    edited_df = st.data_editor(
-        df_editable,
-        column_config={
-            "row_id": None,  # Hide
-            "scenario_id": None,  # Hide
-            "item_idx": None,  # Hide
-            "Scenario": st.column_config.TextColumn(
-                "Scenario",
-                disabled=True,
-                width="medium"
-            ),
-            "Parameter": st.column_config.TextColumn(
-                "Parameter Name",
-                help="Edit parameter name",
-                required=True,
-                width="large"
-            ),
-            "Direction": st.column_config.SelectboxColumn(
-                "Direction",
-                options=["increase", "decrease", "target", "stable", "double", "halve"],
-                required=True,
-                width="small"
-            ),
-            "Value": st.column_config.NumberColumn(
-                "Value",
-                min_value=0.0,
-                max_value=1000000.0,
-                format="%.2f",
-                width="small"
-            ),
-            "Unit": st.column_config.SelectboxColumn(
-                "Unit",
-                options=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GtCO2", "GW", "MW", "TWh"],
-                width="small"
-            ),
-        },
-        num_rows="dynamic",  # Allow adding/deleting rows
+    # Display table
+    df_display = pd.DataFrame(table_data)
+    
+    st.dataframe(
+        df_display,
         use_container_width=True,
         hide_index=True,
-        key="comparison_editor"
+        height=min(400, len(all_params) * 40 + 50)
     )
     
-    # === APPLY CHANGES BUTTON ===
+    # === EDIT CELL INTERFACE ===
     st.markdown("---")
+    st.markdown("### ✏️ Edit Cell")
+    st.caption("Select a parameter and scenario to edit its value, direction, and unit")
     
-    col1, col2, col3 = st.columns([1, 1, 1])
+    col1, col2 = st.columns(2)
     
     with col1:
-        if st.button("💾 Apply Changes to Scenarios", type="primary", use_container_width=True):
-            # Apply edits back to scenarios
-            apply_comparison_edits(edited_df)
-            st.success("✅ Changes applied to all scenarios!")
-            st.session_state.comparison_table_original = edited_df.copy()
-            st.rerun()
+        selected_param = st.selectbox(
+            "Select Parameter:",
+            options=all_params,
+            key="edit_param"
+        )
     
     with col2:
-        if st.button("🔄 Reset Table", use_container_width=True):
-            # Reset to original
-            st.session_state.comparison_table_original = None
-            st.rerun()
+        selected_scenario = st.selectbox(
+            "Select Scenario:",
+            options=[s['title'] for s in scenarios],
+            key="edit_scenario"
+        )
     
-    with col3:
-        if st.button("❌ Close Comparison", use_container_width=True):
-            st.session_state.show_comparison_table = False
-            st.rerun()
+    # Find the selected scenario
+    selected_scenario_obj = None
+    for scenario in scenarios:
+        if scenario['title'] == selected_scenario:
+            selected_scenario_obj = scenario
+            break
     
-    # === MERGE PARAMETERS FEATURE ===
-    st.markdown("---")
-    st.markdown("### 🔗 Merge Similar Parameters")
-    
-    # Get unique parameters
-    unique_params = sorted(edited_df['Parameter'].unique().tolist())
-    
-    if len(unique_params) < 2:
-        st.info("Need at least 2 different parameters to merge")
-    else:
-        col_merge1, col_merge2, col_merge3 = st.columns([2, 2, 1])
+    if selected_scenario_obj:
+        scenario_id = selected_scenario_obj['id']
         
-        with col_merge1:
-            param_from = st.selectbox(
-                "Merge this parameter:",
-                options=unique_params,
-                key="merge_param_from"
-            )
-        
-        with col_merge2:
-            param_to = st.selectbox(
-                "Into this parameter:",
-                options=unique_params,
-                key="merge_param_to"
-            )
-        
-        with col_merge3:
-            st.markdown("")
-            st.markdown("")
-            if st.button("🔗 Merge"):
-                if param_from == param_to:
-                    st.error("Cannot merge a parameter into itself")
-                else:
-                    # Perform merge in the edited_df
-                    merge_parameters_in_table(param_from, param_to)
-                    st.success(f"✅ Merged '{param_from}' into '{param_to}'")
-                    st.info("Click 'Apply Changes' to save the merge to scenarios")
+        # Check if parameter exists in this scenario
+        if selected_param in scenario_data[scenario_id]:
+            # Parameter exists - edit it
+            item = scenario_data[scenario_id][selected_param]
+            st.success(f"✅ **{selected_param}** exists in **{selected_scenario}**")
+            
+            col_val, col_dir, col_unit, col_del = st.columns([2, 2, 2, 1])
+            
+            with col_val:
+                current_value = item.get('value', 0.0)
+                if isinstance(current_value, str):
+                    try:
+                        current_value = float(current_value) if current_value.strip() else 0.0
+                    except:
+                        current_value = 0.0
+                elif current_value is None:
+                    current_value = 0.0
+                
+                new_value = st.number_input(
+                    "Value:",
+                    min_value=0.0,
+                    max_value=1000000.0,
+                    value=float(current_value),
+                    step=0.1,
+                    key="edit_value"
+                )
+            
+            with col_dir:
+                new_direction = st.selectbox(
+                    "Direction:",
+                    options=["increase", "decrease", "target", "stable", "double", "halve"],
+                    index=["increase", "decrease", "target", "stable", "double", "halve"].index(item['direction']) if item['direction'] in ["increase", "decrease", "target", "stable", "double", "halve"] else 0,
+                    key="edit_direction"
+                )
+            
+            with col_unit:
+                new_unit = st.selectbox(
+                    "Unit:",
+                    options=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GtCO2", "GW", "MW", "TWh"],
+                    index=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GtCO2", "GW", "MW", "TWh"].index(item.get('unit', '')) if item.get('unit', '') in ["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GtCO2", "GW", "MW", "TWh"] else 0,
+                    key="edit_unit"
+                )
+            
+            with col_del:
+                st.markdown("")
+                st.markdown("")
+                if st.button("🗑️ Delete", key="delete_cell", use_container_width=True):
+                    # Delete this parameter from this scenario
+                    delete_parameter_from_scenario(selected_scenario_obj, selected_param)
+                    st.success(f"✅ Deleted **{selected_param}** from **{selected_scenario}**")
                     st.rerun()
+            
+            # Update button
+            if st.button("💾 Update Cell", type="primary", use_container_width=True):
+                update_parameter_in_scenario(selected_scenario_obj, selected_param, new_value, new_direction, new_unit)
+                st.success(f"✅ Updated **{selected_param}** in **{selected_scenario}**")
+                st.rerun()
+        
+        else:
+            # Parameter doesn't exist - offer to add it
+            st.info(f"ℹ️ **{selected_param}** does not exist in **{selected_scenario}**")
+            st.markdown("**Add this parameter to the scenario:**")
+            
+            col_val, col_dir, col_unit = st.columns([2, 2, 2])
+            
+            with col_val:
+                new_value = st.number_input(
+                    "Value:",
+                    min_value=0.0,
+                    max_value=1000000.0,
+                    value=0.0,
+                    step=0.1,
+                    key="add_value"
+                )
+            
+            with col_dir:
+                new_direction = st.selectbox(
+                    "Direction:",
+                    options=["increase", "decrease", "target", "stable", "double", "halve"],
+                    index=0,
+                    key="add_direction"
+                )
+            
+            with col_unit:
+                new_unit = st.selectbox(
+                    "Unit:",
+                    options=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GtCO2", "GW", "MW", "TWh"],
+                    index=0,
+                    key="add_unit"
+                )
+            
+            if st.button("➕ Add to Scenario", type="primary", use_container_width=True):
+                add_parameter_to_scenario(selected_scenario_obj, selected_param, new_value, new_direction, new_unit)
+                st.success(f"✅ Added **{selected_param}** to **{selected_scenario}**")
+                st.rerun()
     
-    # === EXPORT OPTIONS ===
+    # === DELETE PARAMETER FROM ALL SCENARIOS ===
     st.markdown("---")
-    st.markdown("### 📥 Export Comparison Table")
+    st.markdown("### 🗑️ Delete Parameter Completely")
+    st.caption("Remove a parameter from ALL scenarios")
+    
+    col_delete1, col_delete2 = st.columns([3, 1])
+    
+    with col_delete1:
+        param_to_delete = st.selectbox(
+            "Select parameter to delete from all scenarios:",
+            options=all_params,
+            key="delete_all_param"
+        )
+    
+    with col_delete2:
+        st.markdown("")
+        st.markdown("")
+        if st.button("🗑️ Delete from All", key="delete_all_button"):
+            delete_parameter_from_all_scenarios(param_to_delete)
+            st.success(f"✅ Deleted **{param_to_delete}** from all scenarios")
+            st.rerun()
+    
+    # === MERGE PARAMETERS ===
+    st.markdown("---")
+    st.markdown("### 🔗 Merge Parameters")
+    st.caption("Combine two parameters into one across all scenarios")
+    
+    col_merge1, col_merge2, col_merge3 = st.columns([2, 2, 1])
+    
+    with col_merge1:
+        merge_from = st.selectbox(
+            "Merge this parameter:",
+            options=all_params,
+            key="merge_from_param"
+        )
+    
+    with col_merge2:
+        merge_to = st.selectbox(
+            "Into this parameter:",
+            options=all_params,
+            key="merge_to_param"
+        )
+    
+    with col_merge3:
+        st.markdown("")
+        st.markdown("")
+        if st.button("🔗 Merge"):
+            if merge_from == merge_to:
+                st.error("Cannot merge a parameter into itself")
+            else:
+                merge_parameters_in_table(merge_from, merge_to)
+                st.success(f"✅ Merged **{merge_from}** into **{merge_to}**")
+                st.rerun()
+    
+    # === EXPORT ===
+    st.markdown("---")
+    st.markdown("### 📥 Export Table")
     
     col_exp1, col_exp2, col_exp3 = st.columns(3)
     
-    # Prepare export DataFrame (remove internal columns)
-    export_df = edited_df[['Scenario', 'Parameter', 'Direction', 'Value', 'Unit']].copy()
-    
     with col_exp1:
-        csv_data = export_df.to_csv(index=False)
+        csv_data = df_display.to_csv(index=False)
         st.download_button(
             label="📥 Download CSV",
             data=csv_data,
@@ -238,7 +351,7 @@ def display_editable_comparison_table():
     
     with col_exp2:
         excel_buffer = io.BytesIO()
-        export_df.to_excel(excel_buffer, index=False, engine='openpyxl')
+        df_display.to_excel(excel_buffer, index=False, engine='openpyxl')
         st.download_button(
             label="📥 Download Excel",
             data=excel_buffer.getvalue(),
@@ -248,7 +361,7 @@ def display_editable_comparison_table():
         )
     
     with col_exp3:
-        json_data = export_df.to_json(orient='records')
+        json_data = df_display.to_json(orient='records')
         st.download_button(
             label="📥 Download JSON",
             data=json_data,
@@ -256,6 +369,84 @@ def display_editable_comparison_table():
             mime="application/json",
             use_container_width=True
         )
+    
+    # === CLOSE BUTTON ===
+    st.markdown("---")
+    if st.button("❌ Close Comparison Table", use_container_width=True):
+        st.session_state.show_comparison_table = False
+        st.rerun()
+
+
+def update_parameter_in_scenario(scenario, param_name, value, direction, unit):
+    """Update parameter in a specific scenario"""
+    for item in scenario['items']:
+        item_param = item.get('parameter_canonical', item.get('parameter', ''))
+        if item_param == param_name:
+            item['value'] = value
+            item['direction'] = direction
+            item['unit'] = unit
+            item['value_type'] = 'percent' if unit == '%' else 'absolute'
+            break
+    
+    # Update in session state
+    for idx, s in enumerate(st.session_state.detected_scenarios):
+        if s['id'] == scenario['id']:
+            st.session_state.detected_scenarios[idx] = scenario
+            break
+
+
+def add_parameter_to_scenario(scenario, param_name, value, direction, unit):
+    """Add new parameter to a scenario"""
+    new_item = {
+        'parameter': param_name,
+        'parameter_canonical': param_name,
+        'direction': direction,
+        'value': value,
+        'unit': unit,
+        'value_type': 'percent' if unit == '%' else 'absolute',
+        'confidence': 0.5,
+        'source_sentence': 'User-added via comparison table',
+        'extraction_method': 'user_added'
+    }
+    
+    scenario['items'].append(new_item)
+    
+    # Update in session state
+    for idx, s in enumerate(st.session_state.detected_scenarios):
+        if s['id'] == scenario['id']:
+            st.session_state.detected_scenarios[idx] = scenario
+            break
+
+
+def delete_parameter_from_scenario(scenario, param_name):
+    """Delete parameter from a specific scenario"""
+    items_to_keep = []
+    
+    for item in scenario['items']:
+        item_param = item.get('parameter_canonical', item.get('parameter', ''))
+        if item_param != param_name:
+            items_to_keep.append(item)
+    
+    scenario['items'] = items_to_keep
+    
+    # Update in session state
+    for idx, s in enumerate(st.session_state.detected_scenarios):
+        if s['id'] == scenario['id']:
+            st.session_state.detected_scenarios[idx] = scenario
+            break
+
+
+def delete_parameter_from_all_scenarios(param_name):
+    """Delete parameter from all scenarios"""
+    for scenario in st.session_state.detected_scenarios:
+        items_to_keep = []
+        
+        for item in scenario['items']:
+            item_param = item.get('parameter_canonical', item.get('parameter', ''))
+            if item_param != param_name:
+                items_to_keep.append(item)
+        
+        scenario['items'] = items_to_keep
 
 
 def apply_comparison_edits(edited_df: pd.DataFrame):
@@ -887,6 +1078,8 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
                         st.markdown(f"- **{canonical}**")
         
         # Edit each item individually
+        items_to_delete = []  # Track items to delete
+        
         for item_idx, item in enumerate(scenario['items']):
             with st.container():
                 # Show both original and canonical if different
@@ -1005,11 +1198,17 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
                 
                 with col5:
                     if st.button("🗑️", key=f"del_{scenario_idx}_{item_idx}", help="Delete parameter"):
-                        scenario['items'].pop(item_idx)
-                        st.session_state.detected_scenarios[scenario_idx] = scenario
-                        st.rerun()
+                        items_to_delete.append(item_idx)
                 
                 st.markdown("---")
+        
+        # Delete items after iteration (to avoid index issues)
+        if items_to_delete:
+            # Sort in reverse order to delete from end to start
+            for idx in sorted(items_to_delete, reverse=True):
+                scenario['items'].pop(idx)
+            st.session_state.detected_scenarios[scenario_idx] = scenario
+            st.rerun()
         
         # Update in session state
         st.session_state.detected_scenarios[scenario_idx] = scenario
