@@ -51,14 +51,16 @@ def create_model_comparison_plot(variable_name: str,
     all_values = np.concatenate([train_values, test_values])
     all_timestamps = pd.DatetimeIndex(list(train_timestamps) + list(test_timestamps))
     
-    # 1. Plot actual data
+    # 1. Plot actual data (markers only by default)
     fig.add_trace(go.Scatter(
         x=all_timestamps,
         y=all_values,
-        mode='lines+markers',
+        mode='markers',  # Changed from 'lines+markers' to just 'markers'
         name='Actual Data',
-        line=dict(color='black', width=2),
-        marker=dict(size=4),
+        marker=dict(
+            size=6,
+            color='black'
+        ),
         showlegend=True
     ))
     
@@ -132,7 +134,7 @@ def create_model_comparison_plot(variable_name: str,
     fig.update_layout(
         title=f"{variable_name} - Model Comparison",
         xaxis_title="Time",
-        yaxis_title="Value",
+        yaxis_title=f"{variable_name}",  # Use variable name as Y-axis label
         height=600,
         template='plotly_white',
         hovermode='x unified',
@@ -140,9 +142,13 @@ def create_model_comparison_plot(variable_name: str,
         legend=dict(
             x=0.01,
             y=0.99,
-            bgcolor='rgba(255, 255, 255, 0.8)',
-            bordercolor='black',
-            borderwidth=1
+            bgcolor='rgba(255, 255, 255, 0.9)',  # White background with slight transparency
+            bordercolor='black',  # Black border
+            borderwidth=1,
+            font=dict(
+                color='black',  # Black text for contrast
+                size=11
+            )
         )
     )
     
