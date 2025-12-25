@@ -78,3 +78,14 @@ numba>=0.57.0
 #   python -m spacy download en_core_web_sm
 #
 # This is required for Page 9 (Scenario Analysis) NLP features
+
+# ============================================================
+#install Gliner
+# ============================================================
+
+gliner
+torch
+transformers
+sentencepiece
+langdetect
+
