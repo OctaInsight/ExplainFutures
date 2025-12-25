@@ -278,40 +278,61 @@ for param, info in all_parameters.items():
 
 df_polarity = pd.DataFrame(polarity_data)
 
-# Display in expandable table
-with st.expander("📋 **Parameter Polarity Table**", expanded=True):
-    st.dataframe(df_polarity, use_container_width=True, hide_index=True)
-    
-    st.caption(f"**Total parameters:** {len(all_parameters)}")
-    st.caption(f"**Positive (higher is better):** {sum([1 for p in all_parameters.values() if p['auto_polarity']])}")
-    st.caption(f"**Negative (lower is better):** {sum([1 for p in all_parameters.values() if not p['auto_polarity']])}")
+# Create editable polarity table
+st.markdown("**Review and edit parameter polarities:**")
+st.caption("💡 Click cells in the 'Polarity' column to change values")
 
-# Manual adjustment interface
-st.markdown("**Adjust any incorrect classifications:**")
+# Prepare data for editable table
+edit_data = []
+for param, info in all_parameters.items():
+    edit_data.append({
+        'Parameter': param,
+        'Category': info['category'],
+        'Polarity': 'Positive (↑)' if info['user_polarity'] else 'Negative (↓)'
+    })
 
-col1, col2 = st.columns([3, 1])
+df_edit = pd.DataFrame(edit_data)
 
-with col1:
-    param_to_change = st.selectbox(
-        "Select parameter to change",
-        options=['-- Select --'] + list(all_parameters.keys()),
-        key='param_selector'
+# Configure editable table
+column_config = {
+    "Parameter": st.column_config.TextColumn(
+        "Parameter Name",
+        help="The parameter being classified",
+        width="medium"
+    ),
+    "Category": st.column_config.TextColumn(
+        "Category",
+        help="Category this parameter belongs to",
+        width="medium"
+    ),
+    "Polarity": st.column_config.SelectboxColumn(
+        "Polarity (Higher is Better?)",
+        help="Is a higher value better or worse?",
+        options=["Positive (↑)", "Negative (↓)"],
+        required=True,
+        width="medium"
     )
+}
 
-with col2:
-    if param_to_change != '-- Select --':
-        current = all_parameters[param_to_change]['user_polarity']
-        new_polarity = st.selectbox(
-            "Set polarity",
-            options=['Positive (↑ better)', 'Negative (↓ better)'],
-            index=0 if current else 1,
-            key='polarity_selector'
-        )
-        
-        if st.button("✅ Update", key='update_polarity'):
-            all_parameters[param_to_change]['user_polarity'] = (new_polarity == 'Positive (↑ better)')
-            st.success(f"Updated {param_to_change}")
-            st.rerun()
+# Display editable table
+edited_df = st.data_editor(
+    df_edit,
+    column_config=column_config,
+    use_container_width=True,
+    hide_index=True,
+    num_rows="fixed",
+    key="polarity_editor"
+)
+
+# Update all_parameters with edited values
+for idx, row in edited_df.iterrows():
+    param = row['Parameter']
+    if param in all_parameters:
+        all_parameters[param]['user_polarity'] = (row['Polarity'] == 'Positive (↑)')
+
+st.caption(f"**Total parameters:** {len(all_parameters)}")
+st.caption(f"**Positive (higher is better):** {sum([1 for p in all_parameters.values() if p['user_polarity']])}")
+st.caption(f"**Negative (lower is better):** {sum([1 for p in all_parameters.values() if not p['user_polarity']])}")
 
 # Store polarity in session state
 polarity_dict = {param: info['user_polarity'] for param, info in all_parameters.items()}
@@ -426,19 +447,36 @@ if st.session_state.get('polarity_confirmed', False):
             
             # Color selection for each scenario
             st.markdown("**Scenario Colors:**")
+            st.caption("Select colors for each scenario")
             
-            default_colors = px.colors.qualitative.Set2
+            # Use default colors
+            default_colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2']
+            
             scenario_colors = {}
+            scenario_list = list(category_scores.keys())
             
-            cols = st.columns(min(len(category_scores), 4))
-            for idx, scenario_name in enumerate(category_scores.keys()):
-                with cols[idx % 4]:
-                    color = st.color_picker(
-                        scenario_name[:20],
-                        default_colors[idx % len(default_colors)],
-                        key=f'color_{idx}'
-                    )
-                    scenario_colors[scenario_name] = color
+            # Create color pickers in a clean layout
+            for idx, scenario_name in enumerate(scenario_list):
+                default_color = default_colors[idx % len(default_colors)]
+                scenario_colors[scenario_name] = default_color
+            
+            # Show color selection in columns
+            num_scenarios = len(scenario_list)
+            cols_per_row = 4
+            
+            for row_start in range(0, num_scenarios, cols_per_row):
+                cols = st.columns(cols_per_row)
+                for col_idx in range(cols_per_row):
+                    scenario_idx = row_start + col_idx
+                    if scenario_idx < num_scenarios:
+                        scenario_name = scenario_list[scenario_idx]
+                        with cols[col_idx]:
+                            selected_color = st.color_picker(
+                                f"{scenario_name[:15]}...",
+                                value=scenario_colors[scenario_name],
+                                key=f'color_picker_{scenario_idx}'
+                            )
+                            scenario_colors[scenario_name] = selected_color
         
         # Create plot
         fig = go.Figure()
