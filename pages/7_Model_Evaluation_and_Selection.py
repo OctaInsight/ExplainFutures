@@ -28,12 +28,6 @@ from core.models.data_preparation import get_series_data
 initialize_session_state()
 config = get_config()
 
-# Page configuration
-st.set_page_config(
-    page_title="Model Evaluation & Selection", 
-    page_icon="📊", 
-    layout="wide"
-)
 
 # Render shared sidebar
 render_app_sidebar()
