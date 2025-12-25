@@ -5,6 +5,8 @@ Login/Logout Page
 
 import streamlit as st
 from datetime import datetime
+from pathlib import Path
+import base64
 
 # MUST be first Streamlit command
 st.set_page_config(
@@ -14,11 +16,101 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Import sidebar AFTER config
-from shared_sidebar import render_app_sidebar
+# Helper function to get logo
+def get_logo_base64():
+    """Get logo as base64 string for embedding"""
+    logo_path = Path(__file__).parent / "assets" / "logo_small.png"
+    try:
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except Exception as e:
+        # Try alternative path
+        try:
+            logo_path = Path("assets/logo_small.png")
+            with open(logo_path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+        except:
+            return None
 
 # Render sidebar
-render_app_sidebar()
+def render_sidebar():
+    """Render the sidebar with logo and info"""
+    
+    # Try to get logo as base64
+    logo_base64 = get_logo_base64()
+    
+    # Logo and Title at the very top
+    if logo_base64:
+        st.sidebar.markdown(f"""
+            <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
+                <img src='data:image/png;base64,{logo_base64}' style='width: 80px; height: 80px; margin-bottom: 0.5rem;' alt='Logo'/>
+                <h2 style='margin: 0; color: white; font-weight: 600;'>ExplainFutures</h2>
+                <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
+            </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.sidebar.markdown("""
+            <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
+                <div style='font-size: 3rem; margin-bottom: 0.5rem;'>🔮</div>
+                <h2 style='margin: 0; color: white; font-weight: 600;'>ExplainFutures</h2>
+                <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
+            </div>
+        """, unsafe_allow_html=True)
+    
+    st.sidebar.markdown("---")
+    
+    # Login/Logout section
+    if st.session_state.get("logged_in", False):
+        st.sidebar.success(f"✅ Logged in: **{st.session_state.get('username', 'User')}**")
+        
+        if st.session_state.get("login_time"):
+            duration = datetime.now() - st.session_state.login_time
+            minutes = int(duration.total_seconds() / 60)
+            st.sidebar.caption(f"Session: {minutes} min")
+        
+        if st.sidebar.button("🚪 Logout", use_container_width=True, key="sidebar_logout_btn"):
+            st.session_state.logged_in = False
+            st.session_state.username = None
+            st.session_state.login_time = None
+            st.rerun()
+    else:
+        st.sidebar.warning("⚠️ Not logged in")
+        st.sidebar.caption("Please login below")
+    
+    st.sidebar.markdown("---")
+    
+    # About ExplainFutures
+    with st.sidebar.expander("📖 About ExplainFutures"):
+        st.markdown("""
+        **Version:** 1.0.0-phase1
+        
+        A modular platform for:
+        - Time-series analysis
+        - Interactive visualizations
+        - Predictive modeling
+        - Future exploration
+        - Scenario planning
+        """)
+    
+    # About Octa Insight
+    with st.sidebar.expander("🏢 About Octa Insight"):
+        st.markdown("""
+        **Octa Insight** specializes in data-driven decision support systems.
+        
+        - Analytics platforms
+        - AI/ML solutions
+        - Consulting services
+        
+        📧 info@octainsight.com
+        """)
+    
+    # Footer
+    st.sidebar.markdown("<br>", unsafe_allow_html=True)
+    st.sidebar.caption("ExplainFutures v1.0.0")
+    st.sidebar.caption("© 2024 Octa Insight")
+
+# Render sidebar
+render_sidebar()
 
 # Initialize session state
 if "logged_in" not in st.session_state:
@@ -54,15 +146,12 @@ if not st.session_state.logged_in:
             
             if login_button:
                 if username and password:
-                    # Simple authentication (replace with your actual auth logic)
-                    if username and password:  # Add your validation here
-                        st.session_state.logged_in = True
-                        st.session_state.username = username
-                        st.session_state.login_time = datetime.now()
-                        st.success(f"✅ Welcome, {username}!")
-                        st.rerun()
-                    else:
-                        st.error("❌ Invalid credentials")
+                    # Simple authentication (you can customize this)
+                    st.session_state.logged_in = True
+                    st.session_state.username = username
+                    st.session_state.login_time = datetime.now()
+                    st.success(f"✅ Welcome, {username}!")
+                    st.rerun()
                 else:
                     st.warning("⚠️ Please enter both username and password")
             
@@ -135,7 +224,7 @@ else:
     
     st.markdown("---")
     
-    # Logout button
+    # Logout button in main area
     if st.button("🚪 Logout", type="secondary"):
         st.session_state.logged_in = False
         st.session_state.username = None
