@@ -28,12 +28,6 @@ from core.models.model_visualization import create_model_comparison_plot
 initialize_session_state()
 config = get_config()
 
-# Page configuration
-st.set_page_config(
-    page_title="Time-Based Models & ML Training", 
-    page_icon="🤖", 
-    layout="wide"
-)
 
 # Render shared sidebar
 render_app_sidebar()
