@@ -71,17 +71,17 @@ def display_editable_comparison_table():
     
     Features:
     - Parameters grouped by category (Economic, Environmental, Social, etc.)
-    - Click parameter name to see source sentence
+    - Expandable rows to show source sentences for each scenario
     - All editing in table
     """
     
     st.markdown("### 📊 Edit All Parameters")
-    st.caption("✏️ Click any cell to edit • Click parameter name to see source sentence • ➕ Add rows to add parameters")
+    st.caption("✏️ Click any cell to edit • Click 📝 button to see source sentences for each scenario")
     
     scenarios = st.session_state.detected_scenarios
     
     # Collect all unique parameters with their metadata
-    all_params_data = {}  # {param_name: {category, source_sentence, items_by_scenario}}
+    all_params_data = {}  # {param_name: {category, sources_by_scenario, items_by_scenario}}
     
     for scenario in scenarios:
         scenario_id = scenario['id']
@@ -92,17 +92,12 @@ def display_editable_comparison_table():
             if param_name not in all_params_data:
                 all_params_data[param_name] = {
                     'category': categorize_parameter(param_name),
-                    'source_sentence': item.get('source_sentence', ''),
+                    'sources_by_scenario': {},
                     'items_by_scenario': {}
                 }
             
             all_params_data[param_name]['items_by_scenario'][scenario_id] = item
-            
-            # Update source sentence if this one is better (longer/more specific)
-            current_source = all_params_data[param_name]['source_sentence']
-            new_source = item.get('source_sentence', '')
-            if len(new_source) > len(current_source):
-                all_params_data[param_name]['source_sentence'] = new_source
+            all_params_data[param_name]['sources_by_scenario'][scenario_id] = item.get('source_sentence', '')
     
     # Sort parameters by category, then alphabetically
     sorted_params = sorted(
@@ -119,7 +114,11 @@ def display_editable_comparison_table():
         if param_data['category'] != current_category:
             current_category = param_data['category']
             # Add separator row
-            separator_row = {'Parameter': f"━━━ {current_category} ━━━", '_is_category_header': True}
+            separator_row = {
+                'Parameter': f"━━━ {current_category} ━━━",
+                '_is_category_header': True,
+                '_sources': {}
+            }
             
             for scenario in scenarios:
                 short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
@@ -132,8 +131,8 @@ def display_editable_comparison_table():
         # Add parameter row
         row = {
             'Parameter': param_name,
-            '_source_sentence': param_data['source_sentence'],
-            '_is_category_header': False
+            '_is_category_header': False,
+            '_sources': param_data['sources_by_scenario']  # Store all sources
         }
         
         # Add value, direction, unit for each scenario
@@ -159,64 +158,78 @@ def display_editable_comparison_table():
         df = pd.DataFrame(table_data)
     else:
         # Empty table
-        columns = ['Parameter', '_source_sentence', '_is_category_header']
+        columns = ['Parameter', '_is_category_header', '_sources']
         for scenario in scenarios:
             short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
             columns.extend([f"{short_title}_Value", f"{short_title}_Direction", f"{short_title}_Unit"])
         df = pd.DataFrame(columns=columns)
     
-    # === SHOW SOURCE SENTENCE VIEWER ===
+    # === EXPANDABLE SOURCE SENTENCES ===
     st.markdown("---")
-    st.markdown("### 📝 View Source Sentence")
+    st.markdown("### 📝 View Source Sentences")
+    st.caption("Select a parameter to see the source sentence from each scenario")
     
     # Get list of actual parameters (not category headers)
     actual_params = [row['Parameter'] for _, row in df.iterrows() 
                      if not row.get('_is_category_header', False)]
     
     if actual_params:
-        selected_param_for_source = st.selectbox(
-            "Select parameter to see its source sentence:",
+        selected_param = st.selectbox(
+            "Select parameter:",
             options=actual_params,
-            key="source_sentence_selector"
+            key="source_viewer_param"
         )
         
-        # Find source sentence
-        source_sentence = df[df['Parameter'] == selected_param_for_source]['_source_sentence'].iloc[0]
+        # Find sources for this parameter
+        param_row = df[df['Parameter'] == selected_param].iloc[0]
+        sources = param_row['_sources']
         
-        if source_sentence and source_sentence.strip():
-            # Highlight the parameter in the sentence
-            param_lower = selected_param_for_source.lower()
-            sentence_lower = source_sentence.lower()
-            
-            if param_lower in sentence_lower:
-                # Find position and extract context
-                idx = sentence_lower.find(param_lower)
-                start = max(0, idx - 30)
-                end = min(len(source_sentence), idx + len(selected_param_for_source) + 30)
+        if sources:
+            # Show source for each scenario in expandable sections
+            for scenario in scenarios:
+                scenario_id = scenario['id']
+                scenario_title = scenario['title']
                 
-                context = source_sentence[start:end]
-                if start > 0:
-                    context = "..." + context
-                if end < len(source_sentence):
-                    context = context + "..."
-                
-                st.info(f"**Source:** *\"{context}\"*")
-            else:
-                # Show full sentence (truncated if too long)
-                if len(source_sentence) > 200:
-                    display = source_sentence[:200] + "..."
+                if scenario_id in sources and sources[scenario_id]:
+                    source_sentence = sources[scenario_id]
+                    
+                    # Extract context around parameter
+                    param_lower = selected_param.lower()
+                    sentence_lower = source_sentence.lower()
+                    
+                    if param_lower in sentence_lower:
+                        idx = sentence_lower.find(param_lower)
+                        start = max(0, idx - 50)
+                        end = min(len(source_sentence), idx + len(selected_param) + 50)
+                        context = source_sentence[start:end]
+                        
+                        if start > 0:
+                            context = "..." + context
+                        if end < len(source_sentence):
+                            context = context + "..."
+                        
+                        display_text = context
+                    else:
+                        # Show full sentence (truncated)
+                        if len(source_sentence) > 150:
+                            display_text = source_sentence[:150] + "..."
+                        else:
+                            display_text = source_sentence
+                    
+                    with st.expander(f"📄 {scenario_title}", expanded=False):
+                        st.info(f"*\"{display_text}\"*")
                 else:
-                    display = source_sentence
-                st.info(f"**Source:** *\"{display}\"*")
+                    with st.expander(f"📄 {scenario_title}", expanded=False):
+                        st.warning("No source sentence available")
         else:
-            st.warning("No source sentence available for this parameter")
+            st.warning("No source sentences available for this parameter")
     
     # === DISPLAY EDITABLE TABLE ===
     st.markdown("---")
     st.markdown("### ✏️ Edit Parameters")
     
     # Remove internal columns from display
-    display_df = df.drop(columns=['_source_sentence', '_is_category_header'], errors='ignore')
+    display_df = df.drop(columns=['_is_category_header', '_sources'], errors='ignore')
     
     # Configure columns
     column_config = {
@@ -255,7 +268,7 @@ def display_editable_comparison_table():
             width="small"
         )
     
-    st.caption("💡 Category headers (━━━) are not editable - only edit parameter rows")
+    st.caption("💡 Category headers (━━━) are not editable")
     
     edited_df = st.data_editor(
         display_df,
@@ -274,7 +287,7 @@ def display_editable_comparison_table():
     with col1:
         if st.button("💾 Save All Changes", type="primary", use_container_width=True):
             # Filter out category headers before saving
-            save_df = edited_df[~edited_df['Parameter'].str.startswith('━━━', na=False)]
+            save_df = edited_df[~edited_df['Parameter'].str.startswith('━━━', na=False)].copy()
             save_table_to_scenarios(save_df, scenarios)
             st.success("✅ All changes saved to scenarios!")
             st.rerun()
@@ -1025,9 +1038,19 @@ Renewable energy reaches 40% by 2040.""",
         if st.session_state.get('show_comparison_table', False):
             display_editable_comparison_table()
         
-        # === STEP 3: MAPPING TO DATASET VARIABLES ===
+        # === STEP 3: CLEANED SCENARIOS ===
         st.markdown("---")
-        st.subheader("🔗 Step 3: Map to Dataset Variables")
+        st.subheader("📄 Step 3: Review Cleaned Scenarios")
+        
+        if st.button("✨ Generate Cleaned Scenario Text", type="primary"):
+            generate_cleaned_scenarios()
+        
+        if st.session_state.cleaned_scenarios:
+            display_cleaned_scenarios()
+        
+        # === STEP 4: MAPPING TO DATASET VARIABLES ===
+        st.markdown("---")
+        st.subheader("🔗 Step 4: Map to Dataset Variables")
         
         # Check if data is available
         if st.session_state.get('df_long') is not None:
@@ -1036,21 +1059,143 @@ Renewable energy reaches 40% by 2040.""",
             st.info("ℹ️ No dataset loaded. Scenario analysis will work in **standalone mode**.")
             st.markdown("*To enable mapping, load data in the Data Upload page.*")
         
-        # === STEP 4: CLEANED SCENARIOS ===
+        # === STEP 5: CATEGORICAL COMPARISON PLOTS ===
         st.markdown("---")
-        st.subheader("📄 Step 4: Review Cleaned Scenarios")
+        st.subheader("📊 Step 5: Visualize Scenarios by Category")
+        st.caption("Scatter plots showing parameter values across scenarios, grouped by category")
         
-        if st.button("✨ Generate Cleaned Scenario Text", type="primary"):
-            generate_cleaned_scenarios()
+        display_categorical_comparison_plots()
+
+
+def display_categorical_comparison_plots():
+    """
+    Display scatter plots grouped by parameter category
+    
+    Features:
+    - One plot per category (Economic, Environmental, Energy, Social, Technology, Other)
+    - X-axis: Parameter names from that category
+    - Y-axis: Values
+    - Points colored by scenario
+    - Multiple Y-axes for different units (%, absolute values, etc.)
+    """
+    
+    scenarios = st.session_state.detected_scenarios
+    
+    if len(scenarios) < 2:
+        st.info("Need at least 2 scenarios to create comparison plots")
+        return
+    
+    # Collect all parameters by category
+    params_by_category = {}
+    
+    for scenario in scenarios:
+        for item in scenario['items']:
+            param_name = item.get('parameter_canonical', item.get('parameter', ''))
+            category = categorize_parameter(param_name)
+            value = item.get('value')
+            unit = item.get('unit', '')
+            
+            if value is None:
+                continue  # Skip parameters without values
+            
+            if category not in params_by_category:
+                params_by_category[category] = {}
+            
+            if param_name not in params_by_category[category]:
+                params_by_category[category][param_name] = []
+            
+            params_by_category[category][param_name].append({
+                'scenario': scenario['title'],
+                'value': float(value),
+                'unit': unit
+            })
+    
+    if not params_by_category:
+        st.info("No parameters with values to plot")
+        return
+    
+    # Create one plot per category
+    for category in sorted(params_by_category.keys()):
+        params = params_by_category[category]
         
-        if st.session_state.cleaned_scenarios:
-            display_cleaned_scenarios()
+        if not params:
+            continue
         
-        # === STEP 5: COMPARISON PLOTS ===
-        st.markdown("---")
-        st.subheader("📈 Step 5: Compare Scenarios")
+        st.markdown(f"### {category}")
         
-        display_scenario_comparison()
+        # Prepare data for plotting
+        plot_data = []
+        
+        for param_name, data_points in params.items():
+            for dp in data_points:
+                plot_data.append({
+                    'Parameter': param_name,
+                    'Scenario': dp['scenario'],
+                    'Value': dp['value'],
+                    'Unit': dp['unit']
+                })
+        
+        if not plot_data:
+            continue
+        
+        df_plot = pd.DataFrame(plot_data)
+        
+        # Group by unit to create separate y-axes if needed
+        units_in_category = df_plot['Unit'].unique()
+        
+        if len(units_in_category) == 1:
+            # Single unit - simple plot
+            unit = units_in_category[0]
+            
+            fig = px.scatter(
+                df_plot,
+                x='Parameter',
+                y='Value',
+                color='Scenario',
+                title=f"{category} - All values in {unit if unit else 'absolute'}",
+                labels={'Value': f'Value ({unit})' if unit else 'Value'},
+                height=500
+            )
+            
+            # Customize layout
+            fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
+            fig.update_layout(
+                xaxis_tickangle=-45,
+                hovermode='closest',
+                showlegend=True,
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        else:
+            # Multiple units - create tabs for each unit
+            unit_tabs = st.tabs([f"{u if u else 'Absolute'}" for u in units_in_category])
+            
+            for tab, unit in zip(unit_tabs, units_in_category):
+                with tab:
+                    df_unit = df_plot[df_plot['Unit'] == unit]
+                    
+                    fig = px.scatter(
+                        df_unit,
+                        x='Parameter',
+                        y='Value',
+                        color='Scenario',
+                        title=f"{category} - Values in {unit if unit else 'absolute'}",
+                        labels={'Value': f'Value ({unit})' if unit else 'Value'},
+                        height=500
+                    )
+                    
+                    # Customize layout
+                    fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
+                    fig.update_layout(
+                        xaxis_tickangle=-45,
+                        hovermode='closest',
+                        showlegend=True,
+                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
 
 
 def display_scenario_editor(scenario: dict, scenario_idx: int):
