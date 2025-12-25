@@ -23,8 +23,6 @@ from core.shared_sidebar import render_app_sidebar
 initialize_session_state()
 config = get_config()
 
-# Page configuration
-st.set_page_config(page_title="Data Cleaning & Preprocessing", page_icon="🧹", layout="wide")
 
 # Render shared sidebar
 render_app_sidebar()  
