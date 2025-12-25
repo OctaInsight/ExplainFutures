@@ -10,14 +10,21 @@ from datetime import datetime
 from pathlib import Path
 import base64
 
+# Helper function to get logo
 def get_logo_base64():
     """Get logo as base64 string for embedding"""
     logo_path = Path(__file__).parent / "assets" / "logo_small.png"
     try:
         with open(logo_path, "rb") as f:
             return base64.b64encode(f.read()).decode()
-    except:
-        return None
+    except Exception as e:
+        # Try alternative path
+        try:
+            logo_path = Path("assets/logo_small.png")
+            with open(logo_path, "rb") as f:
+                return base64.b64encode(f.read()).decode()
+        except:
+            return None
 
 def render_app_sidebar():
     """
