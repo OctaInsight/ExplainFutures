@@ -63,13 +63,30 @@ def create_model_comparison_plot(variable_name: str,
     ))
     
     # 2. Add train/test split line
-    if split_index < len(all_timestamps):
-        fig.add_vline(
-            x=all_timestamps[split_index],
-            line_dash="dash",
-            line_color="red",
-            annotation_text="Train/Test Split",
-            annotation_position="top"
+    if split_index > 0 and split_index < len(all_timestamps):
+        # Get the timestamp at split point
+        split_time = all_timestamps[split_index]
+        
+        # Add vertical line using shape instead of add_vline to avoid timestamp issues
+        fig.add_shape(
+            type="line",
+            x0=split_time,
+            x1=split_time,
+            y0=0,
+            y1=1,
+            yref="paper",
+            line=dict(color="red", width=2, dash="dash")
+        )
+        
+        # Add annotation
+        fig.add_annotation(
+            x=split_time,
+            y=1.0,
+            yref="paper",
+            text="Train/Test Split",
+            showarrow=False,
+            yshift=10,
+            font=dict(color="red")
         )
     
     # 3. Plot selected models
