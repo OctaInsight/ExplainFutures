@@ -10,6 +10,12 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 import io
+from pathlib import Path
+import sys
+
+# Add project root to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
@@ -18,13 +24,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# Import sidebar (after page config!)
-try:
-    from shared_sidebar import render_app_sidebar
-    render_app_sidebar()
-except:
-    # Fallback if import fails
-    st.sidebar.title("📊 Scenario Matrix")
+# Import and render sidebar (after page config!)
+from shared_sidebar import render_app_sidebar
+render_app_sidebar()
 
 
 # ====== UTILITY FUNCTIONS ======
@@ -213,7 +215,7 @@ if 'scenario_parameters' not in st.session_state or not st.session_state.scenari
 scenarios = st.session_state.scenario_parameters
 
 # === STEP 1: GUIDE ===
-with st.expander("📖 **How to Use This Page**", expanded=True):
+with st.expander("📖 **How to Use This Page**", expanded=False):
     st.markdown("""
     ### Understanding Parameter Polarity
     
@@ -485,13 +487,13 @@ if st.session_state.get('polarity_confirmed', False):
         fig.add_shape(
             type="line",
             x0=0, y0=50, x1=100, y1=50,
-            line=dict(color="gray", width=1, dash="dash"),
+            line=dict(color="rgba(255, 255, 255, 0.5)", width=2, dash="dash"),
             layer="below"
         )
         fig.add_shape(
             type="line",
             x0=50, y0=0, x1=50, y1=100,
-            line=dict(color="gray", width=1, dash="dash"),
+            line=dict(color="rgba(255, 255, 255, 0.5)", width=2, dash="dash"),
             layer="below"
         )
         
@@ -538,23 +540,56 @@ if st.session_state.get('polarity_confirmed', False):
         
         # Update layout
         fig.update_layout(
-            title=f"Scenario Comparison: {x_category} vs {y_category}",
-            xaxis_title=f"{x_category} Score (0-100)",
-            yaxis_title=f"{y_category} Score (0-100)",
-            xaxis=dict(range=[0, 100], showgrid=True, gridwidth=0.5, gridcolor='lightgray'),
-            yaxis=dict(range=[0, 100], showgrid=True, gridwidth=0.5, gridcolor='lightgray'),
-            plot_bgcolor='white',
+            title=dict(
+                text=f"Scenario Comparison: {x_category} vs {y_category}",
+                font=dict(color='white', size=18)
+            ),
+            xaxis_title=dict(
+                text=f"{x_category} Score (0-100)",
+                font=dict(color='white', size=14)
+            ),
+            yaxis_title=dict(
+                text=f"{y_category} Score (0-100)",
+                font=dict(color='white', size=14)
+            ),
+            xaxis=dict(
+                range=[0, 100],
+                showgrid=True,
+                gridwidth=0.5,
+                gridcolor='rgba(255, 255, 255, 0.2)',
+                showticklabels=False,  # Hide tick numbers
+                tickvals=[],  # No tick values
+                zeroline=False,
+                color='white'
+            ),
+            yaxis=dict(
+                range=[0, 100],
+                showgrid=True,
+                gridwidth=0.5,
+                gridcolor='rgba(255, 255, 255, 0.2)',
+                showticklabels=False,  # Hide tick numbers
+                tickvals=[],  # No tick values
+                zeroline=False,
+                color='white'
+            ),
+            plot_bgcolor='#0E1117',  # Dark background
+            paper_bgcolor='#0E1117',  # Dark background
+            font=dict(color='white'),
             hovermode='closest',
             width=800,
             height=800,
-            showlegend=show_legend
+            showlegend=show_legend,
+            legend=dict(
+                font=dict(color='white'),
+                bgcolor='rgba(0,0,0,0.5)'
+            )
         )
         
         # Add quadrant labels
-        fig.add_annotation(x=75, y=75, text="High-High", showarrow=False, font=dict(size=12, color="gray"))
-        fig.add_annotation(x=25, y=75, text="Low-High", showarrow=False, font=dict(size=12, color="gray"))
-        fig.add_annotation(x=75, y=25, text="High-Low", showarrow=False, font=dict(size=12, color="gray"))
-        fig.add_annotation(x=25, y=25, text="Low-Low", showarrow=False, font=dict(size=12, color="gray"))
+        fig.add_annotation(x=75, y=75, text="High-High", showarrow=False, font=dict(size=12, color="white"))
+        fig.add_annotation(x=25, y=75, text="Low-High", showarrow=False, font=dict(size=12, color="white"))
+        fig.add_annotation(x=75, y=25, text="High-Low", showarrow=False, font=dict(size=12, color="white"))
+        fig.add_annotation(x=25, y=25, text="Low-Low", showarrow=False, font=dict(size=12, color="white"))
         
         # Display plot
         st.plotly_chart(fig, use_container_width=True)
