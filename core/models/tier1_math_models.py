@@ -38,11 +38,15 @@ def train_tier1_models(train_values: np.ndarray,
     results = {}
     
     # Convert timestamps to numeric (days since start)
-    all_timestamps = pd.DatetimeIndex(list(train_timestamps) + list(test_timestamps))
-    time_numeric = (all_timestamps - all_timestamps[0]).total_seconds() / 86400  # Days
+    # Combine first to ensure consistent reference point
+    all_timestamps = list(train_timestamps) + list(test_timestamps)
+    all_timestamps = pd.DatetimeIndex(all_timestamps)
     
-    X_train = time_numeric[:len(train_values)].reshape(-1, 1)
-    X_test = time_numeric[len(train_values):].reshape(-1, 1)
+    time_numeric = (all_timestamps - all_timestamps[0]).total_seconds().values / 86400  # Days as numpy array
+    
+    n_train = len(train_values)
+    X_train = time_numeric[:n_train].reshape(-1, 1)
+    X_test = time_numeric[n_train:].reshape(-1, 1)
     
     # 1. Linear Trend
     results['Linear Trend'] = train_linear_model(X_train, train_values, X_test, test_values)
