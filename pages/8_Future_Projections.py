@@ -243,7 +243,7 @@ def create_forecast_plot(variable: str,
                         customize: dict,
                         target_date: pd.Timestamp) -> go.Figure:
     """
-    Create forecast visualization showing ONLY the forecast timeframe
+    Create forecast visualization showing ALL historical data + forecast with margin
     
     Parameters:
     -----------
@@ -271,28 +271,16 @@ def create_forecast_plot(variable: str,
     """
     fig = go.Figure()
     
-    # Determine timeframe to show
-    # Show last portion of historical + all forecast up to target_date
-    last_historical_date = historical_timestamps[-1] if len(historical_timestamps) > 0 else forecast_timestamps[0]
-    
-    # Calculate how much historical to show (20% or last 30 days, whichever is less)
-    days_to_show_hist = min(30, int(len(historical_values) * 0.2))
-    hist_start_idx = max(0, len(historical_values) - days_to_show_hist)
-    
-    # Filter historical data to show
-    hist_values_to_show = historical_values[hist_start_idx:]
-    hist_timestamps_to_show = historical_timestamps[hist_start_idx:]
-    
     # Filter forecast to show only up to target_date
     forecast_mask = forecast_timestamps <= target_date
     forecast_values_to_show = forecast_values[forecast_mask]
     forecast_timestamps_to_show = forecast_timestamps[forecast_mask]
     
-    # Historical data
+    # Historical data (SHOW ALL)
     if customize.get('show_historical', True):
         fig.add_trace(go.Scatter(
-            x=hist_timestamps_to_show,
-            y=hist_values_to_show,
+            x=historical_timestamps,
+            y=historical_values,
             mode='markers',
             name='Historical Data',
             marker=dict(
@@ -319,8 +307,8 @@ def create_forecast_plot(variable: str,
     
     # Model line (connect historical and forecast)
     if customize.get('show_model_line', True):
-        all_times = list(hist_timestamps_to_show) + list(forecast_timestamps_to_show)
-        all_values = list(hist_values_to_show) + list(forecast_values_to_show)
+        all_times = list(historical_timestamps) + list(forecast_timestamps_to_show)
+        all_values = list(historical_values) + list(forecast_values_to_show)
         
         fig.add_trace(go.Scatter(
             x=all_times,
@@ -359,6 +347,15 @@ def create_forecast_plot(variable: str,
             font=dict(color="red")
         )
     
+    # Calculate X-axis range with margin
+    # Start: First historical date
+    x_start = historical_timestamps[0] if len(historical_timestamps) > 0 else forecast_timestamps_to_show[0]
+    
+    # End: Target date + 10% margin
+    total_span = (target_date - x_start).days
+    margin_days = int(total_span * 0.1)  # 10% margin
+    x_end = target_date + timedelta(days=margin_days)
+    
     # Layout with explicit X-axis range
     fig.update_layout(
         title=f"{variable} - Historical Data & Forecast (to {target_date.strftime('%Y-%m-%d')})",
@@ -377,8 +374,7 @@ def create_forecast_plot(variable: str,
             font=dict(color='black', size=11)
         ),
         xaxis=dict(
-            range=[hist_timestamps_to_show[0] if len(hist_timestamps_to_show) > 0 else forecast_timestamps_to_show[0],
-                   target_date]
+            range=[x_start, x_end]
         )
     )
     
