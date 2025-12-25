@@ -25,7 +25,7 @@ st.set_page_config(
 )
 
 # Import and render sidebar (after page config!)
-from shared_sidebar import render_app_sidebar
+from core.shared_sidebar import render_app_sidebar
 render_app_sidebar()
 
 
