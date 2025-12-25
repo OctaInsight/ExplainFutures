@@ -316,7 +316,7 @@ def display_variable_tab(series_name: str):
         st.warning("No models were trained successfully for this variable")
         return
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         model1 = st.selectbox(
@@ -342,14 +342,42 @@ def display_variable_tab(series_name: str):
             key=f"model3_{series_name}"
         )
     
-    with col4:
-        # Scatter plot customization
-        with st.popover("🎨 Customize"):
-            marker_size = st.slider("Point Size", 1, 10, 4, key=f"size_{series_name}")
-            marker_color = st.color_picker("Point Color", "#000000", key=f"color_{series_name}")
-    
     # Get selected models (exclude "None")
     selected_models = [m for m in [model1, model2, model3] if m != "None"]
+    
+    st.markdown("---")
+    
+    # === SCATTER PLOT CUSTOMIZATION (Below dropdowns) ===
+    st.markdown("#### 🎨 Customize Plot")
+    
+    col_a, col_b, col_c, col_d = st.columns(4)
+    
+    with col_a:
+        marker_size = st.slider("Point Size", 1, 15, 6, key=f"size_{series_name}")
+        marker_color = st.color_picker("Point Color", "#000000", key=f"color_{series_name}")
+    
+    with col_b:
+        plot_mode = st.selectbox(
+            "Plot Style",
+            ["Points Only", "Points + Lines"],
+            index=0,
+            key=f"mode_{series_name}"
+        )
+        mode = 'markers' if plot_mode == "Points Only" else 'lines+markers'
+    
+    with col_c:
+        y_scale = st.selectbox(
+            "Y-axis Scale",
+            ["Linear", "Logarithmic"],
+            index=0,
+            key=f"yscale_{series_name}"
+        )
+    
+    with col_d:
+        auto_range = st.checkbox("Auto Y-range", value=True, key=f"auto_{series_name}")
+        if not auto_range:
+            y_min = st.number_input("Y min", value=0.0, key=f"ymin_{series_name}")
+            y_max = st.number_input("Y max", value=100.0, key=f"ymax_{series_name}")
     
     if len(selected_models) == 0:
         st.info("👆 Select at least one model to visualize")
@@ -371,9 +399,18 @@ def display_variable_tab(series_name: str):
             split_index=split_index
         )
         
-        # Update marker style based on user preferences
+        # Apply user customizations
+        fig.data[0].mode = mode
         fig.data[0].marker.size = marker_size
         fig.data[0].marker.color = marker_color
+        
+        # Apply Y-axis scale
+        if y_scale == "Logarithmic":
+            fig.update_yaxes(type="log")
+        
+        # Apply Y-axis range
+        if not auto_range:
+            fig.update_yaxes(range=[y_min, y_max])
         
         st.plotly_chart(fig, use_container_width=True)
         
