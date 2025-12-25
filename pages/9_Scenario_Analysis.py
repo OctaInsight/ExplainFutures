@@ -293,64 +293,77 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
     
     st.markdown("---")
     
-    # Display items as editable table
+    # Display items as individual rows for easier editing
     if scenario['items']:
         
-        st.markdown("#### 📋 Parameters")
+        st.markdown("#### 📋 Parameters (Edit individually)")
         
-        # Create DataFrame for editing
-        items_data = []
-        for item in scenario['items']:
-            items_data.append({
-                'Parameter': item['parameter'],
-                'Direction': item['direction'],
-                'Value': item['value'] if item['value'] is not None else '',
-                'Unit': item['unit'],
-                'Confidence': f"{item['confidence']:.0%}",
-                'Source': item['source_sentence'][:50] + '...' if len(item['source_sentence']) > 50 else item['source_sentence']
-            })
-        
-        df_items = pd.DataFrame(items_data)
-        
-        # Use data_editor for interactive editing
-        edited_df = st.data_editor(
-            df_items,
-            column_config={
-                "Parameter": st.column_config.TextColumn("Parameter", required=True, width="medium"),
-                "Direction": st.column_config.SelectboxColumn(
-                    "Direction",
-                    options=["increase", "decrease", "target", "stable", "double", "halve"],
-                    required=True,
-                    width="small"
-                ),
-                "Value": st.column_config.NumberColumn("Value", min_value=0, width="small"),
-                "Unit": st.column_config.SelectboxColumn(
-                    "Unit",
-                    options=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GW", "TWh"],
-                    width="small"
-                ),
-                "Confidence": st.column_config.TextColumn("Confidence", disabled=True, width="small"),
-                "Source": st.column_config.TextColumn("Source Sentence", width="large")
-            },
-            num_rows="dynamic",  # Allow adding/removing rows
-            use_container_width=True,
-            key=f"editor_{scenario_idx}"
-        )
-        
-        # Update scenario items from edited dataframe
-        updated_items = []
-        for idx, row in edited_df.iterrows():
-            updated_items.append({
-                'parameter': row['Parameter'],
-                'direction': row['Direction'],
-                'value': row['Value'] if row['Value'] != '' else None,
-                'unit': row['Unit'],
-                'value_type': 'percent' if row['Unit'] == '%' else 'absolute',
-                'confidence': scenario['items'][idx]['confidence'] if idx < len(scenario['items']) else 0.5,
-                'source_sentence': row['Source']
-            })
-        
-        scenario['items'] = updated_items
+        # Edit each item individually
+        for item_idx, item in enumerate(scenario['items']):
+            with st.container():
+                st.markdown(f"**Parameter {item_idx + 1}:**")
+                
+                col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
+                
+                with col1:
+                    param_name = st.text_input(
+                        "Parameter Name",
+                        value=item['parameter'],
+                        key=f"param_{scenario_idx}_{item_idx}",
+                        label_visibility="collapsed"
+                    )
+                    item['parameter'] = param_name
+                
+                with col2:
+                    direction = st.selectbox(
+                        "Direction",
+                        options=["increase", "decrease", "target", "stable", "double", "halve"],
+                        index=["increase", "decrease", "target", "stable", "double", "halve"].index(item['direction']) if item['direction'] in ["increase", "decrease", "target", "stable", "double", "halve"] else 0,
+                        key=f"dir_{scenario_idx}_{item_idx}",
+                        label_visibility="collapsed"
+                    )
+                    item['direction'] = direction
+                
+                with col3:
+                    # Convert value to float if it's string
+                    current_value = item.get('value', 0.0)
+                    if isinstance(current_value, str):
+                        try:
+                            current_value = float(current_value) if current_value.strip() else 0.0
+                        except:
+                            current_value = 0.0
+                    elif current_value is None:
+                        current_value = 0.0
+                    
+                    value = st.number_input(
+                        "Value",
+                        min_value=0.0,
+                        max_value=1000000.0,
+                        value=float(current_value),
+                        step=0.1,
+                        key=f"val_{scenario_idx}_{item_idx}",
+                        label_visibility="collapsed"
+                    )
+                    item['value'] = value
+                
+                with col4:
+                    unit = st.selectbox(
+                        "Unit",
+                        options=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GW", "TWh"],
+                        index=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GW", "TWh"].index(item.get('unit', '')) if item.get('unit', '') in ["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GW", "TWh"] else 0,
+                        key=f"unit_{scenario_idx}_{item_idx}",
+                        label_visibility="collapsed"
+                    )
+                    item['unit'] = unit
+                    item['value_type'] = 'percent' if unit == '%' else 'absolute'
+                
+                with col5:
+                    if st.button("🗑️", key=f"del_{scenario_idx}_{item_idx}", help="Delete parameter"):
+                        scenario['items'].pop(item_idx)
+                        st.session_state.detected_scenarios[scenario_idx] = scenario
+                        st.rerun()
+                
+                st.markdown("---")
         
         # Update in session state
         st.session_state.detected_scenarios[scenario_idx] = scenario
@@ -363,7 +376,7 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
         new_item = {
             'parameter': 'New Parameter',
             'direction': 'increase',
-            'value': None,
+            'value': 0.0,
             'unit': '',
             'value_type': 'absolute',
             'confidence': 0.5,
