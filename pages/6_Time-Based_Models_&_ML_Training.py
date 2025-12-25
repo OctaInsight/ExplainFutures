@@ -200,6 +200,7 @@ def main():
         # Progress tracking
         progress_bar = st.progress(0)
         status_text = st.empty()
+        error_container = st.container()
         
         # Train for each selected series
         for idx, series_name in enumerate(selected_series):
@@ -207,27 +208,43 @@ def main():
             
             try:
                 # Get REAL series data
-                series_data = get_series_data(series_name)
+                with st.spinner(f"Loading data for {series_name}..."):
+                    series_data = get_series_data(series_name)
+                    
+                # Debug: Show data info
+                st.info(f"✓ Loaded {series_name}: {len(series_data['values'])} data points")
                 
                 # Train all models using the real trainer
-                results = train_all_models_for_variable(
-                    variable_name=series_name,
-                    series_data=series_data,
-                    train_split=train_split,
-                    detect_seasonality=True
-                )
+                with st.spinner(f"Training models for {series_name}..."):
+                    results = train_all_models_for_variable(
+                        variable_name=series_name,
+                        series_data=series_data,
+                        train_split=train_split,
+                        detect_seasonality=True
+                    )
                 
-                # Store results
-                st.session_state.trained_models[series_name] = results
+                # Check if training was successful
+                if results.get('success', False):
+                    total_models = results.get('total_models', 0)
+                    st.success(f"✓ Trained {total_models} models for {series_name}")
+                    
+                    # Store results
+                    st.session_state.trained_models[series_name] = results
+                else:
+                    error_msg = results.get('error', 'Unknown error')
+                    with error_container:
+                        st.error(f"❌ Training failed for {series_name}: {error_msg}")
                 
                 # Update progress
                 progress = (idx + 1) / len(selected_series)
                 progress_bar.progress(progress)
                 
             except Exception as e:
-                st.error(f"Error training {series_name}: {str(e)}")
-                import traceback
-                st.code(traceback.format_exc())
+                with error_container:
+                    st.error(f"❌ Error training {series_name}: {str(e)}")
+                    with st.expander("Show full error details"):
+                        import traceback
+                        st.code(traceback.format_exc())
                 continue
         
         # Complete
