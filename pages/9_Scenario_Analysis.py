@@ -70,13 +70,14 @@ def display_editable_comparison_table():
     ONE SIMPLE TABLE - All editing in one place
     
     Features:
-    - Parameters grouped by category (Economic, Environmental, Social, etc.)
+    - Category column (editable) - rename categories or reassign parameters
+    - Parameters grouped by category
     - All editing in table
     - Clean UI without clutter
     """
     
     st.markdown("### 📊 Edit All Parameters")
-    st.caption("✏️ Click any cell to edit • Parameters grouped by category")
+    st.caption("✏️ Click any cell to edit • Edit category column to rename categories or reassign parameters")
     
     scenarios = st.session_state.detected_scenarios
     
@@ -90,8 +91,15 @@ def display_editable_comparison_table():
             param_name = item.get('parameter_canonical', item.get('parameter', ''))
             
             if param_name not in all_params_data:
+                # Use stored category if available, otherwise auto-categorize
+                stored_category = item.get('category', '')
+                if stored_category:
+                    category = stored_category
+                else:
+                    category = categorize_parameter(param_name)
+                
                 all_params_data[param_name] = {
-                    'category': categorize_parameter(param_name),
+                    'category': category,
                     'sources_by_scenario': {},
                     'items_by_scenario': {}
                 }
@@ -105,33 +113,14 @@ def display_editable_comparison_table():
         key=lambda x: (x[1]['category'], x[0])
     )
     
-    # Build table with category grouping
+    # Build table with category column
     table_data = []
-    current_category = None
     
     for param_name, param_data in sorted_params:
-        # Add category header row if category changed
-        if param_data['category'] != current_category:
-            current_category = param_data['category']
-            # Add separator row
-            separator_row = {
-                'Parameter': f"━━━ {current_category} ━━━",
-                '_is_category_header': True,
-                '_sources': {}
-            }
-            
-            for scenario in scenarios:
-                short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
-                separator_row[f"{short_title}_Value"] = None
-                separator_row[f"{short_title}_Direction"] = None
-                separator_row[f"{short_title}_Unit"] = None
-            
-            table_data.append(separator_row)
-        
-        # Add parameter row
+        # Add parameter row with category
         row = {
+            'Category': param_data['category'],
             'Parameter': param_name,
-            '_is_category_header': False,
             '_sources': param_data['sources_by_scenario']  # Store all sources for future use
         }
         
@@ -158,20 +147,26 @@ def display_editable_comparison_table():
         df = pd.DataFrame(table_data)
     else:
         # Empty table
-        columns = ['Parameter', '_is_category_header', '_sources']
+        columns = ['Category', 'Parameter', '_sources']
         for scenario in scenarios:
             short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
             columns.extend([f"{short_title}_Value", f"{short_title}_Direction", f"{short_title}_Unit"])
         df = pd.DataFrame(columns=columns)
     
     # Remove internal columns from display
-    display_df = df.drop(columns=['_is_category_header', '_sources'], errors='ignore')
+    display_df = df.drop(columns=['_sources'], errors='ignore')
     
     # Configure columns
     column_config = {
+        "Category": st.column_config.TextColumn(
+            "Category",
+            help="Category (editable) - rename or reassign parameters to different categories",
+            required=True,
+            width="medium"
+        ),
         "Parameter": st.column_config.TextColumn(
             "Parameter Name",
-            help="Parameter name - Category headers start with ━━━",
+            help="Parameter name (editable)",
             required=True,
             width="medium"
         )
@@ -204,7 +199,7 @@ def display_editable_comparison_table():
             width="small"
         )
     
-    st.caption("💡 Category headers (━━━) are not editable")
+    st.caption("💡 Edit Category column to rename categories or reassign parameters • All columns are editable")
     
     edited_df = st.data_editor(
         display_df,
@@ -220,9 +215,7 @@ def display_editable_comparison_table():
     
     with col1:
         if st.button("💾 Save All Changes", type="primary", use_container_width=True):
-            # Filter out category headers before saving
-            save_df = edited_df[~edited_df['Parameter'].str.startswith('━━━', na=False)].copy()
-            save_table_to_scenarios(save_df, scenarios)
+            save_table_to_scenarios(edited_df, scenarios)
             st.success("✅ All changes saved to scenarios!")
             st.rerun()
     
@@ -235,32 +228,6 @@ def display_editable_comparison_table():
         if st.button("❌ Close", use_container_width=True):
             st.session_state.show_comparison_table = False
             st.rerun()
-    
-    # Export buttons
-    st.markdown("**📥 Export Table**")
-    
-    col_exp1, col_exp2 = st.columns(2)
-    
-    with col_exp1:
-        csv_data = edited_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download CSV",
-            data=csv_data,
-            file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
-    
-    with col_exp2:
-        excel_buffer = io.BytesIO()
-        edited_df.to_excel(excel_buffer, index=False, engine='openpyxl')
-        st.download_button(
-            label="📥 Download Excel",
-            data=excel_buffer.getvalue(),
-            file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
 
 
 def categorize_parameter(param_name: str) -> str:
@@ -322,7 +289,7 @@ def save_table_to_scenarios(edited_df, scenarios):
     Parameters:
     -----------
     edited_df : DataFrame
-        Edited table from st.data_editor
+        Edited table from st.data_editor (includes Category column)
     scenarios : list
         List of scenario objects
     """
@@ -333,6 +300,7 @@ def save_table_to_scenarios(edited_df, scenarios):
     
     # Process each row in the edited table
     for _, row in edited_df.iterrows():
+        category = row.get('Category', '')
         param_name = row['Parameter']
         
         if pd.isna(param_name) or param_name == '':
@@ -364,6 +332,7 @@ def save_table_to_scenarios(edited_df, scenarios):
                 item = {
                     'parameter': param_name,
                     'parameter_canonical': param_name,
+                    'category': category if pd.notna(category) else 'Other',  # Store category
                     'direction': direction,
                     'value': float(value) if value is not None else None,
                     'unit': unit,
@@ -962,6 +931,7 @@ Renewable energy reaches 40% by 2040.""",
         with col_btn1:
             if st.button("📊 Open Parameter Editor", type="primary", use_container_width=True):
                 st.session_state.show_comparison_table = True
+                st.session_state.parameters_reviewed = True  # Mark as reviewed
                 st.rerun()
         
         with col_btn2:
@@ -971,33 +941,37 @@ Renewable energy reaches 40% by 2040.""",
         if st.session_state.get('show_comparison_table', False):
             display_editable_comparison_table()
         
-        # === STEP 3: CLEANED SCENARIOS ===
-        st.markdown("---")
-        st.subheader("📄 Step 3: Review Cleaned Scenarios")
+        # === STEP 3: CLEANED SCENARIOS (Only show after parameters reviewed) ===
+        if st.session_state.get('parameters_reviewed', False):
+            st.markdown("---")
+            st.subheader("📄 Step 3: Review Cleaned Scenarios")
+            
+            if st.button("✨ Generate Cleaned Scenario Text", type="primary"):
+                generate_cleaned_scenarios()
+                st.session_state.scenarios_cleaned = True  # Mark as cleaned
+            
+            if st.session_state.cleaned_scenarios:
+                display_cleaned_scenarios()
         
-        if st.button("✨ Generate Cleaned Scenario Text", type="primary"):
-            generate_cleaned_scenarios()
-        
-        if st.session_state.cleaned_scenarios:
-            display_cleaned_scenarios()
-        
-        # === STEP 4: MAPPING TO DATASET VARIABLES ===
-        st.markdown("---")
-        st.subheader("🔗 Step 4: Map to Dataset Variables")
-        
-        # Check if data is available
-        if st.session_state.get('df_long') is not None:
-            display_mapping_interface()
-        else:
-            st.info("ℹ️ No dataset loaded. Scenario analysis will work in **standalone mode**.")
-            st.markdown("*To enable mapping, load data in the Data Upload page.*")
-        
-        # === STEP 5: CATEGORICAL COMPARISON PLOTS ===
-        st.markdown("---")
-        st.subheader("📊 Step 5: Visualize Scenarios by Category")
-        st.caption("Scatter plots showing parameter values across scenarios, grouped by category")
-        
-        display_categorical_comparison_plots()
+            # === STEP 4: MAPPING TO DATASET VARIABLES (Only show after scenarios cleaned) ===
+            if st.session_state.get('scenarios_cleaned', False):
+                st.markdown("---")
+                st.subheader("🔗 Step 4: Map to Dataset Variables")
+                
+                # Check if data is available
+                if st.session_state.get('df_long') is not None:
+                    display_mapping_interface()
+                else:
+                    st.info("ℹ️ No dataset loaded. Scenario analysis will work in **standalone mode**.")
+                    st.markdown("*To enable mapping, load data in the Data Upload page.*")
+            
+            # === STEP 5: CATEGORICAL COMPARISON PLOTS (Only show after scenarios cleaned) ===
+            if st.session_state.get('scenarios_cleaned', False):
+                st.markdown("---")
+                st.subheader("📊 Step 5: Visualize Scenarios by Category")
+                st.caption("Scatter plots showing parameter values across scenarios, grouped by category")
+                
+                display_categorical_comparison_plots()
 
 
 def display_categorical_comparison_plots():
@@ -1100,12 +1074,40 @@ def display_categorical_comparison_plots():
             )
             
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Export buttons for this plot
+            col_exp1, col_exp2 = st.columns(2)
+            
+            with col_exp1:
+                # Export plot as HTML
+                html_buffer = io.StringIO()
+                fig.write_html(html_buffer)
+                st.download_button(
+                    label="📥 Download Plot (HTML)",
+                    data=html_buffer.getvalue(),
+                    file_name=f"{category.replace('. ', '_').lower()}_plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                    mime="text/html",
+                    use_container_width=True,
+                    key=f"export_html_{category}"
+                )
+            
+            with col_exp2:
+                # Export data as CSV
+                csv_data = df_plot.to_csv(index=False)
+                st.download_button(
+                    label="📥 Download Data (CSV)",
+                    data=csv_data,
+                    file_name=f"{category.replace('. ', '_').lower()}_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key=f"export_csv_{category}"
+                )
         
         else:
             # Multiple units - create tabs for each unit
             unit_tabs = st.tabs([f"{u if u else 'Absolute'}" for u in units_in_category])
             
-            for tab, unit in zip(unit_tabs, units_in_category):
+            for tab_idx, (tab, unit) in enumerate(zip(unit_tabs, units_in_category)):
                 with tab:
                     df_unit = df_plot[df_plot['Unit'] == unit]
                     
@@ -1129,6 +1131,34 @@ def display_categorical_comparison_plots():
                     )
                     
                     st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Export buttons for this tab
+                    col_exp1, col_exp2 = st.columns(2)
+                    
+                    with col_exp1:
+                        # Export plot as HTML
+                        html_buffer = io.StringIO()
+                        fig.write_html(html_buffer)
+                        st.download_button(
+                            label="📥 Download Plot (HTML)",
+                            data=html_buffer.getvalue(),
+                            file_name=f"{category.replace('. ', '_').lower()}_{unit}_plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                            mime="text/html",
+                            use_container_width=True,
+                            key=f"export_html_{category}_{tab_idx}"
+                        )
+                    
+                    with col_exp2:
+                        # Export data as CSV
+                        csv_data = df_unit.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Download Data (CSV)",
+                            data=csv_data,
+                            file_name=f"{category.replace('. ', '_').lower()}_{unit}_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key=f"export_csv_{category}_{tab_idx}"
+                        )
 
 
 def display_scenario_editor(scenario: dict, scenario_idx: int):
