@@ -12,7 +12,7 @@ import base64
 
 def get_logo_base64():
     """Get logo as base64 string for embedding"""
-    logo_path = Path(__file__).parent.parent / "assets" / "logo_small.png"
+    logo_path = Path(__file__).parent / "assets" / "logo_small.png"
     try:
         with open(logo_path, "rb") as f:
             return base64.b64encode(f.read()).decode()
@@ -23,13 +23,6 @@ def render_app_sidebar():
     """
     Render the application sidebar with logo, status, and info
     This function should be called at the top of every page AFTER st.set_page_config()
-    
-    Usage in page files:
-        import streamlit as st
-        from shared_sidebar import render_app_sidebar
-        
-        st.set_page_config(...)  # First!
-        render_app_sidebar()      # Then this!
     """
     
     # Try to get logo as base64
@@ -54,42 +47,6 @@ def render_app_sidebar():
                 <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
             </div>
         """, unsafe_allow_html=True)
-    
-    st.sidebar.markdown("---")
-    
-    # PATH A Section
-    st.sidebar.markdown("""
-        <div style='background-color: #262730; padding: 10px; border-radius: 5px; margin: 10px 0; border-left: 3px solid #FF4B4B;'>
-            <h3 style='color: #FF4B4B; font-size: 14px; margin: 0 0 5px 0;'>📊 PATH A: HISTORICAL DATA</h3>
-            <p style='color: #FAFAFA; font-size: 12px; margin: 0; opacity: 0.8;'>Analyze historical data and predict trends</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    st.sidebar.caption("Pages 1-8 for historical analysis")
-    
-    st.sidebar.markdown("---")
-    
-    # PATH B Section
-    st.sidebar.markdown("""
-        <div style='background-color: #262730; padding: 10px; border-radius: 5px; margin: 10px 0; border-left: 3px solid #4B8BFF;'>
-            <h3 style='color: #4B8BFF; font-size: 14px; margin: 0 0 5px 0;'>📝 PATH B: SCENARIOS</h3>
-            <p style='color: #FAFAFA; font-size: 12px; margin: 0; opacity: 0.8;'>Extract and define scenario parameters</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    st.sidebar.caption("Pages 9-10 for scenario definition")
-    
-    st.sidebar.markdown("---")
-    
-    # INTEGRATION Section
-    st.sidebar.markdown("""
-        <div style='background-color: #262730; padding: 10px; border-radius: 5px; margin: 10px 0; border-left: 3px solid #4BFF8B;'>
-            <h3 style='color: #4BFF8B; font-size: 14px; margin: 0 0 5px 0;'>🎯 INTEGRATION</h3>
-            <p style='color: #FAFAFA; font-size: 12px; margin: 0; opacity: 0.8;'>Compare scenarios with historical data</p>
-        </div>
-    """, unsafe_allow_html=True)
-    
-    st.sidebar.caption("Page 11 for combined analysis")
     
     st.sidebar.markdown("---")
     
