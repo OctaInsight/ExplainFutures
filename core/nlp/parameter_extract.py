@@ -74,14 +74,16 @@ def extract_horizon(text: str) -> Optional[int]:
 
 def extract_items_from_text(text: str) -> List[Dict]:
     """
-    Extract parameter items from text using multi-pass approach
+    Extract parameter items from text using HYBRID approach
     
-    OPTION B: Comprehensive extraction with:
+    HYBRID SYSTEM (Option B + GLiNER):
     - Pass 1: Template matching
-    - Pass 2: spaCy extraction
+    - Pass 2: spaCy extraction  
     - Pass 3: Regex extraction
-    - Pass 4: Merge and unify
+    - Pass 4: Unify parameter names
     - Pass 5: Deduplicate
+    - Pass 6: GLiNER ML extraction (NEW!)
+    - Pass 7: Merge Option B + GLiNER (BEST ACCURACY!)
     
     Returns list of items with:
     - parameter name (original and canonical)
@@ -89,6 +91,7 @@ def extract_items_from_text(text: str) -> List[Dict]:
     - value (if specified)
     - unit
     - confidence score
+    - extraction_method (hybrid_both, optionb_only, gliner_only)
     """
     
     # Split into sentences
@@ -96,6 +99,8 @@ def extract_items_from_text(text: str) -> List[Dict]:
     
     all_items = []
     context = {'last_subject': None}
+    
+    # ===== OPTION B EXTRACTION =====
     
     # PASS 1: Template-based extraction (highest priority)
     from .templates import extract_with_templates
@@ -129,6 +134,27 @@ def extract_items_from_text(text: str) -> List[Dict]:
     # PASS 5: Deduplicate and merge
     all_items = deduplicate_items(all_items)
     all_items = merge_similar_parameters(all_items, similarity_threshold=0.85)
+    
+    # ===== HYBRID WITH GLINER ML =====
+    
+    # PASS 6 & 7: Use hybrid extraction (Option B + GLiNER)
+    try:
+        from .ml_extractor import hybrid_extract, is_gliner_available
+        
+        if is_gliner_available():
+            # Combine Option B results with GLiNER
+            all_items = hybrid_extract(text, all_items)
+        else:
+            # GLiNER not available - mark items as Option B only
+            for item in all_items:
+                if 'extraction_method' not in item:
+                    item['extraction_method'] = 'optionb'
+    
+    except ImportError:
+        # ml_extractor not available - just use Option B
+        for item in all_items:
+            if 'extraction_method' not in item:
+                item['extraction_method'] = 'optionb'
     
     # Sort by confidence
     all_items.sort(key=lambda x: x.get('confidence', 0), reverse=True)
