@@ -69,50 +69,80 @@ def display_editable_comparison_table():
     """
     ONE SIMPLE TABLE - All editing in one place
     
-    Table structure:
-    Parameter | Scen1_Value | Scen1_Direction | Scen1_Unit | Scen2_Value | Scen2_Direction | Scen2_Unit | ...
-    
-    - Click any cell to edit
-    - Add/delete rows directly
-    - Auto-saves on any change
+    Features:
+    - Parameters grouped by category (Economic, Environmental, Social, etc.)
+    - Click parameter name to see source sentence
+    - All editing in table
     """
     
     st.markdown("### 📊 Edit All Parameters")
-    st.caption("✏️ Click any cell to edit • ➕ Add rows to add parameters • 🗑️ Delete rows to remove parameters")
+    st.caption("✏️ Click any cell to edit • Click parameter name to see source sentence • ➕ Add rows to add parameters")
     
     scenarios = st.session_state.detected_scenarios
     
-    # Collect all unique parameters
-    all_params = set()
-    scenario_data = {}  # {scenario_id: {param: item}}
+    # Collect all unique parameters with their metadata
+    all_params_data = {}  # {param_name: {category, source_sentence, items_by_scenario}}
     
     for scenario in scenarios:
         scenario_id = scenario['id']
-        scenario_data[scenario_id] = {}
         
         for item in scenario['items']:
             param_name = item.get('parameter_canonical', item.get('parameter', ''))
-            all_params.add(param_name)
-            scenario_data[scenario_id][param_name] = item
+            
+            if param_name not in all_params_data:
+                all_params_data[param_name] = {
+                    'category': categorize_parameter(param_name),
+                    'source_sentence': item.get('source_sentence', ''),
+                    'items_by_scenario': {}
+                }
+            
+            all_params_data[param_name]['items_by_scenario'][scenario_id] = item
+            
+            # Update source sentence if this one is better (longer/more specific)
+            current_source = all_params_data[param_name]['source_sentence']
+            new_source = item.get('source_sentence', '')
+            if len(new_source) > len(current_source):
+                all_params_data[param_name]['source_sentence'] = new_source
     
-    all_params = sorted(list(all_params))
+    # Sort parameters by category, then alphabetically
+    sorted_params = sorted(
+        all_params_data.items(),
+        key=lambda x: (x[1]['category'], x[0])
+    )
     
-    # Build table with columns for each scenario
+    # Build table with category grouping
     table_data = []
+    current_category = None
     
-    for param in all_params:
-        row = {'Parameter': param}
+    for param_name, param_data in sorted_params:
+        # Add category header row if category changed
+        if param_data['category'] != current_category:
+            current_category = param_data['category']
+            # Add separator row
+            separator_row = {'Parameter': f"━━━ {current_category} ━━━", '_is_category_header': True}
+            
+            for scenario in scenarios:
+                short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
+                separator_row[f"{short_title}_Value"] = None
+                separator_row[f"{short_title}_Direction"] = None
+                separator_row[f"{short_title}_Unit"] = None
+            
+            table_data.append(separator_row)
+        
+        # Add parameter row
+        row = {
+            'Parameter': param_name,
+            '_source_sentence': param_data['source_sentence'],
+            '_is_category_header': False
+        }
         
         # Add value, direction, unit for each scenario
         for scenario in scenarios:
-            scenario_title = scenario['title']
             scenario_id = scenario['id']
+            short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
             
-            # Shorten scenario title for column headers
-            short_title = scenario_title[:20] if len(scenario_title) > 20 else scenario_title
-            
-            if param in scenario_data[scenario_id]:
-                item = scenario_data[scenario_id][param]
+            if scenario_id in param_data['items_by_scenario']:
+                item = param_data['items_by_scenario'][scenario_id]
                 row[f"{short_title}_Value"] = item.get('value', 0.0) if item.get('value') is not None else 0.0
                 row[f"{short_title}_Direction"] = item.get('direction', 'target')
                 row[f"{short_title}_Unit"] = item.get('unit', '%')
@@ -128,18 +158,71 @@ def display_editable_comparison_table():
     if table_data:
         df = pd.DataFrame(table_data)
     else:
-        # Empty table - create with structure
-        columns = ['Parameter']
+        # Empty table
+        columns = ['Parameter', '_source_sentence', '_is_category_header']
         for scenario in scenarios:
             short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
             columns.extend([f"{short_title}_Value", f"{short_title}_Direction", f"{short_title}_Unit"])
         df = pd.DataFrame(columns=columns)
     
-    # Configure column types
+    # === SHOW SOURCE SENTENCE VIEWER ===
+    st.markdown("---")
+    st.markdown("### 📝 View Source Sentence")
+    
+    # Get list of actual parameters (not category headers)
+    actual_params = [row['Parameter'] for _, row in df.iterrows() 
+                     if not row.get('_is_category_header', False)]
+    
+    if actual_params:
+        selected_param_for_source = st.selectbox(
+            "Select parameter to see its source sentence:",
+            options=actual_params,
+            key="source_sentence_selector"
+        )
+        
+        # Find source sentence
+        source_sentence = df[df['Parameter'] == selected_param_for_source]['_source_sentence'].iloc[0]
+        
+        if source_sentence and source_sentence.strip():
+            # Highlight the parameter in the sentence
+            param_lower = selected_param_for_source.lower()
+            sentence_lower = source_sentence.lower()
+            
+            if param_lower in sentence_lower:
+                # Find position and extract context
+                idx = sentence_lower.find(param_lower)
+                start = max(0, idx - 30)
+                end = min(len(source_sentence), idx + len(selected_param_for_source) + 30)
+                
+                context = source_sentence[start:end]
+                if start > 0:
+                    context = "..." + context
+                if end < len(source_sentence):
+                    context = context + "..."
+                
+                st.info(f"**Source:** *\"{context}\"*")
+            else:
+                # Show full sentence (truncated if too long)
+                if len(source_sentence) > 200:
+                    display = source_sentence[:200] + "..."
+                else:
+                    display = source_sentence
+                st.info(f"**Source:** *\"{display}\"*")
+        else:
+            st.warning("No source sentence available for this parameter")
+    
+    # === DISPLAY EDITABLE TABLE ===
+    st.markdown("---")
+    st.markdown("### ✏️ Edit Parameters")
+    
+    # Remove internal columns from display
+    display_df = df.drop(columns=['_source_sentence', '_is_category_header'], errors='ignore')
+    
+    # Configure columns
     column_config = {
         "Parameter": st.column_config.TextColumn(
             "Parameter Name",
-            help="Parameter name (e.g., GDP, Emissions)",
+            help="Parameter name - Category headers start with ━━━",
             required=True,
             width="medium"
         )
@@ -172,13 +255,12 @@ def display_editable_comparison_table():
             width="small"
         )
     
-    # Display editable table
-    st.markdown("**💡 Tip:** Click 'Parameter' to edit name • Click values to edit • Add rows at bottom • Delete rows with checkbox")
+    st.caption("💡 Category headers (━━━) are not editable - only edit parameter rows")
     
     edited_df = st.data_editor(
-        df,
+        display_df,
         column_config=column_config,
-        num_rows="dynamic",  # Allow adding/deleting rows
+        num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
         key="one_table_editor"
@@ -191,7 +273,9 @@ def display_editable_comparison_table():
     
     with col1:
         if st.button("💾 Save All Changes", type="primary", use_container_width=True):
-            save_table_to_scenarios(edited_df, scenarios)
+            # Filter out category headers before saving
+            save_df = edited_df[~edited_df['Parameter'].str.startswith('━━━', na=False)]
+            save_table_to_scenarios(save_df, scenarios)
             st.success("✅ All changes saved to scenarios!")
             st.rerun()
     
@@ -205,64 +289,84 @@ def display_editable_comparison_table():
             st.session_state.show_comparison_table = False
             st.rerun()
     
-    # === QUICK ACTIONS ===
+    # === EXPORT ===
     st.markdown("---")
-    st.markdown("### ⚡ Quick Actions")
+    st.markdown("### 📥 Export Table")
     
-    col_action1, col_action2 = st.columns(2)
+    col_exp1, col_exp2 = st.columns(2)
     
-    with col_action1:
-        st.markdown("**🔗 Merge Parameters**")
-        
-        # Get unique parameters from edited table
-        unique_params = edited_df['Parameter'].dropna().unique().tolist()
-        
-        if len(unique_params) >= 2:
-            merge_from = st.selectbox(
-                "Merge this:",
-                options=unique_params,
-                key="quick_merge_from"
-            )
-            
-            merge_to = st.selectbox(
-                "Into this:",
-                options=unique_params,
-                key="quick_merge_to"
-            )
-            
-            if st.button("🔗 Merge Now", key="quick_merge_btn"):
-                if merge_from == merge_to:
-                    st.error("Cannot merge into itself")
-                else:
-                    # Merge in the dataframe
-                    edited_df['Parameter'] = edited_df['Parameter'].replace(merge_from, merge_to)
-                    st.success(f"Merged '{merge_from}' → '{merge_to}'. Click 'Save All Changes' to apply.")
-                    st.rerun()
-        else:
-            st.info("Need at least 2 parameters to merge")
-    
-    with col_action2:
-        st.markdown("**📥 Export Table**")
-        
-        # Export current state
+    with col_exp1:
         csv_data = edited_df.to_csv(index=False)
         st.download_button(
-            label="📥 Download as CSV",
+            label="📥 Download CSV",
             data=csv_data,
             file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
             mime="text/csv",
             use_container_width=True
         )
-        
+    
+    with col_exp2:
         excel_buffer = io.BytesIO()
         edited_df.to_excel(excel_buffer, index=False, engine='openpyxl')
         st.download_button(
-            label="📥 Download as Excel",
+            label="📥 Download Excel",
             data=excel_buffer.getvalue(),
             file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
+
+
+def categorize_parameter(param_name: str) -> str:
+    """
+    Categorize parameter by name
+    
+    Returns:
+    --------
+    category : str
+        One of: Economic, Environmental, Social, Energy, Technology, Other
+    """
+    
+    param_lower = param_name.lower()
+    
+    # Economic indicators
+    economic_keywords = ['gdp', 'income', 'investment', 'economic', 'growth', 'productivity', 
+                        'revenue', 'profit', 'cost', 'price', 'trade', 'export', 'import',
+                        'inflation', 'debt', 'budget', 'spending', 'consumption', 'saving']
+    
+    # Environmental indicators
+    environmental_keywords = ['emission', 'co2', 'carbon', 'ghg', 'climate', 'pollution',
+                             'environmental', 'deforestation', 'biodiversity', 'waste',
+                             'water', 'air quality', 'temperature', 'sea level']
+    
+    # Social indicators
+    social_keywords = ['employment', 'unemployment', 'job', 'population', 'health',
+                      'education', 'poverty', 'inequality', 'social', 'welfare',
+                      'human', 'demographic', 'mortality', 'life expectancy']
+    
+    # Energy indicators
+    energy_keywords = ['energy', 'renewable', 'fossil', 'electricity', 'power', 'coal',
+                      'oil', 'gas', 'solar', 'wind', 'nuclear', 'hydro', 'capacity',
+                      'generation', 'consumption', 'demand']
+    
+    # Technology indicators
+    tech_keywords = ['technology', 'innovation', 'r&d', 'research', 'development',
+                    'digital', 'automation', 'ai', 'artificial intelligence',
+                    'patent', 'tech', 'it', 'computing']
+    
+    # Check each category
+    if any(keyword in param_lower for keyword in economic_keywords):
+        return '1. Economic'
+    elif any(keyword in param_lower for keyword in environmental_keywords):
+        return '2. Environmental'
+    elif any(keyword in param_lower for keyword in energy_keywords):
+        return '3. Energy'
+    elif any(keyword in param_lower for keyword in social_keywords):
+        return '4. Social'
+    elif any(keyword in param_lower for keyword in tech_keywords):
+        return '5. Technology'
+    else:
+        return '6. Other'
 
 
 def save_table_to_scenarios(edited_df, scenarios):
@@ -894,44 +998,32 @@ Renewable energy reaches 40% by 2040.""",
                 st.session_state.detected_scenarios = scenarios_with_params
                 st.session_state.scenarios_processed = True
                 
-                st.success("🎉 Analysis complete! Review results below.")
+                st.success("🎉 Analysis complete! Click button below to edit parameters.")
                 st.rerun()
     
-    # === STEP 2: REVIEW EXTRACTED PARAMETERS ===
+    # === STEP 2: EDIT IN COMPARISON TABLE ===
     if st.session_state.scenarios_processed and st.session_state.detected_scenarios:
         
         st.markdown("---")
-        st.subheader("📊 Step 2: Review & Edit Extracted Parameters")
+        st.subheader("📊 Step 2: Review & Edit Parameters")
         
-        # Create tabs for each scenario
-        scenario_tabs = st.tabs([s['title'] for s in st.session_state.detected_scenarios])
+        # Show summary
+        total_params = sum(len(s['items']) for s in st.session_state.detected_scenarios)
+        st.info(f"**{len(st.session_state.detected_scenarios)} scenario(s)** with **{total_params} total parameter(s)** detected")
         
-        for tab_idx, (tab, scenario) in enumerate(zip(scenario_tabs, st.session_state.detected_scenarios)):
-            with tab:
-                display_scenario_editor(scenario, tab_idx)
+        col_btn1, col_btn2 = st.columns([2, 3])
         
-        # === NEW: COMPARISON TABLE (After User Approval) ===
-        st.markdown("---")
-        st.subheader("📊 Step 2b: Compare & Align Parameters Across Scenarios")
+        with col_btn1:
+            if st.button("📊 Open Parameter Editor", type="primary", use_container_width=True):
+                st.session_state.show_comparison_table = True
+                st.rerun()
         
-        if len(st.session_state.detected_scenarios) >= 2:
-            st.markdown("Review all parameters from all scenarios in one table:")
-            
-            col1, col2 = st.columns([2, 3])
-            
-            with col1:
-                if st.button("🔍 Compare Parameters Across Scenarios", type="primary", use_container_width=True):
-                    st.session_state.show_comparison_table = True
-                    st.rerun()
-            
-            with col2:
-                st.caption("Click to see an editable comparison table of all parameters from all scenarios")
-            
-            # Show table only if button was clicked
-            if st.session_state.get('show_comparison_table', False):
-                display_editable_comparison_table()
-        else:
-            st.info("ℹ️ Need at least 2 scenarios to show comparison table")
+        with col_btn2:
+            st.caption("Click to edit all parameters in one table, grouped by category")
+        
+        # Show comparison table if button clicked
+        if st.session_state.get('show_comparison_table', False):
+            display_editable_comparison_table()
         
         # === STEP 3: MAPPING TO DATASET VARIABLES ===
         st.markdown("---")
