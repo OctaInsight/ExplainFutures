@@ -74,34 +74,66 @@ def extract_horizon(text: str) -> Optional[int]:
 
 def extract_items_from_text(text: str) -> List[Dict]:
     """
-    Extract parameter items from text
+    Extract parameter items from text using multi-pass approach
+    
+    OPTION B: Comprehensive extraction with:
+    - Pass 1: Template matching
+    - Pass 2: spaCy extraction
+    - Pass 3: Regex extraction
+    - Pass 4: Merge and unify
+    - Pass 5: Deduplicate
     
     Returns list of items with:
-    - parameter name
+    - parameter name (original and canonical)
     - direction (increase/decrease/target/stable)
     - value (if specified)
     - unit
     - confidence score
     """
-    items = []
     
     # Split into sentences
     sentences = split_sentences(text)
     
-    for sentence in sentences:
-        # Try spaCy extraction first (if available)
-        if SPACY_AVAILABLE:
-            extracted = extract_with_spacy(sentence)
-            if extracted:
-                items.extend(extracted)
-                continue
-        
-        # Fallback to regex extraction
-        extracted = extract_with_regex(sentence)
-        if extracted:
-            items.extend(extracted)
+    all_items = []
+    context = {'last_subject': None}
     
-    return items
+    # PASS 1: Template-based extraction (highest priority)
+    from .templates import extract_with_templates
+    
+    for sentence in sentences:
+        template_items = extract_with_templates(sentence, context)
+        if template_items:
+            all_items.extend(template_items)
+            # Update context with last extracted parameter
+            if template_items:
+                context['last_subject'] = template_items[-1].get('parameter')
+    
+    # PASS 2: spaCy extraction (if available)
+    if SPACY_AVAILABLE:
+        for sentence in sentences:
+            spacy_items = extract_with_spacy(sentence)
+            if spacy_items:
+                all_items.extend(spacy_items)
+    
+    # PASS 3: Regex extraction (fallback)
+    for sentence in sentences:
+        regex_items = extract_with_regex(sentence)
+        if regex_items:
+            all_items.extend(regex_items)
+    
+    # PASS 4: Unify parameter names
+    from .unification import unify_extracted_items, deduplicate_items, merge_similar_parameters
+    
+    all_items = unify_extracted_items(all_items)
+    
+    # PASS 5: Deduplicate and merge
+    all_items = deduplicate_items(all_items)
+    all_items = merge_similar_parameters(all_items, similarity_threshold=0.85)
+    
+    # Sort by confidence
+    all_items.sort(key=lambda x: x.get('confidence', 0), reverse=True)
+    
+    return all_items
 
 
 def split_sentences(text: str) -> List[str]:
@@ -189,21 +221,53 @@ def extract_with_spacy(sentence: str) -> List[Dict]:
 
 
 def get_noun_phrase(token) -> str:
-    """Extract full noun phrase from spaCy token"""
-    # Get all tokens in the noun phrase
+    """
+    Extract full noun phrase from spaCy token
+    Gets complete parameter names including compounds and modifiers
+    """
+    if not token:
+        return ""
+    
+    # Collect all parts of the noun phrase
     phrase_tokens = []
     
-    # Add determiners, adjectives, compounds
-    for child in token.children:
-        if child.dep_ in ['det', 'amod', 'compound']:
-            phrase_tokens.append(child)
-    
-    phrase_tokens.append(token)
+    # Add left children (determiners, adjectives, compounds, numerals)
+    left_children = []
+    for child in token.lefts:
+        if child.dep_ in ['det', 'amod', 'compound', 'nummod', 'nmod', 'poss']:
+            left_children.append(child)
+            # Also get compounds of compounds
+            for grandchild in child.lefts:
+                if grandchild.dep_ in ['compound', 'amod']:
+                    left_children.append(grandchild)
     
     # Sort by position
-    phrase_tokens.sort(key=lambda t: t.i)
+    left_children.sort(key=lambda x: x.i)
+    phrase_tokens.extend(left_children)
     
-    return ' '.join([t.text for t in phrase_tokens])
+    # Add the main token
+    phrase_tokens.append(token)
+    
+    # Add right children (prepositional phrases, noun modifiers)
+    for child in token.rights:
+        if child.dep_ in ['prep', 'pobj', 'npadvmod']:
+            phrase_tokens.append(child)
+            # Add children of preposition
+            for grandchild in child.children:
+                if grandchild.dep_ in ['pobj', 'compound']:
+                    phrase_tokens.append(grandchild)
+    
+    # Sort by position and join
+    phrase_tokens.sort(key=lambda x: x.i)
+    phrase = ' '.join([t.text for t in phrase_tokens])
+    
+    # Clean up
+    phrase = phrase.strip()
+    
+    # Remove leading articles
+    phrase = re.sub(r'^(the|a|an)\s+', '', phrase, flags=re.IGNORECASE)
+    
+    return phrase
 
 
 def extract_value_from_token(token, doc) -> Tuple[Optional[float], str]:
