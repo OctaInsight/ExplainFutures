@@ -118,14 +118,14 @@ def format_item(item: Dict, mappings: Optional[Dict[str, str]] = None) -> str:
     return "- " + " ".join(parts)
 
 
-def format_value(value: float, unit: str) -> str:
+def format_value(value, unit: str) -> str:
     """
     Format value with unit
     
     Parameters:
     -----------
-    value : float
-        Numeric value
+    value : float or str
+        Numeric value (can be string from table)
     unit : str
         Unit string
         
@@ -133,6 +133,15 @@ def format_value(value: float, unit: str) -> str:
     --------
     formatted : str
     """
+    # Convert to float if string
+    try:
+        if isinstance(value, str):
+            value = float(value) if value.strip() else 0.0
+        elif value is None:
+            value = 0.0
+    except (ValueError, AttributeError):
+        value = 0.0
+    
     if unit == '%':
         return f"{value:.1f}%"
     elif unit in ['billion', 'million', 'thousand', 'trillion']:
