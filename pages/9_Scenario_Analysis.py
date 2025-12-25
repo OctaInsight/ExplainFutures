@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import sys
+import io
 from pathlib import Path
 from datetime import datetime
 import plotly.graph_objects as go
@@ -60,6 +61,239 @@ def initialize_scenario_state():
         st.session_state.scenario_mappings = {}
     if "cleaned_scenarios" not in st.session_state:
         st.session_state.cleaned_scenarios = {}
+
+
+def display_parameter_comparison_table():
+    """
+    Display interactive comparison table across all scenarios
+    Allows users to see all parameters side-by-side and merge duplicates
+    """
+    
+    st.markdown("**Compare and align parameters across all scenarios:**")
+    
+    scenarios = st.session_state.detected_scenarios
+    
+    # Collect all unique parameters across all scenarios
+    all_params = set()
+    scenario_params = {}  # {scenario_id: {param_canonical: item}}
+    
+    for scenario in scenarios:
+        scenario_id = scenario['id']
+        scenario_params[scenario_id] = {}
+        
+        for item in scenario['items']:
+            # Use canonical name if available, otherwise original
+            param_name = item.get('parameter_canonical', item.get('parameter', ''))
+            all_params.add(param_name)
+            scenario_params[scenario_id][param_name] = item
+    
+    # Sort parameters alphabetically
+    all_params = sorted(list(all_params))
+    
+    if not all_params:
+        st.info("No parameters extracted yet")
+        return
+    
+    # Build comparison table data
+    table_data = []
+    
+    for param in all_params:
+        row = {'Parameter': param}
+        
+        # Add data from each scenario
+        for scenario in scenarios:
+            scenario_id = scenario['id']
+            scenario_title = scenario['title']
+            
+            if param in scenario_params[scenario_id]:
+                item = scenario_params[scenario_id][param]
+                
+                # Format: "↑ 20%" or "→ 5 MtCO2"
+                direction_symbols = {
+                    'increase': '↑',
+                    'decrease': '↓',
+                    'target': '→',
+                    'stable': '═',
+                    'double': '⇈',
+                    'halve': '⇊'
+                }
+                
+                symbol = direction_symbols.get(item.get('direction', ''), '?')
+                value = item.get('value')
+                unit = item.get('unit', '')
+                
+                if value is not None:
+                    if unit == '%':
+                        cell_value = f"{symbol} {value:.1f}%"
+                    elif unit:
+                        cell_value = f"{symbol} {value:.2f} {unit}"
+                    else:
+                        cell_value = f"{symbol} {value:.2f}"
+                else:
+                    cell_value = f"{symbol} (no value)"
+                
+                row[scenario_title] = cell_value
+            else:
+                row[scenario_title] = "—"  # Not in this scenario
+        
+        table_data.append(row)
+    
+    # Convert to DataFrame
+    df_comparison = pd.DataFrame(table_data)
+    
+    # Display with expandable options
+    with st.expander("🔧 Table Options", expanded=False):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            show_only_common = st.checkbox(
+                "Show only parameters common to all scenarios",
+                value=False,
+                help="Filter to show only parameters that appear in every scenario"
+            )
+        
+        with col2:
+            highlight_differences = st.checkbox(
+                "Highlight inconsistencies",
+                value=True,
+                help="Highlight parameters with different units or missing values"
+            )
+    
+    # Filter if needed
+    if show_only_common:
+        # Keep only rows where all scenarios have data
+        scenario_cols = [s['title'] for s in scenarios]
+        df_filtered = df_comparison[
+            df_comparison[scenario_cols].apply(
+                lambda row: all(val != "—" for val in row), 
+                axis=1
+            )
+        ]
+    else:
+        df_filtered = df_comparison
+    
+    # Display table
+    st.dataframe(
+        df_filtered,
+        use_container_width=True,
+        hide_index=True,
+        height=400
+    )
+    
+    # === MERGE PARAMETERS FEATURE ===
+    st.markdown("---")
+    st.markdown("### 🔗 Merge Similar Parameters")
+    st.caption("Combine parameters that refer to the same thing but have different names")
+    
+    col1, col2, col3 = st.columns([2, 2, 1])
+    
+    with col1:
+        param_to_merge_from = st.selectbox(
+            "Merge this parameter:",
+            options=all_params,
+            key="merge_from",
+            help="Select the parameter to merge (will be removed)"
+        )
+    
+    with col2:
+        param_to_merge_to = st.selectbox(
+            "Into this parameter:",
+            options=all_params,
+            key="merge_to",
+            help="Select the target parameter (will keep this one)"
+        )
+    
+    with col3:
+        st.markdown("")  # Spacing
+        st.markdown("")  # Spacing
+        if st.button("🔗 Merge"):
+            if param_to_merge_from == param_to_merge_to:
+                st.error("Cannot merge a parameter into itself!")
+            else:
+                merge_parameters(param_to_merge_from, param_to_merge_to)
+                st.success(f"✅ Merged '{param_to_merge_from}' into '{param_to_merge_to}'")
+                st.rerun()
+    
+    # === EXPORT COMPARISON TABLE ===
+    st.markdown("---")
+    col_export1, col_export2, col_export3 = st.columns(3)
+    
+    with col_export1:
+        csv_data = df_filtered.to_csv(index=False)
+        st.download_button(
+            label="📥 Download as CSV",
+            data=csv_data,
+            file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv"
+        )
+    
+    with col_export2:
+        excel_buffer = io.BytesIO()
+        df_filtered.to_excel(excel_buffer, index=False, engine='openpyxl')
+        st.download_button(
+            label="📥 Download as Excel",
+            data=excel_buffer.getvalue(),
+            file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+    
+    with col_export3:
+        json_data = df_filtered.to_json(orient='records')
+        st.download_button(
+            label="📥 Download as JSON",
+            data=json_data,
+            file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json"
+        )
+
+
+def merge_parameters(from_param: str, to_param: str):
+    """
+    Merge one parameter into another across all scenarios
+    
+    Parameters:
+    -----------
+    from_param : str
+        Parameter to merge (will be removed)
+    to_param : str
+        Target parameter (will be kept)
+    """
+    
+    scenarios = st.session_state.detected_scenarios
+    
+    for scenario in scenarios:
+        # Find items to merge
+        from_item = None
+        to_item = None
+        from_idx = None
+        
+        for idx, item in enumerate(scenario['items']):
+            param_name = item.get('parameter_canonical', item.get('parameter', ''))
+            
+            if param_name == from_param:
+                from_item = item
+                from_idx = idx
+            elif param_name == to_param:
+                to_item = item
+        
+        # Merge logic
+        if from_item and to_item:
+            # Both exist - merge values if needed
+            if to_item.get('value') is None and from_item.get('value') is not None:
+                to_item['value'] = from_item['value']
+                to_item['unit'] = from_item['unit']
+                to_item['direction'] = from_item['direction']
+            
+            # Remove from_item
+            scenario['items'].pop(from_idx)
+        
+        elif from_item and not to_item:
+            # Only from_item exists - rename it
+            from_item['parameter'] = to_param
+            from_item['parameter_canonical'] = to_param
+    
+    # Update session state
+    st.session_state.detected_scenarios = scenarios
 
 
 def main():
@@ -250,6 +484,15 @@ Renewable energy reaches 40% by 2040.""",
             with tab:
                 display_scenario_editor(scenario, tab_idx)
         
+        # === NEW: COMPARISON TABLE ===
+        st.markdown("---")
+        st.subheader("📊 Step 2b: Compare Parameters Across Scenarios")
+        
+        if len(st.session_state.detected_scenarios) >= 2:
+            display_parameter_comparison_table()
+        else:
+            st.info("ℹ️ Need at least 2 scenarios to show comparison table")
+        
         # === STEP 3: MAPPING TO DATASET VARIABLES ===
         st.markdown("---")
         st.subheader("🔗 Step 3: Map to Dataset Variables")
@@ -353,6 +596,7 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
                 param_display = item.get('parameter', '')
                 canonical = item.get('parameter_canonical', '')
                 extraction_method = item.get('extraction_method', 'unknown')
+                source_sentence = item.get('source_sentence', '')
                 
                 # Method badges
                 method_badges = {
@@ -371,6 +615,16 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
                     st.markdown(f"**Parameter {item_idx + 1}:** `{param_display}` → **{canonical}** ✨ | {method_badge}")
                 else:
                     st.markdown(f"**Parameter {item_idx + 1}:** {method_badge}")
+                
+                # Show source sentence if available
+                if source_sentence:
+                    # Truncate long sentences
+                    if len(source_sentence) > 150:
+                        display_sentence = source_sentence[:150] + "..."
+                    else:
+                        display_sentence = source_sentence
+                    
+                    st.caption(f"📝 Source: *\"{display_sentence}\"*")
                 
                 col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
                 
