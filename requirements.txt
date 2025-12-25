@@ -1,54 +1,80 @@
 # ExplainFutures Phase 1 Requirements
 # Python 3.9+
 
-# Core Dependencies
+# ============================================================
+# CORE DEPENDENCIES
+# ============================================================
 streamlit>=1.28.0
 pandas>=2.0.0
 numpy>=1.24.0
 
-# Visualization
+# ============================================================
+# VISUALIZATION
+# ============================================================
 plotly>=5.17.0
-
-# File I/O
-openpyxl>=3.1.0  # For Excel files
-xlrd>=2.0.1      # For old Excel files (.xls)
-
-# Optional but recommended
-python-dateutil>=2.8.2
-
 # Image export for Plotly figures
 kaleido==0.2.1
 
-# Statistical Analysis
+# ============================================================
+# FILE I/O & EXPORT
+# ============================================================
+openpyxl>=3.1.0           # For Excel files
+xlrd>=2.0.1               # For old Excel files (.xls)
+
+# ============================================================
+# STATISTICAL ANALYSIS
+# ============================================================
 scipy>=1.11.0
 
-# Machine Learning & Dimensionality Reduction
+# ============================================================
+# MACHINE LEARNING & DIMENSIONALITY REDUCTION
+# ============================================================
 scikit-learn>=1.3.0
 umap-learn>=0.5.3
 
-# Data handling
+# ============================================================
+# TIME SERIES MODELING (PAGES 6, 7, 8)
+# ============================================================
+statsmodels>=0.14.0       # For ETS, ARIMA, statistical models
+pmdarima>=2.0.0           # For automatic ARIMA parameter selection
+xgboost>=1.7.0            # High-performance gradient boosting
+
+# ============================================================
+# NLP & SCENARIO ANALYSIS (PAGE 9) - NEW!
+# ============================================================
+langdetect>=1.0.9         # Language detection (English-only gate)
+spacy>=3.7.0              # Natural language processing
+# IMPORTANT: After installing spacy, run this command:
+# python -m spacy download en_core_web_sm
+
+# ============================================================
+# DATA HANDLING & UTILITIES
+# ============================================================
+python-dateutil>=2.8.2
 python-dotenv>=1.0.0
 
-# Database
+# ============================================================
+# DATABASE
+# ============================================================
 supabase>=2.0.0
 
-# Optional: For better performance
+# ============================================================
+# PERFORMANCE OPTIMIZATION (OPTIONAL)
+# ============================================================
 numba>=0.57.0
 
 # ============================================================
-# TIME SERIES MODELING (REQUIRED FOR PAGES 6, 7, 8)
+# ADDITIONAL UTILITIES (Already satisfied by dependencies)
 # ============================================================
-
-# Time Series Forecasting
-statsmodels>=0.14.0        # For ETS, ARIMA, statistical models
-
-# Auto ARIMA (recommended but optional)
-pmdarima>=2.0.0           # For automatic ARIMA parameter selection
-
-# Gradient Boosting (optional but recommended - better than scikit-learn GBR)
-xgboost>=1.7.0            # High-performance gradient boosting
-
-# Additional utilities for time series
-# These are likely already satisfied by other dependencies, but listing explicitly:
 # joblib>=1.3.0           # Parallel processing (comes with scikit-learn)
 # threadpoolctl>=3.1.0    # Thread control (comes with scikit-learn)
+
+# ============================================================
+# POST-INSTALLATION STEPS
+# ============================================================
+# After running: pip install -r requirements.txt
+# Execute this command to download spaCy language model:
+#
+#   python -m spacy download en_core_web_sm
+#
+# This is required for Page 9 (Scenario Analysis) NLP features
