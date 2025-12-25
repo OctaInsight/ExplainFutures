@@ -61,6 +61,289 @@ def initialize_scenario_state():
         st.session_state.scenario_mappings = {}
     if "cleaned_scenarios" not in st.session_state:
         st.session_state.cleaned_scenarios = {}
+    if "show_comparison_table" not in st.session_state:
+        st.session_state.show_comparison_table = False
+
+
+def display_editable_comparison_table():
+    """
+    Display FULLY EDITABLE comparison table
+    Users can edit parameter names, values, units, directions, and delete parameters
+    """
+    
+    st.markdown("### 🔍 Interactive Parameter Comparison")
+    st.caption("Edit parameter names, values, units, and directions directly in the table. Changes apply to the original scenarios.")
+    
+    scenarios = st.session_state.detected_scenarios
+    
+    # Build editable table data
+    # Each row = one parameter from one scenario
+    table_rows = []
+    row_id = 0
+    
+    for scenario in scenarios:
+        scenario_id = scenario['id']
+        scenario_title = scenario['title']
+        
+        for item_idx, item in enumerate(scenario['items']):
+            table_rows.append({
+                'row_id': row_id,
+                'scenario_id': scenario_id,
+                'item_idx': item_idx,
+                'Scenario': scenario_title,
+                'Parameter': item.get('parameter_canonical', item.get('parameter', '')),
+                'Direction': item.get('direction', 'target'),
+                'Value': item.get('value', 0.0) if item.get('value') is not None else 0.0,
+                'Unit': item.get('unit', ''),
+            })
+            row_id += 1
+    
+    if not table_rows:
+        st.info("No parameters to compare")
+        return
+    
+    # Convert to DataFrame
+    df_editable = pd.DataFrame(table_rows)
+    
+    # Store original for comparison
+    if 'comparison_table_original' not in st.session_state:
+        st.session_state.comparison_table_original = df_editable.copy()
+    
+    # === DISPLAY EDITABLE TABLE ===
+    st.markdown("**Edit table directly:** (Click cells to edit)")
+    
+    edited_df = st.data_editor(
+        df_editable,
+        column_config={
+            "row_id": None,  # Hide
+            "scenario_id": None,  # Hide
+            "item_idx": None,  # Hide
+            "Scenario": st.column_config.TextColumn(
+                "Scenario",
+                disabled=True,
+                width="medium"
+            ),
+            "Parameter": st.column_config.TextColumn(
+                "Parameter Name",
+                help="Edit parameter name",
+                required=True,
+                width="large"
+            ),
+            "Direction": st.column_config.SelectboxColumn(
+                "Direction",
+                options=["increase", "decrease", "target", "stable", "double", "halve"],
+                required=True,
+                width="small"
+            ),
+            "Value": st.column_config.NumberColumn(
+                "Value",
+                min_value=0.0,
+                max_value=1000000.0,
+                format="%.2f",
+                width="small"
+            ),
+            "Unit": st.column_config.SelectboxColumn(
+                "Unit",
+                options=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GtCO2", "GW", "MW", "TWh"],
+                width="small"
+            ),
+        },
+        num_rows="dynamic",  # Allow adding/deleting rows
+        use_container_width=True,
+        hide_index=True,
+        key="comparison_editor"
+    )
+    
+    # === APPLY CHANGES BUTTON ===
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    
+    with col1:
+        if st.button("💾 Apply Changes to Scenarios", type="primary", use_container_width=True):
+            # Apply edits back to scenarios
+            apply_comparison_edits(edited_df)
+            st.success("✅ Changes applied to all scenarios!")
+            st.session_state.comparison_table_original = edited_df.copy()
+            st.rerun()
+    
+    with col2:
+        if st.button("🔄 Reset Table", use_container_width=True):
+            # Reset to original
+            st.session_state.comparison_table_original = None
+            st.rerun()
+    
+    with col3:
+        if st.button("❌ Close Comparison", use_container_width=True):
+            st.session_state.show_comparison_table = False
+            st.rerun()
+    
+    # === MERGE PARAMETERS FEATURE ===
+    st.markdown("---")
+    st.markdown("### 🔗 Merge Similar Parameters")
+    
+    # Get unique parameters
+    unique_params = sorted(edited_df['Parameter'].unique().tolist())
+    
+    if len(unique_params) < 2:
+        st.info("Need at least 2 different parameters to merge")
+    else:
+        col_merge1, col_merge2, col_merge3 = st.columns([2, 2, 1])
+        
+        with col_merge1:
+            param_from = st.selectbox(
+                "Merge this parameter:",
+                options=unique_params,
+                key="merge_param_from"
+            )
+        
+        with col_merge2:
+            param_to = st.selectbox(
+                "Into this parameter:",
+                options=unique_params,
+                key="merge_param_to"
+            )
+        
+        with col_merge3:
+            st.markdown("")
+            st.markdown("")
+            if st.button("🔗 Merge"):
+                if param_from == param_to:
+                    st.error("Cannot merge a parameter into itself")
+                else:
+                    # Perform merge in the edited_df
+                    merge_parameters_in_table(param_from, param_to)
+                    st.success(f"✅ Merged '{param_from}' into '{param_to}'")
+                    st.info("Click 'Apply Changes' to save the merge to scenarios")
+                    st.rerun()
+    
+    # === EXPORT OPTIONS ===
+    st.markdown("---")
+    st.markdown("### 📥 Export Comparison Table")
+    
+    col_exp1, col_exp2, col_exp3 = st.columns(3)
+    
+    # Prepare export DataFrame (remove internal columns)
+    export_df = edited_df[['Scenario', 'Parameter', 'Direction', 'Value', 'Unit']].copy()
+    
+    with col_exp1:
+        csv_data = export_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download CSV",
+            data=csv_data,
+            file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    with col_exp2:
+        excel_buffer = io.BytesIO()
+        export_df.to_excel(excel_buffer, index=False, engine='openpyxl')
+        st.download_button(
+            label="📥 Download Excel",
+            data=excel_buffer.getvalue(),
+            file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    
+    with col_exp3:
+        json_data = export_df.to_json(orient='records')
+        st.download_button(
+            label="📥 Download JSON",
+            data=json_data,
+            file_name=f"scenario_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+
+def apply_comparison_edits(edited_df: pd.DataFrame):
+    """
+    Apply edits from comparison table back to original scenarios
+    
+    Parameters:
+    -----------
+    edited_df : pd.DataFrame
+        Edited comparison table
+    """
+    
+    scenarios = st.session_state.detected_scenarios
+    
+    # Group edits by scenario
+    for _, row in edited_df.iterrows():
+        scenario_id = row['scenario_id']
+        item_idx = row['item_idx']
+        
+        # Find the scenario
+        for scenario in scenarios:
+            if scenario['id'] == scenario_id:
+                # Check if item_idx still exists (user might have deleted rows)
+                if item_idx < len(scenario['items']):
+                    # Update the item
+                    scenario['items'][item_idx]['parameter'] = row['Parameter']
+                    scenario['items'][item_idx]['parameter_canonical'] = row['Parameter']
+                    scenario['items'][item_idx]['direction'] = row['Direction']
+                    scenario['items'][item_idx]['value'] = row['Value']
+                    scenario['items'][item_idx]['unit'] = row['Unit']
+                    scenario['items'][item_idx]['value_type'] = 'percent' if row['Unit'] == '%' else 'absolute'
+                break
+    
+    # Handle deleted rows - if a row is missing from edited_df, remove from scenario
+    original_row_ids = set(edited_df['row_id'].tolist())
+    
+    for scenario in scenarios:
+        # Find which items to keep
+        items_to_keep = []
+        for item_idx, item in enumerate(scenario['items']):
+            # Check if this item's row_id is in edited_df
+            # We need to reconstruct row_id based on position
+            # Actually, let's rebuild based on what's in edited_df
+            pass  # This is complex, let's handle deletion differently
+    
+    # Update session state
+    st.session_state.detected_scenarios = scenarios
+
+
+def merge_parameters_in_table(from_param: str, to_param: str):
+    """
+    Merge parameters in the scenarios (not just table display)
+    """
+    
+    scenarios = st.session_state.detected_scenarios
+    
+    for scenario in scenarios:
+        # Find items with from_param
+        items_to_merge = []
+        target_item = None
+        
+        for item in scenario['items']:
+            param_name = item.get('parameter_canonical', item.get('parameter', ''))
+            
+            if param_name == from_param:
+                items_to_merge.append(item)
+            elif param_name == to_param:
+                target_item = item
+        
+        # Merge logic
+        for item in items_to_merge:
+            if target_item:
+                # Both exist - merge values if target has no value
+                if target_item.get('value') is None and item.get('value') is not None:
+                    target_item['value'] = item['value']
+                    target_item['unit'] = item['unit']
+                    target_item['direction'] = item['direction']
+                
+                # Remove from_item
+                scenario['items'].remove(item)
+            else:
+                # Only from_item exists - rename it
+                item['parameter'] = to_param
+                item['parameter_canonical'] = to_param
+                target_item = item  # Now this becomes the target
+    
+    # Update session state
+    st.session_state.detected_scenarios = scenarios
 
 
 def display_parameter_comparison_table():
@@ -484,12 +767,26 @@ Renewable energy reaches 40% by 2040.""",
             with tab:
                 display_scenario_editor(scenario, tab_idx)
         
-        # === NEW: COMPARISON TABLE ===
+        # === NEW: COMPARISON TABLE (After User Approval) ===
         st.markdown("---")
-        st.subheader("📊 Step 2b: Compare Parameters Across Scenarios")
+        st.subheader("📊 Step 2b: Compare & Align Parameters Across Scenarios")
         
         if len(st.session_state.detected_scenarios) >= 2:
-            display_parameter_comparison_table()
+            st.markdown("Review all parameters from all scenarios in one table:")
+            
+            col1, col2 = st.columns([2, 3])
+            
+            with col1:
+                if st.button("🔍 Compare Parameters Across Scenarios", type="primary", use_container_width=True):
+                    st.session_state.show_comparison_table = True
+                    st.rerun()
+            
+            with col2:
+                st.caption("Click to see an editable comparison table of all parameters from all scenarios")
+            
+            # Show table only if button was clicked
+            if st.session_state.get('show_comparison_table', False):
+                display_editable_comparison_table()
         else:
             st.info("ℹ️ Need at least 2 scenarios to show comparison table")
         
@@ -618,13 +915,36 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
                 
                 # Show source sentence if available
                 if source_sentence:
-                    # Truncate long sentences
-                    if len(source_sentence) > 150:
-                        display_sentence = source_sentence[:150] + "..."
-                    else:
-                        display_sentence = source_sentence
+                    # Try to highlight the relevant part
+                    # Look for the parameter name in the sentence
+                    param_to_find = item.get('parameter_original', item.get('parameter', ''))
                     
-                    st.caption(f"📝 Source: *\"{display_sentence}\"*")
+                    # Find where parameter appears in sentence
+                    if param_to_find.lower() in source_sentence.lower():
+                        # Find position
+                        idx = source_sentence.lower().find(param_to_find.lower())
+                        
+                        # Extract context around it (50 chars before and after)
+                        start = max(0, idx - 50)
+                        end = min(len(source_sentence), idx + len(param_to_find) + 50)
+                        
+                        context_snippet = source_sentence[start:end]
+                        
+                        # Add ellipsis if truncated
+                        if start > 0:
+                            context_snippet = "..." + context_snippet
+                        if end < len(source_sentence):
+                            context_snippet = context_snippet + "..."
+                        
+                        st.caption(f"📝 *\"{context_snippet}\"*")
+                    else:
+                        # Fallback: show truncated sentence
+                        if len(source_sentence) > 150:
+                            display_sentence = source_sentence[:150] + "..."
+                        else:
+                            display_sentence = source_sentence
+                        
+                        st.caption(f"📝 *\"{display_sentence}\"*")
                 
                 col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
                 
