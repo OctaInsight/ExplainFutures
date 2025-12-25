@@ -27,8 +27,6 @@ from core.io.validators import parse_time_column, validate_time_series, check_nu
 initialize_session_state()
 config = get_config()
 
-# Page configuration
-st.set_page_config(page_title="Upload & Data Diagnostics", page_icon="📁", layout="wide")
 
 # Render shared sidebar
 render_app_sidebar()  
