@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import sys
+import io
 from pathlib import Path
 from datetime import datetime, timedelta
 import plotly.graph_objects as go
@@ -118,7 +119,7 @@ def validate_forecast_horizon(last_date: pd.Timestamp, forecast_date: pd.Timesta
         }
 
 
-def generate_forecast(variable: str, model_name: str, forecast_steps: int) -> dict:
+def generate_forecast(variable: str, model_name: str, target_date: pd.Timestamp, last_date: pd.Timestamp) -> dict:
     """
     Generate forecast for a variable using selected model
     
@@ -128,8 +129,10 @@ def generate_forecast(variable: str, model_name: str, forecast_steps: int) -> di
         Variable name
     model_name : str
         Selected model name
-    forecast_steps : int
-        Number of steps to forecast
+    target_date : pd.Timestamp
+        Target forecast date (user-specified)
+    last_date : pd.Timestamp
+        Last date in historical data
         
     Returns:
     --------
@@ -157,12 +160,13 @@ def generate_forecast(variable: str, model_name: str, forecast_steps: int) -> di
     if model_data is None:
         raise ValueError(f"Model {model_name} not found for {variable}")
     
-    # Get last timestamp and values
+    # Get split data
     split_data = var_results.get('train_test_split', {})
-    last_timestamp = split_data['test_timestamps'][-1] if len(split_data.get('test_timestamps', [])) > 0 else split_data['train_timestamps'][-1]
     
-    # Generate future timestamps
-    # Infer frequency from training data
+    # Calculate exact number of steps from last_date to target_date
+    forecast_steps = (target_date - last_date).days
+    
+    # Generate future timestamps - EXACT range from last_date to target_date
     train_timestamps = split_data['train_timestamps']
     if len(train_timestamps) > 1:
         freq = pd.infer_freq(train_timestamps)
@@ -170,23 +174,26 @@ def generate_forecast(variable: str, model_name: str, forecast_steps: int) -> di
             # Calculate median difference
             median_diff = pd.Series(train_timestamps[1:] - train_timestamps[:-1]).median()
             future_timestamps = pd.date_range(
-                start=last_timestamp + median_diff,
-                periods=forecast_steps,
+                start=last_date + median_diff,
+                end=target_date,
                 freq=median_diff
             )
         else:
             future_timestamps = pd.date_range(
-                start=last_timestamp,
-                periods=forecast_steps + 1,
+                start=last_date,
+                end=target_date,
                 freq=freq
-            )[1:]  # Exclude last_timestamp
+            )[1:]  # Exclude last_date (already in historical)
     else:
         # Default to daily
         future_timestamps = pd.date_range(
-            start=last_timestamp + timedelta(days=1),
-            periods=forecast_steps,
+            start=last_date + timedelta(days=1),
+            end=target_date,
             freq='D'
         )
+    
+    # Recalculate forecast_steps based on actual timestamps generated
+    forecast_steps = len(future_timestamps)
     
     # Generate forecast based on model type
     if model_type == 'tier2_timeseries':
@@ -196,11 +203,6 @@ def generate_forecast(variable: str, model_name: str, forecast_steps: int) -> di
         
     elif model_type == 'tier1_math':
         # Mathematical models - extrapolate
-        # Get time numeric
-        all_train = split_data['train_values']
-        all_test = split_data['test_values']
-        all_data = np.concatenate([all_train, all_test])
-        
         start_time = split_data['train_timestamps'][0]
         time_since_start = (future_timestamps - start_time).total_seconds().values / 86400
         
@@ -216,8 +218,6 @@ def generate_forecast(variable: str, model_name: str, forecast_steps: int) -> di
     
     elif model_type == 'tier3_ml':
         # ML models need features - use last known values for lag features
-        # This is simplified - in practice, we'd need to generate proper lag features
-        # For now, use last value as naive forecast
         last_value = split_data['test_values'][-1] if len(split_data.get('test_values', [])) > 0 else split_data['train_values'][-1]
         forecast_values = np.full(forecast_steps, last_value)
         st.warning(f"ML model forecasting simplified for {variable} - using last known value")
@@ -229,7 +229,8 @@ def generate_forecast(variable: str, model_name: str, forecast_steps: int) -> di
         'forecast_values': np.array(forecast_values),
         'forecast_timestamps': future_timestamps,
         'model_type': model_type,
-        'model_name': model_name
+        'model_name': model_name,
+        'target_date': target_date
     }
 
 
@@ -239,9 +240,10 @@ def create_forecast_plot(variable: str,
                         forecast_values: np.ndarray,
                         forecast_timestamps: pd.DatetimeIndex,
                         split_index: int,
-                        customize: dict) -> go.Figure:
+                        customize: dict,
+                        target_date: pd.Timestamp) -> go.Figure:
     """
-    Create forecast visualization
+    Create forecast visualization showing ONLY the forecast timeframe
     
     Parameters:
     -----------
@@ -259,6 +261,8 @@ def create_forecast_plot(variable: str,
         Where train/test split occurred
     customize : dict
         Customization options (colors, sizes, visibility)
+    target_date : pd.Timestamp
+        User-specified target forecast date
         
     Returns:
     --------
@@ -267,11 +271,28 @@ def create_forecast_plot(variable: str,
     """
     fig = go.Figure()
     
+    # Determine timeframe to show
+    # Show last portion of historical + all forecast up to target_date
+    last_historical_date = historical_timestamps[-1] if len(historical_timestamps) > 0 else forecast_timestamps[0]
+    
+    # Calculate how much historical to show (20% or last 30 days, whichever is less)
+    days_to_show_hist = min(30, int(len(historical_values) * 0.2))
+    hist_start_idx = max(0, len(historical_values) - days_to_show_hist)
+    
+    # Filter historical data to show
+    hist_values_to_show = historical_values[hist_start_idx:]
+    hist_timestamps_to_show = historical_timestamps[hist_start_idx:]
+    
+    # Filter forecast to show only up to target_date
+    forecast_mask = forecast_timestamps <= target_date
+    forecast_values_to_show = forecast_values[forecast_mask]
+    forecast_timestamps_to_show = forecast_timestamps[forecast_mask]
+    
     # Historical data
     if customize.get('show_historical', True):
         fig.add_trace(go.Scatter(
-            x=historical_timestamps,
-            y=historical_values,
+            x=hist_timestamps_to_show,
+            y=hist_values_to_show,
             mode='markers',
             name='Historical Data',
             marker=dict(
@@ -284,8 +305,8 @@ def create_forecast_plot(variable: str,
     # Forecast data
     if customize.get('show_forecast', True):
         fig.add_trace(go.Scatter(
-            x=forecast_timestamps,
-            y=forecast_values,
+            x=forecast_timestamps_to_show,
+            y=forecast_values_to_show,
             mode='markers',
             name='Forecast',
             marker=dict(
@@ -298,11 +319,8 @@ def create_forecast_plot(variable: str,
     
     # Model line (connect historical and forecast)
     if customize.get('show_model_line', True):
-        # Take last 20% of historical + all forecast
-        line_start = max(0, len(historical_values) - int(len(historical_values) * 0.2))
-        
-        all_times = list(historical_timestamps[line_start:]) + list(forecast_timestamps)
-        all_values = list(historical_values[line_start:]) + list(forecast_values)
+        all_times = list(hist_timestamps_to_show) + list(forecast_timestamps_to_show)
+        all_values = list(hist_values_to_show) + list(forecast_values_to_show)
         
         fig.add_trace(go.Scatter(
             x=all_times,
@@ -341,9 +359,9 @@ def create_forecast_plot(variable: str,
             font=dict(color="red")
         )
     
-    # Layout
+    # Layout with explicit X-axis range
     fig.update_layout(
-        title=f"{variable} - Historical Data & Forecast",
+        title=f"{variable} - Historical Data & Forecast (to {target_date.strftime('%Y-%m-%d')})",
         xaxis_title="Time",
         yaxis_title=f"{variable}",
         height=600,
@@ -357,6 +375,10 @@ def create_forecast_plot(variable: str,
             bordercolor='black',
             borderwidth=1,
             font=dict(color='black', size=11)
+        ),
+        xaxis=dict(
+            range=[hist_timestamps_to_show[0] if len(hist_timestamps_to_show) > 0 else forecast_timestamps_to_show[0],
+                   target_date]
         )
     )
     
@@ -515,9 +537,6 @@ def main():
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # Calculate forecast steps
-        forecast_steps = validation['days_ahead']
-        
         # Generate forecasts
         forecast_results = {}
         
@@ -525,7 +544,7 @@ def main():
             status_text.text(f"Generating forecast for: {variable}...")
             
             try:
-                forecast = generate_forecast(variable, model_name, forecast_steps)
+                forecast = generate_forecast(variable, model_name, forecast_date, last_date)
                 forecast_results[variable] = forecast
                 
             except Exception as e:
@@ -536,8 +555,9 @@ def main():
             progress = (idx + 1) / len(st.session_state.selected_models_for_forecast)
             progress_bar.progress(progress)
         
-        # Store results
+        # Store results AND target date
         st.session_state.forecast_results = forecast_results
+        st.session_state.forecast_target_date = forecast_date
         st.session_state.forecasts_generated = True
         
         status_text.empty()
@@ -569,6 +589,9 @@ def display_forecast_tab(variable: str):
     var_results = st.session_state.trained_models[variable]
     split_data = var_results['train_test_split']
     
+    # Get target date
+    target_date = st.session_state.get('forecast_target_date', forecast['forecast_timestamps'][-1])
+    
     # Get historical data
     train_values = split_data['train_values']
     test_values = split_data['test_values']
@@ -577,6 +600,11 @@ def display_forecast_tab(variable: str):
     
     historical_values = np.concatenate([train_values, test_values])
     historical_timestamps = pd.DatetimeIndex(list(train_timestamps) + list(test_timestamps))
+    
+    # Filter forecast to target_date
+    forecast_mask = forecast['forecast_timestamps'] <= target_date
+    forecast_values_filtered = forecast['forecast_values'][forecast_mask]
+    forecast_timestamps_filtered = forecast['forecast_timestamps'][forecast_mask]
     
     # === CUSTOMIZATION OPTIONS ===
     st.markdown("#### 🎨 Customize Visualization")
@@ -625,10 +653,11 @@ def display_forecast_tab(variable: str):
         variable=variable,
         historical_values=historical_values,
         historical_timestamps=historical_timestamps,
-        forecast_values=forecast['forecast_values'],
-        forecast_timestamps=forecast['forecast_timestamps'],
+        forecast_values=forecast_values_filtered,
+        forecast_timestamps=forecast_timestamps_filtered,
         split_index=len(train_values),
-        customize=customize
+        customize=customize,
+        target_date=target_date
     )
     
     st.plotly_chart(fig, use_container_width=True)
@@ -645,10 +674,10 @@ def display_forecast_tab(variable: str):
         with col2:
             st.markdown("**Export Data:**")
             
-            # Create forecast DataFrame
+            # Create forecast DataFrame - ONLY up to target_date
             forecast_df = pd.DataFrame({
-                'Date': forecast['forecast_timestamps'],
-                'Forecast': forecast['forecast_values'],
+                'Date': forecast_timestamps_filtered,
+                'Forecast': forecast_values_filtered,
                 'Variable': variable,
                 'Model': forecast['model_name']
             })
@@ -667,17 +696,56 @@ def display_forecast_tab(variable: str):
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.metric("Forecast Steps", len(forecast['forecast_values']))
+            st.metric("Forecast Steps", len(forecast_values_filtered))
         
         with col2:
-            st.metric("Mean Forecast", f"{np.mean(forecast['forecast_values']):.3f}")
+            st.metric("Mean Forecast", f"{np.mean(forecast_values_filtered):.3f}")
         
         with col3:
-            st.metric("Forecast Range", f"{np.ptp(forecast['forecast_values']):.3f}")
+            st.metric("Forecast Range", f"{np.ptp(forecast_values_filtered):.3f}")
         
         # Forecast table
         st.markdown("**Forecast Values:**")
         st.dataframe(forecast_df, use_container_width=True, hide_index=True)
+        
+        # ADD EXPORT BUTTON FOR TABLE
+        st.markdown("---")
+        st.markdown("**Export Table Data:**")
+        
+        col_a, col_b, col_c = st.columns(3)
+        
+        with col_a:
+            csv_table = forecast_df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download as CSV",
+                data=csv_table,
+                file_name=f"forecast_table_{variable}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                key=f"table_csv_{variable}"
+            )
+        
+        with col_b:
+            excel_buffer = io.BytesIO()
+            forecast_df.to_excel(excel_buffer, index=False, engine='openpyxl')
+            excel_data = excel_buffer.getvalue()
+            
+            st.download_button(
+                label="📥 Download as Excel",
+                data=excel_data,
+                file_name=f"forecast_table_{variable}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"table_excel_{variable}"
+            )
+        
+        with col_c:
+            json_data = forecast_df.to_json(orient='records', date_format='iso')
+            st.download_button(
+                label="📥 Download as JSON",
+                data=json_data,
+                file_name=f"forecast_table_{variable}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json",
+                key=f"table_json_{variable}"
+            )
 
 
 if __name__ == "__main__":
