@@ -302,12 +302,121 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
         if len(scenario['items']) > 10:
             st.info(f"💡 This scenario has {len(scenario['items'])} parameters. Scroll down to see all.")
         
+        # Show unification info if available
+        unified_params = [item.get('parameter_canonical') for item in scenario['items'] if item.get('parameter_canonical')]
+        if unified_params:
+            with st.expander("🔗 Parameter Unification Info", expanded=False):
+                st.markdown("**Unified parameters** (variations merged):")
+                unique_canonical = list(set(unified_params))
+                for canonical in unique_canonical:
+                    # Find all original variations
+                    variations = [item.get('parameter_original', item.get('parameter')) 
+                                  for item in scenario['items'] 
+                                  if item.get('parameter_canonical') == canonical]
+                    variations = list(set(variations))
+                    
+                    if len(variations) > 1:
+                        st.markdown(f"- **{canonical}** ← `{', '.join(variations)}`")
+                    else:
+                        st.markdown(f"- **{canonical}**")
+        
         # Edit each item individually
         for item_idx, item in enumerate(scenario['items']):
             with st.container():
-                st.markdown(f"**Parameter {item_idx + 1}:**")
+                # Show both original and canonical if different
+                param_display = item.get('parameter', '')
+                canonical = item.get('parameter_canonical', '')
+                
+                if canonical and canonical != param_display:
+                    st.markdown(f"**Parameter {item_idx + 1}:** `{param_display}` → **{canonical}** ✨")
+                else:
+                    st.markdown(f"**Parameter {item_idx + 1}:**")
                 
                 col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
+                
+                with col1:
+                    # Use canonical name if available
+                    param_name = st.text_input(
+                        "Parameter Name",
+                        value=canonical if canonical else param_display,
+                        key=f"param_{scenario_idx}_{item_idx}",
+                        label_visibility="collapsed"
+                    )
+                    item['parameter'] = param_name
+                    if canonical:
+                        item['parameter_canonical'] = param_name
+                
+                with col2:
+                    direction = st.selectbox(
+                        "Direction",
+                        options=["increase", "decrease", "target", "stable", "double", "halve"],
+                        index=["increase", "decrease", "target", "stable", "double", "halve"].index(item['direction']) if item['direction'] in ["increase", "decrease", "target", "stable", "double", "halve"] else 0,
+                        key=f"dir_{scenario_idx}_{item_idx}",
+                        label_visibility="collapsed"
+                    )
+                    item['direction'] = direction
+                
+                with col3:
+                    # Convert value to float if it's string
+                    current_value = item.get('value', 0.0)
+                    if isinstance(current_value, str):
+                        try:
+                            current_value = float(current_value) if current_value.strip() else 0.0
+                        except:
+                            current_value = 0.0
+                    elif current_value is None:
+                        current_value = 0.0
+                    
+                    value = st.number_input(
+                        "Value",
+                        min_value=0.0,
+                        max_value=1000000.0,
+                        value=float(current_value),
+                        step=0.1,
+                        key=f"val_{scenario_idx}_{item_idx}",
+                        label_visibility="collapsed"
+                    )
+                    item['value'] = value
+                
+                with col4:
+                    unit = st.selectbox(
+                        "Unit",
+                        options=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GW", "TWh"],
+                        index=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GW", "TWh"].index(item.get('unit', '')) if item.get('unit', '') in ["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GW", "TWh"] else 0,
+                        key=f"unit_{scenario_idx}_{item_idx}",
+                        label_visibility="collapsed"
+                    )
+                    item['unit'] = unit
+                    item['value_type'] = 'percent' if unit == '%' else 'absolute'
+                
+                with col5:
+                    if st.button("🗑️", key=f"del_{scenario_idx}_{item_idx}", help="Delete parameter"):
+                        scenario['items'].pop(item_idx)
+                        st.session_state.detected_scenarios[scenario_idx] = scenario
+                        st.rerun()
+                
+                st.markdown("---")
+        
+        # Update in session state
+        st.session_state.detected_scenarios[scenario_idx] = scenario
+        
+    else:
+        st.info("No parameters detected. Click 'Add Parameter' to add manually.")
+    
+    # Add parameter button
+    if st.button(f"➕ Add Parameter", key=f"add_param_{scenario_idx}"):
+        new_item = {
+            'parameter': 'New Parameter',
+            'direction': 'increase',
+            'value': 0.0,
+            'unit': '',
+            'value_type': 'absolute',
+            'confidence': 0.5,
+            'source_sentence': 'User-added'
+        }
+        scenario['items'].append(new_item)
+        st.session_state.detected_scenarios[scenario_idx] = scenario
+        st.rerun()
                 
                 with col1:
                     param_name = st.text_input(
