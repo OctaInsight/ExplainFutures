@@ -19,12 +19,10 @@ from core.utils import display_error, display_success, display_warning, display_
 from core.shared_sidebar import render_app_sidebar
 from core.viz.export import quick_export_buttons
 
-# Import model training functions (TO BE IMPLEMENTED IN core/models/)
-# from core.models.data_preparation import get_available_series, get_series_data, prepare_series_for_modeling
-# from core.models.tier1_math_models import train_tier1_models
-# from core.models.tier2_timeseries_models import train_tier2_models
-# from core.models.tier3_ml_models import train_tier3_models
-# from core.models.model_visualization import create_model_comparison_plot
+# Import model training functions
+from core.models.data_preparation import get_available_series, get_series_data
+from core.models.model_trainer import train_all_models_for_variable
+from core.models.model_visualization import create_model_comparison_plot
 
 # Initialize
 initialize_session_state()
@@ -53,161 +51,6 @@ def initialize_page_state():
         st.session_state.trained_models = {}
     if "training_complete" not in st.session_state:
         st.session_state.training_complete = False
-
-
-def get_available_series():
-    """
-    Get all available variables and components from previous steps
-    TO BE IMPLEMENTED IN: core/models/data_preparation.py
-    
-    Returns:
-    --------
-    available_series : dict
-        Dictionary organized by category:
-        {
-            'Original Variables': [...],
-            'Cleaned Variables': [...],
-            'PCA Components': [...],
-            'Factor Scores': [...],
-            'ICA Components': [...]
-        }
-    """
-    # PLACEHOLDER - This will call the actual function from core/models/data_preparation.py
-    available = {
-        'Original Variables': [],
-        'Cleaned Variables': [],
-        'PCA Components': [],
-        'Factor Scores': [],
-        'ICA Components': []
-    }
-    
-    # Get original variables
-    if st.session_state.data_loaded and st.session_state.df_long is not None:
-        original_vars = st.session_state.df_long['variable'].unique().tolist()
-        available['Original Variables'] = sorted(original_vars)
-    
-    # Get cleaned variables
-    if st.session_state.get('preprocessing_applied', False):
-        if st.session_state.df_long is not None:
-            all_vars = st.session_state.df_long['variable'].unique().tolist()
-            cleaned_vars = [v for v in all_vars if v not in available['Original Variables']]
-            available['Cleaned Variables'] = sorted(cleaned_vars)
-    
-    # Get PCA components
-    if st.session_state.get('pca_accepted', False) and 'pca' in st.session_state.get('reduction_results', {}):
-        n_components = st.session_state.reduction_results['pca']['n_components']
-        available['PCA Components'] = [f"PC{i+1}" for i in range(n_components)]
-    
-    # Get Factor scores
-    if 'factor_analysis' in st.session_state.get('reduction_results', {}):
-        n_factors = st.session_state.reduction_results['factor_analysis']['n_factors']
-        available['Factor Scores'] = [f"Factor{i+1}" for i in range(n_factors)]
-    
-    # Get ICA components
-    if 'ica' in st.session_state.get('reduction_results', {}):
-        n_components = st.session_state.reduction_results['ica']['n_components']
-        available['ICA Components'] = [f"IC{i+1}" for i in range(n_components)]
-    
-    return available
-
-
-def train_all_models_for_variable(variable_name: str, series_data: dict, train_split: float = 0.8):
-    """
-    Train all three tiers of models for a single variable
-    TO BE IMPLEMENTED IN: core/models/model_trainer.py
-    
-    Parameters:
-    -----------
-    variable_name : str
-        Name of the variable
-    series_data : dict
-        Dictionary containing 'values' and 'timestamps'
-    train_split : float
-        Fraction of data to use for training (default 0.8)
-    
-    Returns:
-    --------
-    results : dict
-        Dictionary with trained models from all tiers:
-        {
-            'tier1_math': {...},
-            'tier2_timeseries': {...},
-            'tier3_ml': {...},
-            'train_test_split': {...}
-        }
-    """
-    # PLACEHOLDER - This will be implemented in core/models/model_trainer.py
-    st.info(f"🔄 Training all models for: {variable_name}")
-    
-    results = {
-        'tier1_math': {},
-        'tier2_timeseries': {},
-        'tier3_ml': {},
-        'train_test_split': {}
-    }
-    
-    return results
-
-
-def create_model_comparison_plot(variable_name: str, 
-                                 series_data: dict,
-                                 model_results: dict,
-                                 selected_models: list):
-    """
-    Create interactive plot comparing selected models
-    TO BE IMPLEMENTED IN: core/models/model_visualization.py
-    
-    Parameters:
-    -----------
-    variable_name : str
-        Name of variable
-    series_data : dict
-        Original series data
-    model_results : dict
-        Trained model results
-    selected_models : list
-        List of up to 3 model names to display
-        
-    Returns:
-    --------
-    fig : plotly.graph_objects.Figure
-        Interactive comparison plot
-    """
-    # PLACEHOLDER - This will be implemented in core/models/model_visualization.py
-    import plotly.graph_objects as go
-    
-    fig = go.Figure()
-    
-    # Add actual data
-    fig.add_trace(go.Scatter(
-        x=list(range(len(series_data.get('values', [])))),
-        y=series_data.get('values', []),
-        mode='lines+markers',
-        name='Actual Data',
-        line=dict(color='black', width=2)
-    ))
-    
-    # Placeholder for model lines
-    for model_name in selected_models[:3]:  # Max 3 models
-        fig.add_trace(go.Scatter(
-            x=list(range(len(series_data.get('values', [])))),
-            y=series_data.get('values', []),  # PLACEHOLDER - will be model predictions
-            mode='lines',
-            name=model_name,
-            line=dict(width=2, dash='dash')
-        ))
-    
-    fig.update_layout(
-        title=f"{variable_name} - Model Comparison",
-        xaxis_title="Time",
-        yaxis_title="Value",
-        height=500,
-        template='plotly_white',
-        hovermode='x unified',
-        showlegend=True
-    )
-    
-    return fig
 
 
 def main():
@@ -363,14 +206,16 @@ def main():
             status_text.text(f"Training models for: {series_name}...")
             
             try:
-                # Get series data (PLACEHOLDER - will be implemented)
-                series_data = {
-                    'values': np.random.randn(100),  # PLACEHOLDER
-                    'timestamps': pd.date_range(start='2020-01-01', periods=100, freq='D')  # PLACEHOLDER
-                }
+                # Get REAL series data
+                series_data = get_series_data(series_name)
                 
-                # Train all models
-                results = train_all_models_for_variable(series_name, series_data, train_split)
+                # Train all models using the real trainer
+                results = train_all_models_for_variable(
+                    variable_name=series_name,
+                    series_data=series_data,
+                    train_split=train_split,
+                    detect_seasonality=True
+                )
                 
                 # Store results
                 st.session_state.trained_models[series_name] = results
@@ -381,6 +226,8 @@ def main():
                 
             except Exception as e:
                 st.error(f"Error training {series_name}: {str(e)}")
+                import traceback
+                st.code(traceback.format_exc())
                 continue
         
         # Complete
@@ -424,34 +271,35 @@ def display_variable_tab(series_name: str):
     
     results = st.session_state.trained_models[series_name]
     
-    # Get series data (PLACEHOLDER)
-    series_data = {
-        'values': np.random.randn(100),  # PLACEHOLDER
-        'timestamps': pd.date_range(start='2020-01-01', periods=100, freq='D')  # PLACEHOLDER
-    }
+    # Get actual series data
+    try:
+        series_data = get_series_data(series_name)
+    except Exception as e:
+        st.error(f"Error loading series data: {str(e)}")
+        return
+    
+    # Get split info
+    split_data = results.get('train_test_split', {})
+    train_values = split_data.get('train_values', np.array([]))
+    test_values = split_data.get('test_values', np.array([]))
+    train_timestamps = split_data.get('train_timestamps', pd.DatetimeIndex([]))
+    test_timestamps = split_data.get('test_timestamps', pd.DatetimeIndex([]))
+    split_index = split_data.get('split_index', 0)
     
     # === MODEL SELECTION FOR COMPARISON ===
     st.markdown("#### Select Models to Compare (up to 3)")
     
-    # Get all available models
+    # Get all available models from ACTUAL results
     all_models = []
     all_models.extend(list(results.get('tier1_math', {}).keys()))
     all_models.extend(list(results.get('tier2_timeseries', {}).keys()))
     all_models.extend(list(results.get('tier3_ml', {}).keys()))
     
-    # PLACEHOLDER - actual model names
     if not all_models:
-        all_models = [
-            "Linear Trend",
-            "Polynomial (degree 2)",
-            "Polynomial (degree 3)",
-            "ETS/Holt-Winters",
-            "ARIMA",
-            "Gradient Boosting",
-            "Random Forest"
-        ]
+        st.warning("No models were trained successfully for this variable")
+        return
     
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         model1 = st.selectbox(
@@ -477,35 +325,48 @@ def display_variable_tab(series_name: str):
             key=f"model3_{series_name}"
         )
     
+    with col4:
+        # Scatter plot customization
+        with st.popover("🎨 Customize"):
+            marker_size = st.slider("Point Size", 1, 10, 4, key=f"size_{series_name}")
+            marker_color = st.color_picker("Point Color", "#000000", key=f"color_{series_name}")
+    
     # Get selected models (exclude "None")
     selected_models = [m for m in [model1, model2, model3] if m != "None"]
     
     if len(selected_models) == 0:
         st.info("👆 Select at least one model to visualize")
-        return
-    
-    st.markdown("---")
-    
-    # === VISUALIZATION ===
-    st.markdown("#### Model Comparison Plot")
-    
-    # Create comparison plot
-    fig = create_model_comparison_plot(
-        series_name,
-        series_data,
-        results,
-        selected_models
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Export options
-    with st.expander("💾 Export Figure"):
-        quick_export_buttons(
-            fig,
-            f"model_comparison_{series_name}",
-            ['png', 'pdf', 'html']
+    else:
+        st.markdown("---")
+        
+        # === VISUALIZATION ===
+        st.markdown("#### Model Comparison Plot")
+        
+        # Create comparison plot with REAL data
+        fig = create_model_comparison_plot(
+            variable_name=series_name,
+            train_values=train_values,
+            test_values=test_values,
+            train_timestamps=train_timestamps,
+            test_timestamps=test_timestamps,
+            model_results=results,
+            selected_models=selected_models,
+            split_index=split_index
         )
+        
+        # Update marker style based on user preferences
+        fig.data[0].marker.size = marker_size
+        fig.data[0].marker.color = marker_color
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Export options
+        with st.expander("💾 Export Figure"):
+            quick_export_buttons(
+                fig,
+                f"model_comparison_{series_name}",
+                ['png', 'pdf', 'html']
+            )
     
     st.markdown("---")
     
@@ -514,45 +375,53 @@ def display_variable_tab(series_name: str):
     
     summary_data = []
     
-    # Tier 1 - Mathematical Models
-    for model_name in results.get('tier1_math', {}).keys():
+    # Tier 1 - Mathematical Models (REAL DATA)
+    for model_name, model_data in results.get('tier1_math', {}).items():
+        test_metrics = model_data.get('test_metrics', {})
         summary_data.append({
             'Tier': 'Tier 1 (Math)',
             'Model': model_name,
             'Type': 'Mathematical',
-            'Status': '✅ Trained'
+            'R²': f"{test_metrics.get('r2', 0):.3f}",
+            'MAE': f"{test_metrics.get('mae', 0):.3f}",
+            'RMSE': f"{test_metrics.get('rmse', 0):.3f}",
+            'Equation': model_data.get('equation', 'N/A')
         })
     
-    # Tier 2 - Time Series Models
-    for model_name in results.get('tier2_timeseries', {}).keys():
+    # Tier 2 - Time Series Models (REAL DATA)
+    for model_name, model_data in results.get('tier2_timeseries', {}).items():
+        test_metrics = model_data.get('test_metrics', {})
         summary_data.append({
             'Tier': 'Tier 2 (TS)',
             'Model': model_name,
             'Type': 'Time Series',
-            'Status': '✅ Trained'
+            'R²': f"{test_metrics.get('r2', 0):.3f}",
+            'MAE': f"{test_metrics.get('mae', 0):.3f}",
+            'RMSE': f"{test_metrics.get('rmse', 0):.3f}",
+            'Equation': model_data.get('equation', 'N/A')
         })
     
-    # Tier 3 - ML Models
-    for model_name in results.get('tier3_ml', {}).keys():
+    # Tier 3 - ML Models (REAL DATA)
+    for model_name, model_data in results.get('tier3_ml', {}).items():
+        test_metrics = model_data.get('test_metrics', {})
         summary_data.append({
             'Tier': 'Tier 3 (ML)',
             'Model': model_name,
             'Type': 'Machine Learning',
-            'Status': '✅ Trained'
+            'R²': f"{test_metrics.get('r2', 0):.3f}",
+            'MAE': f"{test_metrics.get('mae', 0):.3f}",
+            'RMSE': f"{test_metrics.get('rmse', 0):.3f}",
+            'Equation': model_data.get('equation', 'N/A')
         })
-    
-    # PLACEHOLDER data if no models
-    if not summary_data:
-        summary_data = [
-            {'Tier': 'Tier 1 (Math)', 'Model': 'Linear Trend', 'Type': 'Mathematical', 'Status': '✅ Trained'},
-            {'Tier': 'Tier 1 (Math)', 'Model': 'Polynomial (2)', 'Type': 'Mathematical', 'Status': '✅ Trained'},
-            {'Tier': 'Tier 2 (TS)', 'Model': 'ETS/Holt-Winters', 'Type': 'Time Series', 'Status': '✅ Trained'},
-            {'Tier': 'Tier 3 (ML)', 'Model': 'Gradient Boosting', 'Type': 'Machine Learning', 'Status': '✅ Trained'},
-        ]
     
     if summary_data:
         summary_df = pd.DataFrame(summary_data)
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        
+        # Show total count
+        st.caption(f"**Total models trained: {len(summary_data)}**")
+    else:
+        st.warning("No model results available")
 
 
 if __name__ == "__main__":
