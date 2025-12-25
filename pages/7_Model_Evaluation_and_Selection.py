@@ -51,6 +51,61 @@ def initialize_selection_state():
         st.session_state.model_selection_complete = False
 
 
+def calculate_health_index(metrics: dict) -> float:
+    """
+    Calculate health index (0-100) from R², MAE, RMSE, MAPE
+    
+    Parameters:
+    -----------
+    metrics : dict
+        Dictionary with 'r2', 'mae', 'rmse', 'mape'
+        
+    Returns:
+    --------
+    health_index : float
+        Score from 0-100 (100 = best)
+    """
+    # Extract metrics
+    r2 = metrics.get('r2', 0)
+    mae = metrics.get('mae', np.inf)
+    rmse = metrics.get('rmse', np.inf)
+    mape = metrics.get('mape', np.inf)
+    
+    # Handle NaN/inf
+    if np.isnan(r2) or np.isinf(r2):
+        r2 = 0
+    if np.isnan(mae) or np.isinf(mae):
+        mae = 100
+    if np.isnan(rmse) or np.isinf(rmse):
+        rmse = 100
+    if np.isnan(mape) or np.isinf(mape):
+        mape = 100
+    
+    # R² contribution (0-1 → 0-40 points)
+    # Higher R² is better
+    r2_score = max(0, min(r2, 1)) * 40
+    
+    # MAE contribution (0-20 points)
+    # Lower MAE is better - use inverse scaling
+    # Assume MAE < 10 is excellent, MAE > 50 is poor
+    mae_score = max(0, 20 * (1 - min(mae / 50, 1)))
+    
+    # RMSE contribution (0-20 points)
+    # Lower RMSE is better
+    # Assume RMSE < 10 is excellent, RMSE > 50 is poor
+    rmse_score = max(0, 20 * (1 - min(rmse / 50, 1)))
+    
+    # MAPE contribution (0-20 points)
+    # Lower MAPE is better
+    # Assume MAPE < 10% is excellent, MAPE > 50% is poor
+    mape_score = max(0, 20 * (1 - min(mape / 50, 1)))
+    
+    # Total health index
+    health_index = r2_score + mae_score + rmse_score + mape_score
+    
+    return round(health_index, 2)
+
+
 def get_metric_color(value: float, metric: str, all_values: list) -> str:
     """
     Get color for metric value (gradient from red to green)
@@ -84,7 +139,7 @@ def get_metric_color(value: float, metric: str, all_values: list) -> str:
     if max_val == min_val:
         normalized = 0.5
     else:
-        if metric == 'r2':
+        if metric in ['r2', 'health_index']:
             # Higher is better
             normalized = (value - min_val) / (max_val - min_val)
         else:
@@ -152,7 +207,12 @@ def create_evaluation_matrix():
             
             if model_data:
                 test_metrics = model_data.get('test_metrics', {})
+                
+                # Calculate health index
+                health_index = calculate_health_index(test_metrics)
+                
                 matrix_data['metrics'][var_name][model_name] = {
+                    'health_index': health_index,
                     'r2': test_metrics.get('r2', np.nan),
                     'mae': test_metrics.get('mae', np.nan),
                     'rmse': test_metrics.get('rmse', np.nan),
@@ -180,6 +240,31 @@ def display_cell_details(variable: str, model: str, model_data: dict):
         Model data with metrics and predictions
     """
     st.markdown(f"### 📊 {variable} - {model}")
+    
+    # Health Index (big display)
+    metrics_info = model_data.get('test_metrics', {})
+    health_index = calculate_health_index(metrics_info)
+    
+    col_health = st.columns(1)[0]
+    
+    # Color code health index
+    if health_index >= 80:
+        health_color = "🟢"
+        health_label = "Excellent"
+    elif health_index >= 60:
+        health_color = "🟡"
+        health_label = "Good"
+    elif health_index >= 40:
+        health_color = "🟠"
+        health_label = "Fair"
+    else:
+        health_color = "🔴"
+        health_label = "Poor"
+    
+    st.markdown(f"## {health_color} Health Index: {health_index}/100 ({health_label})")
+    st.progress(health_index / 100)
+    
+    st.markdown("---")
     
     # Metrics display
     col1, col2, col3, col4 = st.columns(4)
@@ -247,6 +332,23 @@ def display_cell_details(variable: str, model: str, model_data: dict):
     # Visualization
     st.markdown("**Model Performance Visualization**")
     
+    # Customization options
+    col_a, col_b = st.columns(2)
+    with col_a:
+        scatter_size = st.slider(
+            "Point Size",
+            min_value=1,
+            max_value=15,
+            value=6,
+            key=f"scatter_size_{variable}_{model}"
+        )
+    with col_b:
+        scatter_color = st.color_picker(
+            "Point Color",
+            value="#000000",
+            key=f"scatter_color_{variable}_{model}"
+        )
+    
     try:
         # Get variable results
         var_results = st.session_state.trained_models[variable]
@@ -269,6 +371,10 @@ def display_cell_details(variable: str, model: str, model_data: dict):
             selected_models=[model],
             split_index=split_index
         )
+        
+        # Apply customizations
+        fig.data[0].marker.size = scatter_size
+        fig.data[0].marker.color = scatter_color
         
         st.plotly_chart(fig, use_container_width=True)
         
@@ -341,24 +447,37 @@ def main():
     # === METRIC SELECTOR ===
     st.subheader("📊 Evaluation Matrix")
     
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([2, 1, 1])
     
     with col1:
         metric_display = st.selectbox(
-            "Color cells by metric:",
-            ['r2', 'mae', 'rmse', 'mape'],
+            "Select metric to display in cells:",
+            ['health_index', 'r2', 'mae', 'rmse', 'mape'],
             format_func=lambda x: {
+                'health_index': '🏥 Health Index (0-100)',
                 'r2': 'R² (Variance Explained)',
                 'mae': 'MAE (Mean Absolute Error)',
                 'rmse': 'RMSE (Root Mean Squared Error)',
                 'mape': 'MAPE (Mean Absolute % Error)'
             }[x],
-            index=0
+            index=0,  # Default to health_index
+            key='metric_selector'
         )
     
     with col2:
+        if st.button("🔄 Apply & Update Colors", type="primary", use_container_width=True):
+            st.session_state.current_metric = metric_display
+            st.rerun()
+    
+    with col3:
         st.metric("Variables", len(variables))
         st.metric("Model Types", len(models))
+    
+    # Get current metric (use session state to persist after Apply button)
+    if 'current_metric' not in st.session_state:
+        st.session_state.current_metric = 'health_index'
+    
+    current_metric = st.session_state.current_metric
     
     # === INTERACTIVE MATRIX ===
     st.markdown("#### Interactive Evaluation Matrix")
@@ -387,10 +506,10 @@ def main():
                 
                 if metrics is None:
                     # Model not available
-                    st.markdown("🔘")
+                    st.markdown("⚪")
                 else:
                     # Get metric value for coloring
-                    metric_value = metrics.get(metric_display, np.nan)
+                    metric_value = metrics.get(current_metric, np.nan)
                     
                     # Get all values for this metric to scale colors
                     all_metric_values = []
@@ -398,28 +517,59 @@ def main():
                         for m in models:
                             m_data = matrix_data['metrics'][v].get(m)
                             if m_data:
-                                val = m_data.get(metric_display, np.nan)
+                                val = m_data.get(current_metric, np.nan)
                                 if not np.isnan(val):
                                     all_metric_values.append(val)
-                    
-                    # Get color
-                    if np.isnan(metric_value):
-                        color = 'rgb(200, 200, 200)'
-                    else:
-                        color = get_metric_color(metric_value, metric_display, all_metric_values)
                     
                     # Check if selected
                     is_selected = (variable in st.session_state.selected_models_for_forecast and 
                                  st.session_state.selected_models_for_forecast[variable] == model)
                     
+                    # Get color
                     if is_selected:
-                        color = 'rgb(70, 130, 180)'  # Blue for selected
+                        # Blue for selected - use markdown with colored background
+                        bg_color = '#4682B4'  # Steel blue
+                        text_color = 'white'
+                    elif np.isnan(metric_value):
+                        bg_color = '#C8C8C8'  # Gray
+                        text_color = 'black'
+                    else:
+                        color_rgb = get_metric_color(metric_value, current_metric, all_metric_values)
+                        bg_color = color_rgb.replace('rgb', '').replace('(', '').replace(')', '')
+                        rgb_parts = [int(x.strip()) for x in bg_color.split(',')]
+                        bg_color = f'#{rgb_parts[0]:02x}{rgb_parts[1]:02x}{rgb_parts[2]:02x}'
+                        # Use white text on dark backgrounds
+                        brightness = (rgb_parts[0] * 299 + rgb_parts[1] * 587 + rgb_parts[2] * 114) / 1000
+                        text_color = 'white' if brightness < 128 else 'black'
                     
-                    # Create button with color
-                    button_label = f"{metric_value:.3f}" if not np.isnan(metric_value) else "N/A"
+                    # Format button label based on metric
+                    if current_metric == 'health_index':
+                        button_label = f"{int(metric_value)}" if not np.isnan(metric_value) else "N/A"
+                    else:
+                        button_label = f"{metric_value:.3f}" if not np.isnan(metric_value) else "N/A"
                     
+                    # Create colored button using HTML/CSS
+                    button_html = f"""
+                    <div style="
+                        background-color: {bg_color};
+                        color: {text_color};
+                        padding: 10px;
+                        border-radius: 5px;
+                        text-align: center;
+                        font-weight: bold;
+                        cursor: pointer;
+                        border: 2px solid {'#000' if is_selected else '#ccc'};
+                        margin: 2px;
+                    ">
+                        {button_label}
+                    </div>
+                    """
+                    
+                    st.markdown(button_html, unsafe_allow_html=True)
+                    
+                    # Add invisible button for click detection
                     if st.button(
-                        button_label,
+                        "Select",
                         key=f"cell_{variable}_{model}",
                         help=f"Click to view details for {variable} - {model}",
                         use_container_width=True
@@ -491,9 +641,11 @@ def main():
             metrics = matrix_data['metrics'][variable].get(model)
             if metrics:
                 test_metrics = metrics['model_data'].get('test_metrics', {})
+                health_index = metrics.get('health_index', 0)
                 summary_data.append({
                     'Variable': variable,
                     'Selected Model': model,
+                    'Health Index': f"{int(health_index)}/100",
                     'R²': f"{test_metrics.get('r2', 0):.4f}",
                     'MAE': f"{test_metrics.get('mae', 0):.4f}",
                     'RMSE': f"{test_metrics.get('rmse', 0):.4f}"
