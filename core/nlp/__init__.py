@@ -18,6 +18,12 @@ from .unification import (
     get_all_canonical_parameters
 )
 from .templates import extract_with_templates, get_template_count
+from .ml_extractor import (
+    hybrid_extract,
+    extract_with_gliner,
+    is_gliner_available,
+    get_gliner_status
+)
 
 __all__ = [
     'detect_language',
@@ -42,5 +48,9 @@ __all__ = [
     'add_user_synonym',
     'get_all_canonical_parameters',
     'extract_with_templates',
-    'get_template_count'
+    'get_template_count',
+    'hybrid_extract',
+    'extract_with_gliner',
+    'is_gliner_available',
+    'get_gliner_status'
 ]
