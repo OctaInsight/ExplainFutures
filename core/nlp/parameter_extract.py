@@ -232,8 +232,8 @@ def extract_with_regex(sentence: str) -> List[Dict]:
     """
     items = []
     
-    # Pattern 1: "GDP increases by 20%"
-    pattern1 = r'(\w+(?:\s+\w+)?)\s+(increases?|decreases?|grows?|falls?|rises?|declines?)\s+by\s+(\d+\.?\d*)\s*(%|percent|pct)'
+    # Pattern 1: "GDP increases by 20%" or "GDP increases by 20 percent"
+    pattern1 = r'([A-Z][A-Za-z0-9\s]+?)\s+(increases?|decreases?|grows?|falls?|rises?|declines?)\s+(?:by\s+)?(\d+\.?\d*)\s*(%|percent|pct)'
     matches = re.finditer(pattern1, sentence, re.IGNORECASE)
     
     for match in matches:
@@ -252,8 +252,8 @@ def extract_with_regex(sentence: str) -> List[Dict]:
             'source_sentence': sentence
         })
     
-    # Pattern 2: "GDP reaches 3.2 trillion"
-    pattern2 = r'(\w+(?:\s+\w+)?)\s+(reaches?|hits?|attains?)\s+(\d+\.?\d*)\s*(trillion|billion|million|thousand|mtco2|gw|twh)'
+    # Pattern 2: "GDP reaches 3.2 trillion" or "GDP reaches 3.2 trillion dollars"
+    pattern2 = r'([A-Z][A-Za-z0-9\s]+?)\s+(reaches?|hits?|attains?|to)\s+(\d+\.?\d*)\s*(trillion|billion|million|thousand|mtco2|gw|twh|kt|mt|gt)'
     matches = re.finditer(pattern2, sentence, re.IGNORECASE)
     
     for match in matches:
@@ -271,13 +271,13 @@ def extract_with_regex(sentence: str) -> List[Dict]:
             'source_sentence': sentence
         })
     
-    # Pattern 3: "20% increase in GDP"
-    pattern3 = r'(\d+\.?\d*)\s*(%|percent|pct)\s+(increase|decrease)\s+in\s+(\w+(?:\s+\w+)?)'
+    # Pattern 3: "20% increase in GDP" or "20 percent increase in GDP"
+    pattern3 = r'(\d+\.?\d*)\s*(%|percent|pct)\s+(increase|decrease|reduction|growth|decline)\s+(?:in|of)\s+([A-Z][A-Za-z0-9\s]+?)(?:\s|$|,|\.)'
     matches = re.finditer(pattern3, sentence, re.IGNORECASE)
     
     for match in matches:
         value = float(match.group(1))
-        direction = 'increase' if match.group(3).lower() == 'increase' else 'decrease'
+        direction = 'increase' if match.group(3).lower() in ['increase', 'growth'] else 'decrease'
         parameter = match.group(4).strip()
         
         items.append({
@@ -290,8 +290,8 @@ def extract_with_regex(sentence: str) -> List[Dict]:
             'source_sentence': sentence
         })
     
-    # Pattern 4: "GDP doubles"
-    pattern4 = r'(\w+(?:\s+\w+)?)\s+(doubles?|halves?|triples?)'
+    # Pattern 4: "GDP doubles" or "emissions halve"
+    pattern4 = r'([A-Z][A-Za-z0-9\s]+?)\s+(doubles?|halves?|triples?)'
     matches = re.finditer(pattern4, sentence, re.IGNORECASE)
     
     for match in matches:
@@ -321,12 +321,50 @@ def extract_with_regex(sentence: str) -> List[Dict]:
             'source_sentence': sentence
         })
     
-    # Pattern 5: "GDP increases" (direction only)
-    pattern5 = r'(\w+(?:\s+\w+)?)\s+(increases?|decreases?|grows?|falls?|rises?|declines?|remains?\s+stable)'
+    # Pattern 5: "GDP of 3.2 trillion" or "emissions of 5 MtCO2"
+    pattern5 = r'([A-Z][A-Za-z0-9\s]+?)\s+of\s+(\d+\.?\d*)\s*(trillion|billion|million|thousand|mtco2|gw|twh|%|percent)'
+    matches = re.finditer(pattern5, sentence, re.IGNORECASE)
     
-    # Only match if no value was already extracted
+    for match in matches:
+        parameter = match.group(1).strip()
+        value = float(match.group(2))
+        unit = match.group(3).lower()
+        unit = '%' if unit in ['%', 'percent'] else unit
+        
+        items.append({
+            'parameter': parameter,
+            'direction': 'target',
+            'value': value,
+            'unit': unit,
+            'value_type': 'percent' if unit == '%' else 'absolute',
+            'confidence': 0.8,
+            'source_sentence': sentence
+        })
+    
+    # Pattern 6: "GDP: 20%", "Emissions: 5 MtCO2" (colon format)
+    pattern6 = r'([A-Z][A-Za-z0-9\s]+?):\s*(\d+\.?\d*)\s*(%|percent|trillion|billion|million|mtco2|gw|twh)?'
+    matches = re.finditer(pattern6, sentence, re.IGNORECASE)
+    
+    for match in matches:
+        parameter = match.group(1).strip()
+        value = float(match.group(2))
+        unit = match.group(3).lower() if match.group(3) else ''
+        unit = '%' if unit in ['%', 'percent'] else unit
+        
+        items.append({
+            'parameter': parameter,
+            'direction': 'target',
+            'value': value,
+            'unit': unit if unit else 'absolute',
+            'value_type': 'percent' if unit == '%' else 'absolute',
+            'confidence': 0.75,
+            'source_sentence': sentence
+        })
+    
+    # Pattern 7: "GDP increases" (direction only) - ONLY if no value was already extracted
     if not items:
-        matches = re.finditer(pattern5, sentence, re.IGNORECASE)
+        pattern7 = r'([A-Z][A-Za-z0-9\s]+?)\s+(increases?|decreases?|grows?|falls?|rises?|declines?|remains?\s+stable)'
+        matches = re.finditer(pattern7, sentence, re.IGNORECASE)
         
         for match in matches:
             parameter = match.group(1).strip()
