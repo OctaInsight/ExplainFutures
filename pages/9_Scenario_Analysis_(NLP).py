@@ -34,12 +34,6 @@ from core.nlp.schema import Scenario, ScenarioItem
 initialize_session_state()
 config = get_config()
 
-# Page configuration
-st.set_page_config(
-    page_title="Scenario Analysis", 
-    page_icon="📝", 
-    layout="wide"
-)
 
 # Render shared sidebar
 render_app_sidebar()
