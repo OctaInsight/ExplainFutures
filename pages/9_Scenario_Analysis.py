@@ -296,7 +296,11 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
     # Display items as individual rows for easier editing
     if scenario['items']:
         
-        st.markdown("#### 📋 Parameters (Edit individually)")
+        st.markdown(f"#### 📋 Parameters ({len(scenario['items'])} total)")
+        
+        # Add scrollable container if many parameters
+        if len(scenario['items']) > 10:
+            st.info(f"💡 This scenario has {len(scenario['items'])} parameters. Scroll down to see all.")
         
         # Edit each item individually
         for item_idx, item in enumerate(scenario['items']):
