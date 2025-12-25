@@ -25,12 +25,6 @@ from core.viz.export import quick_export_buttons
 initialize_session_state()
 config = get_config()
 
-# Page configuration
-st.set_page_config(
-    page_title="Future Projections", 
-    page_icon="🔮", 
-    layout="wide"
-)
 
 # Render shared sidebar
 render_app_sidebar()
