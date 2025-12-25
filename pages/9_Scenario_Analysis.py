@@ -71,12 +71,12 @@ def display_editable_comparison_table():
     
     Features:
     - Parameters grouped by category (Economic, Environmental, Social, etc.)
-    - Expandable rows to show source sentences for each scenario
     - All editing in table
+    - Clean UI without clutter
     """
     
     st.markdown("### 📊 Edit All Parameters")
-    st.caption("✏️ Click any cell to edit • Click 📝 button to see source sentences for each scenario")
+    st.caption("✏️ Click any cell to edit • Parameters grouped by category")
     
     scenarios = st.session_state.detected_scenarios
     
@@ -132,7 +132,7 @@ def display_editable_comparison_table():
         row = {
             'Parameter': param_name,
             '_is_category_header': False,
-            '_sources': param_data['sources_by_scenario']  # Store all sources
+            '_sources': param_data['sources_by_scenario']  # Store all sources for future use
         }
         
         # Add value, direction, unit for each scenario
@@ -163,70 +163,6 @@ def display_editable_comparison_table():
             short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
             columns.extend([f"{short_title}_Value", f"{short_title}_Direction", f"{short_title}_Unit"])
         df = pd.DataFrame(columns=columns)
-    
-    # === EXPANDABLE SOURCE SENTENCES ===
-    st.markdown("---")
-    st.markdown("### 📝 View Source Sentences")
-    st.caption("Select a parameter to see the source sentence from each scenario")
-    
-    # Get list of actual parameters (not category headers)
-    actual_params = [row['Parameter'] for _, row in df.iterrows() 
-                     if not row.get('_is_category_header', False)]
-    
-    if actual_params:
-        selected_param = st.selectbox(
-            "Select parameter:",
-            options=actual_params,
-            key="source_viewer_param"
-        )
-        
-        # Find sources for this parameter
-        param_row = df[df['Parameter'] == selected_param].iloc[0]
-        sources = param_row['_sources']
-        
-        if sources:
-            # Show source for each scenario in expandable sections
-            for scenario in scenarios:
-                scenario_id = scenario['id']
-                scenario_title = scenario['title']
-                
-                if scenario_id in sources and sources[scenario_id]:
-                    source_sentence = sources[scenario_id]
-                    
-                    # Extract context around parameter
-                    param_lower = selected_param.lower()
-                    sentence_lower = source_sentence.lower()
-                    
-                    if param_lower in sentence_lower:
-                        idx = sentence_lower.find(param_lower)
-                        start = max(0, idx - 50)
-                        end = min(len(source_sentence), idx + len(selected_param) + 50)
-                        context = source_sentence[start:end]
-                        
-                        if start > 0:
-                            context = "..." + context
-                        if end < len(source_sentence):
-                            context = context + "..."
-                        
-                        display_text = context
-                    else:
-                        # Show full sentence (truncated)
-                        if len(source_sentence) > 150:
-                            display_text = source_sentence[:150] + "..."
-                        else:
-                            display_text = source_sentence
-                    
-                    with st.expander(f"📄 {scenario_title}", expanded=False):
-                        st.info(f"*\"{display_text}\"*")
-                else:
-                    with st.expander(f"📄 {scenario_title}", expanded=False):
-                        st.warning("No source sentence available")
-        else:
-            st.warning("No source sentences available for this parameter")
-    
-    # === DISPLAY EDITABLE TABLE ===
-    st.markdown("---")
-    st.markdown("### ✏️ Edit Parameters")
     
     # Remove internal columns from display
     display_df = df.drop(columns=['_is_category_header', '_sources'], errors='ignore')
@@ -279,9 +215,7 @@ def display_editable_comparison_table():
         key="one_table_editor"
     )
     
-    # === AUTO-SAVE BUTTON ===
-    st.markdown("---")
-    
+    # Action buttons
     col1, col2, col3 = st.columns([2, 2, 1])
     
     with col1:
@@ -302,9 +236,8 @@ def display_editable_comparison_table():
             st.session_state.show_comparison_table = False
             st.rerun()
     
-    # === EXPORT ===
-    st.markdown("---")
-    st.markdown("### 📥 Export Table")
+    # Export buttons
+    st.markdown("**📥 Export Table**")
     
     col_exp1, col_exp2 = st.columns(2)
     
