@@ -24,7 +24,7 @@ from core.shared_sidebar import render_app_sidebar
 from core.nlp.lang_detect import detect_language
 from core.nlp.scenario_segment import segment_scenarios
 from core.nlp.parameter_extract import extract_parameters_from_scenarios
-from core.nlp.value_parse import parse_values
+from core.nlp.value_parse import parse_value_string, normalize_unit, format_value
 from core.nlp.mapping import suggest_variable_mapping, create_mapping
 from core.nlp.clean_text import generate_cleaned_scenario_text
 from core.nlp.schema import Scenario, ScenarioItem
@@ -587,4 +587,3 @@ def display_scenario_comparison():
 
 if __name__ == "__main__":
     main()
-
