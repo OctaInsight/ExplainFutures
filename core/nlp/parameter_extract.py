@@ -106,9 +106,24 @@ def extract_items_from_text(text: str) -> List[Dict]:
 
 def split_sentences(text: str) -> List[str]:
     """Split text into sentences"""
-    # Simple sentence splitting
-    sentences = re.split(r'[.!?]+', text)
-    return [s.strip() for s in sentences if s.strip()]
+    # More sophisticated sentence splitting
+    # First, handle abbreviations to avoid false splits
+    text = text.replace('e.g.', 'eg').replace('i.e.', 'ie').replace('etc.', 'etc')
+    
+    # Split on period, exclamation, or question mark followed by space and capital letter
+    sentences = re.split(r'[.!?]+(?=\s+[A-Z])', text)
+    
+    # Also split on newlines (for list-style input)
+    all_sentences = []
+    for sent in sentences:
+        # Further split on newlines
+        subsents = sent.split('\n')
+        all_sentences.extend(subsents)
+    
+    # Clean and filter
+    cleaned = [s.strip() for s in all_sentences if s.strip() and len(s.strip()) > 10]
+    
+    return cleaned
 
 
 def extract_with_spacy(sentence: str) -> List[Dict]:
@@ -233,18 +248,20 @@ def extract_with_regex(sentence: str) -> List[Dict]:
     items = []
     
     # Pattern 1: "GDP increases by 20%" or "GDP increases by 20 percent"
-    pattern1 = r'([A-Z][A-Za-z0-9\s]+?)\s+(increases?|decreases?|grows?|falls?|rises?|declines?)\s+(?:by\s+)?(\d+\.?\d*)\s*(%|percent|pct)'
+    pattern1 = r'([A-Z][A-Za-z0-9\s]+?)\s+(?:has\s+)?(?:continued\s+to\s+)?(?:increases?|decreases?|grows?|grown|falls?|fallen|rises?|risen|declines?|declined)\s+(?:by\s+)?(?:around\s+|about\s+|approximately\s+)?(\d+\.?\d*)\s*(%|percent|pct)'
     matches = re.finditer(pattern1, sentence, re.IGNORECASE)
     
     for match in matches:
         parameter = match.group(1).strip()
-        direction = 'increase' if match.group(2).lower() in ['increase', 'increases', 'grow', 'grows', 'rise', 'rises'] else 'decrease'
-        value = float(match.group(3))
+        # Clean parameter name
+        parameter = re.sub(r'\s+has$', '', parameter)
+        direction_word = 'increase' if any(word in match.group(0).lower() for word in ['increase', 'grow', 'rise', 'risen', 'grown']) else 'decrease'
+        value = float(match.group(2))
         unit = '%'
         
         items.append({
             'parameter': parameter,
-            'direction': direction,
+            'direction': direction_word,
             'value': value,
             'unit': unit,
             'value_type': 'percent',
@@ -253,13 +270,14 @@ def extract_with_regex(sentence: str) -> List[Dict]:
         })
     
     # Pattern 2: "GDP reaches 3.2 trillion" or "GDP reaches 3.2 trillion dollars"
-    pattern2 = r'([A-Z][A-Za-z0-9\s]+?)\s+(reaches?|hits?|attains?|to)\s+(\d+\.?\d*)\s*(trillion|billion|million|thousand|mtco2|gw|twh|kt|mt|gt)'
+    pattern2 = r'([A-Z][A-Za-z0-9\s]+?)\s+(?:has\s+)?(?:reaches?|reached|hits?|attains?|to|of)\s+(?:around\s+|about\s+|approximately\s+)?(\d+\.?\d*)\s*(trillion|billion|million|thousand|mtco2|gw|twh|kt|mt|gt)'
     matches = re.finditer(pattern2, sentence, re.IGNORECASE)
     
     for match in matches:
         parameter = match.group(1).strip()
-        value = float(match.group(3))
-        unit = match.group(4).lower()
+        parameter = re.sub(r'\s+has$', '', parameter)
+        value = float(match.group(2))
+        unit = match.group(3).lower()
         
         items.append({
             'parameter': parameter,
@@ -272,17 +290,17 @@ def extract_with_regex(sentence: str) -> List[Dict]:
         })
     
     # Pattern 3: "20% increase in GDP" or "20 percent increase in GDP"
-    pattern3 = r'(\d+\.?\d*)\s*(%|percent|pct)\s+(increase|decrease|reduction|growth|decline)\s+(?:in|of)\s+([A-Z][A-Za-z0-9\s]+?)(?:\s|$|,|\.)'
+    pattern3 = r'(?:around\s+|about\s+|approximately\s+)?(\d+\.?\d*)\s*(%|percent|pct)\s+(?:increase|decrease|reduction|growth|decline|rise|fall)\s+(?:in|of)\s+([A-Z][A-Za-z0-9\s]+?)(?:\s|$|,|\.)'
     matches = re.finditer(pattern3, sentence, re.IGNORECASE)
     
     for match in matches:
         value = float(match.group(1))
-        direction = 'increase' if match.group(3).lower() in ['increase', 'growth'] else 'decrease'
-        parameter = match.group(4).strip()
+        direction_word = 'increase' if any(word in match.group(0).lower() for word in ['increase', 'growth', 'rise']) else 'decrease'
+        parameter = match.group(3).strip()
         
         items.append({
             'parameter': parameter,
-            'direction': direction,
+            'direction': direction_word,
             'value': value,
             'unit': '%',
             'value_type': 'percent',
@@ -291,18 +309,19 @@ def extract_with_regex(sentence: str) -> List[Dict]:
         })
     
     # Pattern 4: "GDP doubles" or "emissions halve"
-    pattern4 = r'([A-Z][A-Za-z0-9\s]+?)\s+(doubles?|halves?|triples?)'
+    pattern4 = r'([A-Z][A-Za-z0-9\s]+?)\s+(?:has\s+)?(?:doubles?|doubled|halves?|halved|triples?|tripled)'
     matches = re.finditer(pattern4, sentence, re.IGNORECASE)
     
     for match in matches:
         parameter = match.group(1).strip()
-        verb = match.group(2).lower()
+        parameter = re.sub(r'\s+has$', '', parameter)
+        verb = match.group(0).lower()
         
         if 'double' in verb:
             direction = 'double'
             value = 100.0
             unit = '%'
-        elif 'halve' in verb:
+        elif 'halve' in verb or 'halved' in verb:
             direction = 'halve'
             value = -50.0
             unit = '%'
@@ -322,7 +341,7 @@ def extract_with_regex(sentence: str) -> List[Dict]:
         })
     
     # Pattern 5: "GDP of 3.2 trillion" or "emissions of 5 MtCO2"
-    pattern5 = r'([A-Z][A-Za-z0-9\s]+?)\s+of\s+(\d+\.?\d*)\s*(trillion|billion|million|thousand|mtco2|gw|twh|%|percent)'
+    pattern5 = r'([A-Z][A-Za-z0-9\s]+?)\s+of\s+(?:around\s+|about\s+|approximately\s+)?(\d+\.?\d*)\s*(trillion|billion|million|thousand|mtco2|gw|twh|%|percent)'
     matches = re.finditer(pattern5, sentence, re.IGNORECASE)
     
     for match in matches:
@@ -342,7 +361,7 @@ def extract_with_regex(sentence: str) -> List[Dict]:
         })
     
     # Pattern 6: "GDP: 20%", "Emissions: 5 MtCO2" (colon format)
-    pattern6 = r'([A-Z][A-Za-z0-9\s]+?):\s*(\d+\.?\d*)\s*(%|percent|trillion|billion|million|mtco2|gw|twh)?'
+    pattern6 = r'([A-Z][A-Za-z0-9\s]+?):\s*(?:around\s+|about\s+)?(\d+\.?\d*)\s*(%|percent|trillion|billion|million|mtco2|gw|twh)?'
     matches = re.finditer(pattern6, sentence, re.IGNORECASE)
     
     for match in matches:
@@ -361,18 +380,68 @@ def extract_with_regex(sentence: str) -> List[Dict]:
             'source_sentence': sentence
         })
     
-    # Pattern 7: "GDP increases" (direction only) - ONLY if no value was already extracted
+    # Pattern 7: "falling by approximately 40 percent" or "increasing by around 25 percent"
+    pattern7 = r'(?:falling|rising|increasing|decreasing|growing|declining)\s+by\s+(?:around\s+|about\s+|approximately\s+)?(\d+\.?\d*)\s*(%|percent|pct)'
+    matches = re.finditer(pattern7, sentence, re.IGNORECASE)
+    
+    for match in matches:
+        direction_word = 'increase' if any(word in match.group(0).lower() for word in ['rising', 'increasing', 'growing']) else 'decrease'
+        value = float(match.group(1))
+        
+        # Try to find subject before this phrase
+        # Look backwards in sentence
+        before_text = sentence[:match.start()]
+        # Find capitalized noun phrase
+        subject_match = re.search(r'([A-Z][A-Za-z0-9\s]+?)\s+(?:has|have)\s*$', before_text)
+        
+        if subject_match:
+            parameter = subject_match.group(1).strip()
+        else:
+            # Default to generic name
+            parameter = "Value"
+        
+        items.append({
+            'parameter': parameter,
+            'direction': direction_word,
+            'value': value,
+            'unit': '%',
+            'value_type': 'percent',
+            'confidence': 0.8,
+            'source_sentence': sentence
+        })
+    
+    # Pattern 8: "reduction in carbon emissions of only around 10 percent"
+    pattern8 = r'(?:increase|decrease|reduction|growth)\s+in\s+([A-Za-z0-9\s]+?)\s+of\s+(?:only\s+)?(?:around\s+|about\s+)?(\d+\.?\d*)\s*(%|percent)'
+    matches = re.finditer(pattern8, sentence, re.IGNORECASE)
+    
+    for match in matches:
+        direction_word = 'increase' if 'increase' in match.group(0).lower() or 'growth' in match.group(0).lower() else 'decrease'
+        parameter = match.group(1).strip()
+        value = float(match.group(2))
+        
+        items.append({
+            'parameter': parameter,
+            'direction': direction_word,
+            'value': value,
+            'unit': '%',
+            'value_type': 'percent',
+            'confidence': 0.85,
+            'source_sentence': sentence
+        })
+    
+    # Pattern 9: "GDP increases" (direction only) - ONLY if no value was already extracted
     if not items:
-        pattern7 = r'([A-Z][A-Za-z0-9\s]+?)\s+(increases?|decreases?|grows?|falls?|rises?|declines?|remains?\s+stable)'
-        matches = re.finditer(pattern7, sentence, re.IGNORECASE)
+        pattern9 = r'([A-Z][A-Za-z0-9\s]+?)\s+(?:has\s+)?(?:increases?|increased|decreases?|decreased|grows?|grown|falls?|fallen|rises?|risen|declines?|declined|remains?\s+stable)'
+        matches = re.finditer(pattern9, sentence, re.IGNORECASE)
         
         for match in matches:
             parameter = match.group(1).strip()
-            verb = match.group(2).lower()
+            parameter = re.sub(r'\s+has$', '', parameter)
+            verb = match.group(0).lower()
             
             if 'stable' in verb or 'remain' in verb:
                 direction = 'stable'
-            elif verb in ['increase', 'increases', 'grow', 'grows', 'rise', 'rises']:
+            elif any(word in verb for word in ['increase', 'grow', 'rise', 'risen', 'grown']):
                 direction = 'increase'
             else:
                 direction = 'decrease'
