@@ -26,7 +26,6 @@ scipy>=1.11.0
 scikit-learn>=1.3.0
 umap-learn>=0.5.3
 
-
 # Data handling
 python-dotenv>=1.0.0
 
@@ -36,3 +35,20 @@ supabase>=2.0.0
 # Optional: For better performance
 numba>=0.57.0
 
+# ============================================================
+# TIME SERIES MODELING (REQUIRED FOR PAGES 6, 7, 8)
+# ============================================================
+
+# Time Series Forecasting
+statsmodels>=0.14.0        # For ETS, ARIMA, statistical models
+
+# Auto ARIMA (recommended but optional)
+pmdarima>=2.0.0           # For automatic ARIMA parameter selection
+
+# Gradient Boosting (optional but recommended - better than scikit-learn GBR)
+xgboost>=1.7.0            # High-performance gradient boosting
+
+# Additional utilities for time series
+# These are likely already satisfied by other dependencies, but listing explicitly:
+# joblib>=1.3.0           # Parallel processing (comes with scikit-learn)
+# threadpoolctl>=3.1.0    # Thread control (comes with scikit-learn)
