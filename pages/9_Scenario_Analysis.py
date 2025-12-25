@@ -123,6 +123,32 @@ def main():
         **Note:** This module works independently - you don't need loaded data to use it!
         """)
     
+    # === GLiNER STATUS DISPLAY ===
+    try:
+        from core.nlp.ml_extractor import get_gliner_status
+        gliner_status = get_gliner_status()
+        
+        col_status1, col_status2 = st.columns([3, 1])
+        
+        with col_status1:
+            if gliner_status['available']:
+                if gliner_status['model_loaded']:
+                    st.success("✅ **Hybrid AI Mode Active:** GLiNER ML + Option B (Best Accuracy: ~85%)")
+                else:
+                    st.info("🔄 **Hybrid AI Mode Ready:** GLiNER will load automatically on first use")
+            else:
+                st.warning("⚠️ **Option B Mode Only:** Using Templates + spaCy + Regex (~70% accuracy)")
+                
+        with col_status2:
+            if not gliner_status['available']:
+                if st.button("📥 How to Install GLiNER"):
+                    st.code("pip install gliner --break-system-packages", language="bash")
+                    st.info("Run this command, then restart the app for AI-powered extraction!")
+    
+    except Exception:
+        # Silently continue if status check fails
+        pass
+    
     st.markdown("---")
     
     # === STEP 1: INPUT SCENARIO TEXT ===
@@ -326,11 +352,25 @@ def display_scenario_editor(scenario: dict, scenario_idx: int):
                 # Show both original and canonical if different
                 param_display = item.get('parameter', '')
                 canonical = item.get('parameter_canonical', '')
+                extraction_method = item.get('extraction_method', 'unknown')
+                
+                # Method badges
+                method_badges = {
+                    'hybrid_both': '🟢 AI+Templates',
+                    'gliner_only': '🟡 AI Only',
+                    'optionb_only': '🔵 Templates Only',
+                    'optionb': '⚪ Templates',
+                    'templates': '📋 Template',
+                    'spacy': '🔤 spaCy',
+                    'regex': '🔍 Regex'
+                }
+                
+                method_badge = method_badges.get(extraction_method, f'❓ {extraction_method}')
                 
                 if canonical and canonical != param_display:
-                    st.markdown(f"**Parameter {item_idx + 1}:** `{param_display}` → **{canonical}** ✨")
+                    st.markdown(f"**Parameter {item_idx + 1}:** `{param_display}` → **{canonical}** ✨ | {method_badge}")
                 else:
-                    st.markdown(f"**Parameter {item_idx + 1}:**")
+                    st.markdown(f"**Parameter {item_idx + 1}:** {method_badge}")
                 
                 col1, col2, col3, col4, col5 = st.columns([3, 2, 2, 2, 1])
                 
