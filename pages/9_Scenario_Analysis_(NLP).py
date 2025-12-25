@@ -210,6 +210,32 @@ def display_editable_comparison_table():
         key="one_table_editor"
     )
     
+    # Download parameter table
+    st.markdown("**📥 Download Parameter Table**")
+    
+    col_dl1, col_dl2 = st.columns(2)
+    
+    with col_dl1:
+        csv_data = edited_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download as CSV",
+            data=csv_data,
+            file_name=f"scenario_parameters_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    
+    with col_dl2:
+        excel_buffer = io.BytesIO()
+        edited_df.to_excel(excel_buffer, index=False, engine='openpyxl')
+        st.download_button(
+            label="📥 Download as Excel",
+            data=excel_buffer.getvalue(),
+            file_name=f"scenario_parameters_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    
     # Action buttons
     col1, col2, col3 = st.columns([2, 2, 1])
     
@@ -953,25 +979,19 @@ Renewable energy reaches 40% by 2040.""",
             if st.session_state.cleaned_scenarios:
                 display_cleaned_scenarios()
         
-            # === STEP 4: MAPPING TO DATASET VARIABLES (Only show after scenarios cleaned) ===
-            if st.session_state.get('scenarios_cleaned', False):
-                st.markdown("---")
-                st.subheader("🔗 Step 4: Map to Dataset Variables")
-                
-                # Check if data is available
-                if st.session_state.get('df_long') is not None:
-                    display_mapping_interface()
-                else:
-                    st.info("ℹ️ No dataset loaded. Scenario analysis will work in **standalone mode**.")
-                    st.markdown("*To enable mapping, load data in the Data Upload page.*")
             
-            # === STEP 5: CATEGORICAL COMPARISON PLOTS (Only show after scenarios cleaned) ===
+            # === STEP 4: CATEGORICAL COMPARISON PLOTS (Only show after scenarios cleaned) ===
             if st.session_state.get('scenarios_cleaned', False):
                 st.markdown("---")
-                st.subheader("📊 Step 5: Visualize Scenarios by Category")
+                st.subheader("📊 Step 4: Visualize Scenarios by Category")
                 st.caption("Scatter plots showing parameter values across scenarios, grouped by category")
                 
                 display_categorical_comparison_plots()
+                
+                # Store data for next page (Page 10)
+                if st.session_state.get('show_comparison_table', False):
+                    # Store parameter data
+                    st.session_state.scenario_parameters = st.session_state.get('detected_scenarios', [])
 
 
 def display_categorical_comparison_plots():
@@ -1028,137 +1048,198 @@ def display_categorical_comparison_plots():
         if not params:
             continue
         
-        st.markdown(f"### {category}")
-        
-        # Prepare data for plotting
-        plot_data = []
-        
-        for param_name, data_points in params.items():
-            for dp in data_points:
-                plot_data.append({
-                    'Parameter': param_name,
-                    'Scenario': dp['scenario'],
-                    'Value': dp['value'],
-                    'Unit': dp['unit']
-                })
-        
-        if not plot_data:
-            continue
-        
-        df_plot = pd.DataFrame(plot_data)
-        
-        # Group by unit to create separate y-axes if needed
-        units_in_category = df_plot['Unit'].unique()
-        
-        if len(units_in_category) == 1:
-            # Single unit - simple plot
-            unit = units_in_category[0]
+        # Use expander for collapsible sections
+        with st.expander(f"📊 {category}", expanded=False):
             
-            fig = px.scatter(
-                df_plot,
-                x='Parameter',
-                y='Value',
-                color='Scenario',
-                title=f"{category} - All values in {unit if unit else 'absolute'}",
-                labels={'Value': f'Value ({unit})' if unit else 'Value'},
-                height=500
-            )
+            # Prepare data for plotting
+            plot_data = []
             
-            # Customize layout
-            fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
-            fig.update_layout(
-                xaxis_tickangle=-45,
-                hovermode='closest',
-                showlegend=True,
-                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-            )
+            for param_name, data_points in params.items():
+                for dp in data_points:
+                    plot_data.append({
+                        'Parameter': param_name,
+                        'Scenario': dp['scenario'],
+                        'Value': dp['value'],
+                        'Unit': dp['unit']
+                    })
             
-            st.plotly_chart(fig, use_container_width=True)
+            if not plot_data:
+                continue
             
-            # Export buttons for this plot
-            col_exp1, col_exp2 = st.columns(2)
+            df_plot = pd.DataFrame(plot_data)
             
-            with col_exp1:
-                # Export plot as HTML
-                html_buffer = io.StringIO()
-                fig.write_html(html_buffer)
-                st.download_button(
-                    label="📥 Download Plot (HTML)",
-                    data=html_buffer.getvalue(),
-                    file_name=f"{category.replace('. ', '_').lower()}_plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
-                    mime="text/html",
-                    use_container_width=True,
-                    key=f"export_html_{category}"
+            # Group by unit to create separate y-axes if needed
+            units_in_category = df_plot['Unit'].unique()
+            
+            if len(units_in_category) == 1:
+                # Single unit - simple plot
+                unit = units_in_category[0]
+                
+                fig = px.scatter(
+                    df_plot,
+                    x='Parameter',
+                    y='Value',
+                    color='Scenario',
+                    title=f"{category} - All values in {unit if unit else 'absolute'}",
+                    labels={'Value': f'Value ({unit})' if unit else 'Value'},
+                    height=500
                 )
-            
-            with col_exp2:
-                # Export data as CSV
-                csv_data = df_plot.to_csv(index=False)
-                st.download_button(
-                    label="📥 Download Data (CSV)",
-                    data=csv_data,
-                    file_name=f"{category.replace('. ', '_').lower()}_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                    key=f"export_csv_{category}"
+                
+                # Customize layout
+                fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
+                fig.update_layout(
+                    xaxis_tickangle=-45,
+                    hovermode='closest',
+                    showlegend=True,
+                    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                 )
-        
-        else:
-            # Multiple units - create tabs for each unit
-            unit_tabs = st.tabs([f"{u if u else 'Absolute'}" for u in units_in_category])
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Export buttons for this plot
+                col_exp1, col_exp2, col_exp3, col_exp4 = st.columns(4)
+                
+                with col_exp1:
+                    # PNG export
+                    try:
+                        img_bytes = fig.to_image(format="png", width=1200, height=800)
+                        st.download_button(
+                            label="📥 PNG",
+                            data=img_bytes,
+                            file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_plot.png",
+                            mime="image/png",
+                            use_container_width=True,
+                            key=f"png_{category}_{unit}"
+                        )
+                    except:
+                        st.caption("⚠️ Install kaleido for PNG export")
+                
+                with col_exp2:
+                    # PDF export
+                    try:
+                        pdf_bytes = fig.to_image(format="pdf", width=1200, height=800)
+                        st.download_button(
+                            label="📥 PDF",
+                            data=pdf_bytes,
+                            file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_plot.pdf",
+                            mime="application/pdf",
+                            use_container_width=True,
+                            key=f"pdf_{category}_{unit}"
+                        )
+                    except:
+                        st.caption("⚠️ Install kaleido for PDF export")
+                
+                with col_exp3:
+                    # HTML export
+                    html_buffer = io.StringIO()
+                    fig.write_html(html_buffer)
+                    st.download_button(
+                        label="📥 HTML",
+                        data=html_buffer.getvalue(),
+                        file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_plot.html",
+                        mime="text/html",
+                        use_container_width=True,
+                        key=f"html_{category}_{unit}"
+                    )
+                
+                with col_exp4:
+                    # Data CSV export
+                    csv_data = df_plot.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Data",
+                        data=csv_data,
+                        file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_data.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key=f"csv_{category}_{unit}"
+                    )
             
-            for tab_idx, (tab, unit) in enumerate(zip(unit_tabs, units_in_category)):
-                with tab:
-                    df_unit = df_plot[df_plot['Unit'] == unit]
-                    
-                    fig = px.scatter(
-                        df_unit,
-                        x='Parameter',
-                        y='Value',
-                        color='Scenario',
-                        title=f"{category} - Values in {unit if unit else 'absolute'}",
-                        labels={'Value': f'Value ({unit})' if unit else 'Value'},
-                        height=500
-                    )
-                    
-                    # Customize layout
-                    fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
-                    fig.update_layout(
-                        xaxis_tickangle=-45,
-                        hovermode='closest',
-                        showlegend=True,
-                        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Export buttons for this tab
-                    col_exp1, col_exp2 = st.columns(2)
-                    
-                    with col_exp1:
-                        # Export plot as HTML
-                        html_buffer = io.StringIO()
-                        fig.write_html(html_buffer)
-                        st.download_button(
-                            label="📥 Download Plot (HTML)",
-                            data=html_buffer.getvalue(),
-                            file_name=f"{category.replace('. ', '_').lower()}_{unit}_plot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
-                            mime="text/html",
-                            use_container_width=True,
-                            key=f"export_html_{category}_{tab_idx}"
+            else:
+                # Multiple units - create tabs for each unit
+                unit_tabs = st.tabs([f"{u if u else 'Absolute'}" for u in units_in_category])
+                
+                for tab_idx, (tab, unit) in enumerate(zip(unit_tabs, units_in_category)):
+                    with tab:
+                        df_unit = df_plot[df_plot['Unit'] == unit]
+                        
+                        fig = px.scatter(
+                            df_unit,
+                            x='Parameter',
+                            y='Value',
+                            color='Scenario',
+                            title=f"{category} - Values in {unit if unit else 'absolute'}",
+                            labels={'Value': f'Value ({unit})' if unit else 'Value'},
+                            height=500
                         )
-                    
-                    with col_exp2:
-                        # Export data as CSV
-                        csv_data = df_unit.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download Data (CSV)",
-                            data=csv_data,
-                            file_name=f"{category.replace('. ', '_').lower()}_{unit}_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv",
-                            use_container_width=True,
-                            key=f"export_csv_{category}_{tab_idx}"
+                        
+                        # Customize layout
+                        fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
+                        fig.update_layout(
+                            xaxis_tickangle=-45,
+                            hovermode='closest',
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
                         )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Export buttons for this tab
+                        col_exp1, col_exp2, col_exp3, col_exp4 = st.columns(4)
+                        
+                        with col_exp1:
+                            # PNG export
+                            try:
+                                img_bytes = fig.to_image(format="png", width=1200, height=800)
+                                st.download_button(
+                                    label="📥 PNG",
+                                    data=img_bytes,
+                                    file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_plot.png",
+                                    mime="image/png",
+                                    use_container_width=True,
+                                    key=f"png_{category}_{tab_idx}"
+                                )
+                            except:
+                                st.caption("⚠️ Install kaleido")
+                        
+                        with col_exp2:
+                            # PDF export
+                            try:
+                                pdf_bytes = fig.to_image(format="pdf", width=1200, height=800)
+                                st.download_button(
+                                    label="📥 PDF",
+                                    data=pdf_bytes,
+                                    file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_plot.pdf",
+                                    mime="application/pdf",
+                                    use_container_width=True,
+                                    key=f"pdf_{category}_{tab_idx}"
+                                )
+                            except:
+                                st.caption("⚠️ Install kaleido")
+                        
+                        with col_exp3:
+                            # HTML export
+                            html_buffer = io.StringIO()
+                            fig.write_html(html_buffer)
+                            st.download_button(
+                                label="📥 HTML",
+                                data=html_buffer.getvalue(),
+                                file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_plot.html",
+                                mime="text/html",
+                                use_container_width=True,
+                                key=f"html_{category}_{tab_idx}"
+                            )
+                        
+                        with col_exp4:
+                            # Data CSV export
+                            csv_data = df_unit.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Data",
+                                data=csv_data,
+                                file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_data.csv",
+                                mime="text/csv",
+                                use_container_width=True,
+                                key=f"csv_{category}_{tab_idx}"
+                            )
 
 
 def display_scenario_editor(scenario: dict, scenario_idx: int):
