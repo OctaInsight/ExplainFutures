@@ -1,3 +1,9 @@
+[client]
+showSidebarNavigation = true
+
+[ui]
+hideTopBar = false
+
 [theme]
 primaryColor = "#FF4B4B"
 backgroundColor = "#0E1117"
