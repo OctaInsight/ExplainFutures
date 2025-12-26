@@ -376,10 +376,217 @@ def method_5_gliner_extraction(text: str) -> pd.DataFrame:
 
 
 # ============================================================================
-# PARAMETER NORMALIZATION
+# PARAMETER NAME CLEANING & DEDUPLICATION
 # ============================================================================
 
-def normalize_parameter_name(param: str) -> str:
+def clean_parameter_name(param: str) -> str:
+    """
+    Clean parameter name by removing direction words and artifacts
+    
+    Examples:
+    "GDP increases by" → "GDP"
+    "Economic parameters decreases" → "Economic parameters"
+    "CO2 emissions reaches" → "CO2 emissions"
+    """
+    if not param:
+        return param
+    
+    # Convert to string and strip
+    param = str(param).strip()
+    
+    # Remove direction words and artifacts
+    direction_patterns = [
+        r'\s+increases?\s+by\s*$',
+        r'\s+decreases?\s+by\s*$',
+        r'\s+increases?\s*$',
+        r'\s+decreases?\s*$',
+        r'\s+reaches?\s*$',
+        r'\s+targets?\s*$',
+        r'\s+achieves?\s*$',
+        r'\s+grows?\s+to\s*$',
+        r'\s+falls?\s+to\s*$',
+        r'\s+rises?\s+to\s*$',
+        r'\s+drops?\s+to\s*$',
+        r'\s+remains?\s*$',
+        r'\s+stable\s*$',
+        r'\s+by\s*$',
+        r'\s+to\s*$',
+        r'\s+at\s*$',
+    ]
+    
+    for pattern in direction_patterns:
+        param = re.sub(pattern, '', param, flags=re.IGNORECASE)
+    
+    # Remove trailing/leading whitespace and punctuation
+    param = param.strip().rstrip(':').rstrip(',').rstrip(';').strip()
+    
+    return param
+
+
+def calculate_parameter_similarity(param1: str, param2: str) -> float:
+    """
+    Calculate similarity between two parameter names
+    Uses multiple methods for robust matching
+    """
+    # Normalize both
+    p1 = param1.lower().strip()
+    p2 = param2.lower().strip()
+    
+    # Exact match
+    if p1 == p2:
+        return 1.0
+    
+    # Character-level similarity (Levenshtein-like)
+    char_similarity = SequenceMatcher(None, p1, p2).ratio()
+    
+    # Word-level similarity
+    words1 = set(p1.split())
+    words2 = set(p2.split())
+    
+    if words1 and words2:
+        word_overlap = len(words1.intersection(words2)) / max(len(words1), len(words2))
+    else:
+        word_overlap = 0.0
+    
+    # Containment check (one is substring of other)
+    if p1 in p2 or p2 in p1:
+        containment = 0.9
+    else:
+        containment = 0.0
+    
+    # Combined score (weighted average)
+    similarity = (char_similarity * 0.4 + word_overlap * 0.4 + containment * 0.2)
+    
+    return similarity
+
+
+def find_duplicate_parameters(param_list: List[str], threshold: float = 0.85) -> Dict[str, List[str]]:
+    """
+    Find groups of duplicate/similar parameters
+    
+    Returns:
+    --------
+    dict: {canonical_name: [similar_names]}
+    
+    Example:
+    {
+        "GDP": ["GDP", "GDP increases by", "gdp", "GDP growth"],
+        "CO2 emissions": ["CO2 emissions", "co2", "carbon emissions"]
+    }
+    """
+    if not param_list:
+        return {}
+    
+    # Clean all parameters first
+    cleaned_params = [(p, clean_parameter_name(p)) for p in param_list]
+    
+    # Group similar parameters
+    groups = {}
+    used = set()
+    
+    for i, (original_i, cleaned_i) in enumerate(cleaned_params):
+        if original_i in used:
+            continue
+        
+        # Start a new group
+        group = [original_i]
+        
+        # Find all similar parameters
+        for j, (original_j, cleaned_j) in enumerate(cleaned_params):
+            if i != j and original_j not in used:
+                similarity = calculate_parameter_similarity(cleaned_i, cleaned_j)
+                
+                if similarity >= threshold:
+                    group.append(original_j)
+                    used.add(original_j)
+        
+        # Choose canonical name (shortest cleaned version)
+        canonical = min(group, key=lambda x: len(clean_parameter_name(x)))
+        canonical_cleaned = clean_parameter_name(canonical)
+        
+        groups[canonical_cleaned] = group
+        used.add(original_i)
+    
+    return groups
+
+
+def deduplicate_extraction_table(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Deduplicate parameters in an extraction table
+    Merges similar parameter names
+    """
+    if df.empty:
+        return df
+    
+    # Get all unique parameters
+    all_params = df['parameter'].unique().tolist()
+    
+    # Find duplicates
+    duplicate_groups = find_duplicate_parameters(all_params, threshold=0.85)
+    
+    # Create mapping from any variant to canonical name
+    param_mapping = {}
+    for canonical, variants in duplicate_groups.items():
+        for variant in variants:
+            param_mapping[variant] = canonical
+    
+    # Apply mapping
+    df['parameter'] = df['parameter'].map(lambda x: param_mapping.get(x, clean_parameter_name(x)))
+    
+    # Group by parameter and aggregate (keep first value for each parameter)
+    if not df.empty:
+        # For duplicates within same table, keep the one with highest confidence
+        df_dedup = df.sort_values('confidence', ascending=False).groupby('parameter', as_index=False).first()
+        return df_dedup
+    
+    return df
+
+
+def advanced_parameter_deduplication(all_tables: Dict[str, pd.DataFrame]) -> Dict[str, pd.DataFrame]:
+    """
+    Advanced deduplication across all extraction tables
+    
+    Process:
+    1. Collect all unique parameter names from all methods
+    2. Find duplicate groups
+    3. Create canonical mapping
+    4. Apply to all tables
+    """
+    # Collect all parameters from all tables
+    all_params = []
+    for method, table in all_tables.items():
+        if not table.empty and 'parameter' in table.columns:
+            all_params.extend(table['parameter'].unique().tolist())
+    
+    if not all_params:
+        return all_tables
+    
+    # Find duplicate groups across ALL methods
+    duplicate_groups = find_duplicate_parameters(all_params, threshold=0.80)
+    
+    # Create global mapping
+    global_mapping = {}
+    for canonical, variants in duplicate_groups.items():
+        for variant in variants:
+            global_mapping[variant] = canonical
+    
+    # Apply mapping to all tables
+    cleaned_tables = {}
+    for method, table in all_tables.items():
+        if not table.empty and 'parameter' in table.columns:
+            # Apply global mapping
+            table_copy = table.copy()
+            table_copy['parameter'] = table_copy['parameter'].map(
+                lambda x: global_mapping.get(x, clean_parameter_name(x))
+            )
+            
+            # Deduplicate within table
+            table_copy = deduplicate_extraction_table(table_copy)
+            cleaned_tables[method] = table_copy
+        else:
+            cleaned_tables[method] = table
+    
+    return cleaned_tables
     """
     Standardize parameter names
     """
@@ -555,6 +762,10 @@ def extract_parameters_ensemble(text: str) -> pd.DataFrame:
     tables['semantic'] = method_3_semantic_extraction(text)
     tables['statistical'] = method_4_statistical_extraction(text)
     tables['gliner'] = method_5_gliner_extraction(text)
+    
+    # === CRITICAL: DEDUPLICATE PARAMETER NAMES ===
+    # This removes duplicates like "GDP", "GDP increases by", "GDP decreases"
+    tables = advanced_parameter_deduplication(tables)
     
     # Normalize parameter names in all tables
     for method, table in tables.items():
@@ -836,3 +1047,59 @@ def extract_title_and_year_ensemble(text: str) -> Tuple[str, int]:
     best_year = reconcile_years(years)
     
     return best_title, best_year
+
+
+def normalize_parameter_name(param: str) -> str:
+    """
+    Standardize parameter names after cleaning
+    """
+    # First, clean the parameter name (remove direction words)
+    param = clean_parameter_name(param)
+    
+    # Convert to lowercase
+    param = param.lower().strip()
+    
+    # Remove special characters except spaces
+    param = re.sub(r'[^\w\s]', ' ', param)
+    
+    # Remove extra spaces
+    param = re.sub(r'\s+', ' ', param).strip()
+    
+    # Common substitutions
+    substitutions = {
+        'gdp growth': 'gdp',
+        'gross domestic product': 'gdp',
+        'co2 emissions': 'co2 emissions',
+        'co2 emission': 'co2 emissions',
+        'carbon dioxide emissions': 'co2 emissions',
+        'carbon dioxide emission': 'co2 emissions',
+        'carbon emissions': 'co2 emissions',
+        'renewable energy share': 'renewable energy',
+        'renewable share': 'renewable energy',
+        'renewables': 'renewable energy',
+        'income inequality': 'inequality',
+        'gini index': 'inequality',
+        'gini coefficient': 'inequality',
+        'air pollution levels': 'air pollution',
+        'pollution levels': 'air pollution',
+        'employment rate': 'employment',
+        'unemployment': 'employment',
+        'public health outcomes': 'health outcomes',
+        'health outcome': 'health outcomes',
+        'disease rates': 'disease rate',
+        'energy efficiency': 'energy efficiency',
+        'productivity growth': 'productivity',
+        'public investment': 'investment',
+        'social cohesion': 'social cohesion',
+        'access to education': 'education access',
+        'educational access': 'education access',
+        'economic parameters': 'economic indicator',
+        'environmental parameters': 'environmental indicator'
+    }
+    
+    # Apply substitutions
+    for old, new in substitutions.items():
+        if param == old:
+            return new
+    
+    return param
