@@ -669,7 +669,7 @@ def main():
             col1, col2, col3 = st.columns([1, 2, 1])
             with col2:
                 if st.button("🔮 Proceed to Future Projections →", type="primary", use_container_width=True):
-                    st.switch_page("pages/8_Future_Projections.py")
+                    st.switch_page("pages/08_Future_Projections.py")
         else:
             missing = len(variables) - len(st.session_state.selected_models_for_forecast)
             st.warning(f"⚠️ {missing} variable(s) still need model selection")
