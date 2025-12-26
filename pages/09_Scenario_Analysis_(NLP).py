@@ -144,13 +144,12 @@ if 'nlp_models_loaded' not in st.session_state:
         st.session_state.nlp_models = nlp_models
         st.session_state.nlp_models_loaded = True
         
-        # Success message with balloons
-        st.success("🎉 **NLP Models Loaded Successfully!**")
-        st.info("💡 **Note:** Models are now cached. Page refreshes will be instant!")
-        st.balloons()
+        # Success message (professional - no balloons)
+        st.success("✅ **NLP Models Loaded Successfully**")
+        st.info("💡 Models are now cached. Page refreshes will be instant.")
         
         # Brief pause to show success, then rerun
-        time.sleep(1.5)
+        time.sleep(1.0)
         st.rerun()
 else:
     # Models already loaded - just retrieve from session
