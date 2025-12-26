@@ -926,6 +926,55 @@ Renewable energy reaches 40% by 2040.""",
                 st.info("📑 Segmenting scenarios...")
                 scenarios = segment_scenarios(scenario_text)
                 
+                # Improve title and year extraction
+                import re
+                for scenario in scenarios:
+                    # Extract year from title or text if not already set
+                    if not scenario.get('horizon') or scenario.get('horizon') == 2050:
+                        # Look for year in title first
+                        title = scenario.get('title', '')
+                        year_match = re.search(r'\b(20\d{2}|203\d|204\d|205\d)\b', title)
+                        
+                        if year_match:
+                            scenario['horizon'] = int(year_match.group(1))
+                        else:
+                            # Look in full text
+                            full_text = scenario.get('text', '')
+                            # Look for patterns like "by 2030", "in 2040", "year 2050"
+                            year_patterns = [
+                                r'by\s+(20\d{2})',
+                                r'in\s+(20\d{2})',
+                                r'year\s+(20\d{2})',
+                                r'to\s+(20\d{2})',
+                                r'until\s+(20\d{2})',
+                                r'\b(20\d{2})\b'
+                            ]
+                            
+                            for pattern in year_patterns:
+                                match = re.search(pattern, full_text, re.IGNORECASE)
+                                if match:
+                                    scenario['horizon'] = int(match.group(1))
+                                    break
+                    
+                    # Improve title extraction
+                    if not scenario.get('title') or scenario.get('title').startswith('Scenario'):
+                        full_text = scenario.get('text', '')
+                        
+                        # Look for patterns like "Scenario 1:", "Scenario A:", "Name: Something"
+                        title_patterns = [
+                            r'Scenario\s+[A-Za-z0-9]+\s*[:：]\s*([^\n]+)',
+                            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:：]',
+                            r'Scenario\s*[:：]\s*([^\n]+)',
+                        ]
+                        
+                        for pattern in title_patterns:
+                            match = re.search(pattern, full_text[:200])  # Check first 200 chars
+                            if match:
+                                extracted_title = match.group(1).strip()
+                                if extracted_title and len(extracted_title) < 50:
+                                    scenario['title'] = extracted_title
+                                    break
+                
                 st.success(f"✅ Detected {len(scenarios)} scenario(s)")
                 
                 # Step 3: Extract parameters from each scenario
@@ -951,61 +1000,43 @@ Renewable energy reaches 40% by 2040.""",
         
         # === SCENARIO SUMMARY TABLE ===
         st.markdown("**Detected Scenarios:**")
+        st.caption("✏️ Edit scenario names and projected years below")
         
-        summary_data = []
+        # Use simple input fields instead of data_editor for better UX
         for idx, scenario in enumerate(st.session_state.detected_scenarios):
-            summary_data.append({
-                'Scenario': scenario.get('title', f'Scenario {idx+1}'),
-                'Year': scenario.get('horizon', 2050),
-                'Parameters': len(scenario.get('items', []))
-            })
-        
-        df_summary = pd.DataFrame(summary_data)
-        
-        # Configure editable columns
-        summary_config = {
-            "Scenario": st.column_config.TextColumn(
-                "Scenario Name",
-                help="Edit scenario name",
-                required=True,
-                width="large"
-            ),
-            "Year": st.column_config.NumberColumn(
-                "Projected Year",
-                help="Edit projected year",
-                min_value=2020,
-                max_value=2100,
-                step=1,
-                format="%d",
-                width="medium"
-            ),
-            "Parameters": st.column_config.NumberColumn(
-                "# Parameters",
-                help="Number of detected parameters (read-only)",
-                disabled=True,
-                width="small"
-            )
-        }
-        
-        edited_summary = st.data_editor(
-            df_summary,
-            column_config=summary_config,
-            use_container_width=True,
-            hide_index=True,
-            num_rows="fixed",
-            key="scenario_summary_editor"
-        )
-        
-        # Update scenarios with edited data
-        for idx in range(len(edited_summary)):
-            st.session_state.detected_scenarios[idx]['title'] = str(edited_summary.iloc[idx]['Scenario'])
-            
-            # Handle Year with type checking
-            year_value = edited_summary.iloc[idx]['Year']
-            if pd.notna(year_value):
-                st.session_state.detected_scenarios[idx]['horizon'] = int(float(year_value))
-            else:
-                st.session_state.detected_scenarios[idx]['horizon'] = 2050  # Default value
+            with st.container():
+                st.markdown(f"**Scenario {idx + 1}:**")
+                
+                col1, col2, col3 = st.columns([3, 2, 1])
+                
+                with col1:
+                    new_title = st.text_input(
+                        "Scenario Name",
+                        value=scenario.get('title', f'Scenario {idx+1}'),
+                        key=f"scenario_name_{idx}",
+                        label_visibility="collapsed",
+                        placeholder="Enter scenario name"
+                    )
+                    if new_title != scenario.get('title'):
+                        st.session_state.detected_scenarios[idx]['title'] = new_title
+                
+                with col2:
+                    new_year = st.number_input(
+                        "Projected Year",
+                        min_value=2020,
+                        max_value=2100,
+                        value=int(scenario.get('horizon', 2050)),
+                        step=1,
+                        key=f"scenario_year_{idx}",
+                        label_visibility="collapsed"
+                    )
+                    if new_year != scenario.get('horizon'):
+                        st.session_state.detected_scenarios[idx]['horizon'] = int(new_year)
+                
+                with col3:
+                    st.metric("Parameters", len(scenario.get('items', [])))
+                
+                st.markdown("---")
         
         # Show info box
         col_info1, col_info2 = st.columns([2, 1])
@@ -1085,13 +1116,84 @@ def display_categorical_comparison_plots():
     - Y-axis: Values
     - Points colored by scenario
     - Multiple Y-axes for different units (%, absolute values, etc.)
+    - Customizable colors and marker sizes
     """
+    
+    # Try to import export functions
+    try:
+        from core.viz.export import quick_export_buttons
+        EXPORT_AVAILABLE = True
+    except ImportError:
+        EXPORT_AVAILABLE = False
     
     scenarios = st.session_state.detected_scenarios
     
     if len(scenarios) < 2:
         st.info("Need at least 2 scenarios to create comparison plots")
         return
+    
+    # === PLOT CUSTOMIZATION SECTION ===
+    with st.expander("🎨 **Plot Customization**", expanded=False):
+        st.markdown("**Customize scenario appearance across all plots:**")
+        
+        # Initialize customization in session state
+        if 'plot_customization' not in st.session_state:
+            default_colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2']
+            st.session_state.plot_customization = {
+                'colors': {},
+                'marker_size': 12
+            }
+            for idx, scenario in enumerate(scenarios):
+                st.session_state.plot_customization['colors'][scenario['title']] = default_colors[idx % len(default_colors)]
+        
+        # Marker size
+        col_size1, col_size2 = st.columns([1, 3])
+        
+        with col_size1:
+            marker_size = st.slider(
+                "Marker Size",
+                min_value=6,
+                max_value=20,
+                value=st.session_state.plot_customization.get('marker_size', 12),
+                step=1,
+                key='plot_marker_size'
+            )
+            st.session_state.plot_customization['marker_size'] = marker_size
+        
+        with col_size2:
+            st.caption("Adjust the size of scenario markers in all plots")
+        
+        # Colors for each scenario
+        st.markdown("**Scenario Colors:**")
+        
+        num_scenarios = len(scenarios)
+        cols_per_row = 3
+        
+        for row_start in range(0, num_scenarios, cols_per_row):
+            cols = st.columns(cols_per_row)
+            for col_idx in range(cols_per_row):
+                scenario_idx = row_start + col_idx
+                if scenario_idx < num_scenarios:
+                    scenario = scenarios[scenario_idx]
+                    scenario_title = scenario['title']
+                    
+                    with cols[col_idx]:
+                        current_color = st.session_state.plot_customization['colors'].get(
+                            scenario_title,
+                            '#636EFA'
+                        )
+                        
+                        new_color = st.color_picker(
+                            scenario_title[:20],
+                            value=current_color,
+                            key=f'scenario_color_{scenario_idx}'
+                        )
+                        
+                        st.session_state.plot_customization['colors'][scenario_title] = new_color
+    
+    # Get customization settings
+    scenario_colors = st.session_state.plot_customization.get('colors', {})
+    marker_size = st.session_state.plot_customization.get('marker_size', 12)
     
     # Collect all parameters by category
     params_by_category = {}
@@ -1163,11 +1265,12 @@ def display_categorical_comparison_plots():
                     color='Scenario',
                     title=f"{category} - All values in {unit if unit else 'absolute'}",
                     labels={'Value': f'Value ({unit})' if unit else 'Value'},
-                    height=500
+                    height=500,
+                    color_discrete_map=scenario_colors  # Use custom colors
                 )
                 
-                # Customize layout
-                fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
+                # Customize layout with custom marker size
+                fig.update_traces(marker=dict(size=marker_size, line=dict(width=2, color='DarkSlateGrey')))
                 fig.update_layout(
                     xaxis_tickangle=-45,
                     hovermode='closest',
@@ -1177,64 +1280,55 @@ def display_categorical_comparison_plots():
                 
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Export buttons for this plot
-                col_exp1, col_exp2, col_exp3, col_exp4 = st.columns(4)
-                
-                with col_exp1:
-                    # PNG export
-                    try:
-                        img_bytes = fig.to_image(format="png", width=1200, height=800)
-                        st.download_button(
-                            label="📥 PNG",
-                            data=img_bytes,
-                            file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_plot.png",
-                            mime="image/png",
-                            use_container_width=True,
-                            key=f"png_{category}_{unit}"
+                # Export buttons using quick_export_buttons
+                if EXPORT_AVAILABLE:
+                    st.markdown("---")
+                    with st.expander("💾 Export Plot", expanded=False):
+                        quick_export_buttons(
+                            fig,
+                            filename_prefix=f"{category.replace('. ', '_').replace(' ', '_').lower()}_plot",
+                            show_formats=['png', 'pdf', 'html']
                         )
-                    except:
-                        st.caption("⚠️ Install kaleido for PNG export")
-                
-                with col_exp2:
-                    # PDF export
-                    try:
-                        pdf_bytes = fig.to_image(format="pdf", width=1200, height=800)
+                else:
+                    # Fallback export buttons
+                    col_exp1, col_exp2, col_exp3 = st.columns(3)
+                    
+                    with col_exp1:
+                        try:
+                            img_bytes = fig.to_image(format="png", width=1200, height=800)
+                            st.download_button(
+                                label="📥 PNG",
+                                data=img_bytes,
+                                file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_plot.png",
+                                mime="image/png",
+                                use_container_width=True,
+                                key=f"png_{category}_{unit}"
+                            )
+                        except:
+                            st.caption("⚠️ Install kaleido")
+                    
+                    with col_exp2:
+                        html_buffer = io.StringIO()
+                        fig.write_html(html_buffer)
                         st.download_button(
-                            label="📥 PDF",
-                            data=pdf_bytes,
-                            file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_plot.pdf",
-                            mime="application/pdf",
+                            label="📥 HTML",
+                            data=html_buffer.getvalue(),
+                            file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_plot.html",
+                            mime="text/html",
                             use_container_width=True,
-                            key=f"pdf_{category}_{unit}"
+                            key=f"html_{category}_{unit}"
                         )
-                    except:
-                        st.caption("⚠️ Install kaleido for PDF export")
-                
-                with col_exp3:
-                    # HTML export
-                    html_buffer = io.StringIO()
-                    fig.write_html(html_buffer)
-                    st.download_button(
-                        label="📥 HTML",
-                        data=html_buffer.getvalue(),
-                        file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_plot.html",
-                        mime="text/html",
-                        use_container_width=True,
-                        key=f"html_{category}_{unit}"
-                    )
-                
-                with col_exp4:
-                    # Data CSV export
-                    csv_data = df_plot.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Data",
-                        data=csv_data,
-                        file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_data.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                        key=f"csv_{category}_{unit}"
-                    )
-            
+                    
+                    with col_exp3:
+                        csv_data = df_plot.to_csv(index=False)
+                        st.download_button(
+                            label="📥 Data",
+                            data=csv_data,
+                            file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_data.csv",
+                            mime="text/csv",
+                            use_container_width=True,
+                            key=f"csv_{category}_{unit}"
+                        )
             else:
                 # Multiple units - create tabs for each unit
                 unit_tabs = st.tabs([f"{u if u else 'Absolute'}" for u in units_in_category])
@@ -1250,11 +1344,12 @@ def display_categorical_comparison_plots():
                             color='Scenario',
                             title=f"{category} - Values in {unit if unit else 'absolute'}",
                             labels={'Value': f'Value ({unit})' if unit else 'Value'},
-                            height=500
+                            height=500,
+                            color_discrete_map=scenario_colors  # Use custom colors
                         )
                         
-                        # Customize layout
-                        fig.update_traces(marker=dict(size=12, line=dict(width=2, color='DarkSlateGrey')))
+                        # Customize layout with custom marker size
+                        fig.update_traces(marker=dict(size=marker_size, line=dict(width=2, color='DarkSlateGrey')))
                         fig.update_layout(
                             xaxis_tickangle=-45,
                             hovermode='closest',
@@ -1264,63 +1359,63 @@ def display_categorical_comparison_plots():
                         
                         st.plotly_chart(fig, use_container_width=True)
                         
-                        # Export buttons for this tab
-                        col_exp1, col_exp2, col_exp3, col_exp4 = st.columns(4)
-                        
-                        with col_exp1:
-                            # PNG export
-                            try:
-                                img_bytes = fig.to_image(format="png", width=1200, height=800)
-                                st.download_button(
-                                    label="📥 PNG",
-                                    data=img_bytes,
-                                    file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_plot.png",
-                                    mime="image/png",
-                                    use_container_width=True,
-                                    key=f"png_{category}_{tab_idx}"
+                        # Export buttons using quick_export_buttons
+                        if EXPORT_AVAILABLE:
+                            st.markdown("---")
+                            with st.expander("💾 Export Plot", expanded=False):
+                                quick_export_buttons(
+                                    fig,
+                                    filename_prefix=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_plot",
+                                    show_formats=['png', 'pdf', 'html']
                                 )
-                            except:
-                                st.caption("⚠️ Install kaleido")
-                        
-                        with col_exp2:
-                            # PDF export
-                            try:
-                                pdf_bytes = fig.to_image(format="pdf", width=1200, height=800)
+                        else:
+                            # Fallback export
+                            col_exp1, col_exp2, col_exp3 = st.columns(3)
+                            
+                            with col_exp1:
+                                try:
+                                    img_bytes = fig.to_image(format="png", width=1200, height=800)
+                                    st.download_button(
+                                        label="📥 PNG",
+                                        data=img_bytes,
+                                        file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_plot.png",
+                                        mime="image/png",
+                                        use_container_width=True,
+                                        key=f"png_{category}_{tab_idx}"
+                                    )
+                                except:
+                                    st.caption("⚠️ Install kaleido")
+                            
+                            with col_exp2:
+                                html_buffer = io.StringIO()
+                                fig.write_html(html_buffer)
                                 st.download_button(
-                                    label="📥 PDF",
-                                    data=pdf_bytes,
-                                    file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_plot.pdf",
-                                    mime="application/pdf",
+                                    label="📥 HTML",
+                                    data=html_buffer.getvalue(),
+                                    file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_plot.html",
+                                    mime="text/html",
                                     use_container_width=True,
-                                    key=f"pdf_{category}_{tab_idx}"
+                                    key=f"html_{category}_{tab_idx}"
                                 )
-                            except:
-                                st.caption("⚠️ Install kaleido")
+                            
+                            with col_exp3:
+                                csv_data = df_unit.to_csv(index=False)
+                                st.download_button(
+                                    label="📥 Data",
+                                    data=csv_data,
+                                    file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_data.csv",
+                                    mime="text/csv",
+                                    use_container_width=True,
+                                    key=f"csv_{category}_{tab_idx}"
+                                )
+                        fig.update_layout(
+                            xaxis_tickangle=-45,
+                            hovermode='closest',
+                            showlegend=True,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
                         
-                        with col_exp3:
-                            # HTML export
-                            html_buffer = io.StringIO()
-                            fig.write_html(html_buffer)
-                            st.download_button(
-                                label="📥 HTML",
-                                data=html_buffer.getvalue(),
-                                file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_plot.html",
-                                mime="text/html",
-                                use_container_width=True,
-                                key=f"html_{category}_{tab_idx}"
-                            )
-                        
-                        with col_exp4:
-                            # Data CSV export
-                            csv_data = df_unit.to_csv(index=False)
-                            st.download_button(
-                                label="📥 Data",
-                                data=csv_data,
-                                file_name=f"{category.replace('. ', '_').replace(' ', '_').lower()}_{unit}_data.csv",
-                                mime="text/csv",
-                                use_container_width=True,
-                                key=f"csv_{category}_{tab_idx}"
-                            )
+                        st.plotly_chart(fig, use_container_width=True)
 
 
 def display_scenario_editor(scenario: dict, scenario_idx: int):
