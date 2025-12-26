@@ -1053,18 +1053,27 @@ def display_forecast_tab(variable: str):
     
     # Get confidence scores
     confidence_scores = forecast.get('confidence_scores')
+    confidence_filtered = None  # Initialize to avoid UnboundLocalError
+    
     if confidence_scores is not None:
         confidence_filtered = confidence_scores[forecast_mask]
-        avg_confidence = np.mean(confidence_filtered)
-        min_confidence = np.min(confidence_filtered)
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Avg Confidence", f"{avg_confidence:.1%}")
-        with col2:
-            st.metric("Min Confidence", f"{min_confidence:.1%}")
-        with col3:
-            st.metric("Iterations", iterations)
+        # Validate confidence array is not empty
+        if len(confidence_filtered) > 0:
+            avg_confidence = np.mean(confidence_filtered)
+            min_confidence = np.min(confidence_filtered)
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Avg Confidence", f"{avg_confidence:.1%}")
+            with col2:
+                st.metric("Min Confidence", f"{min_confidence:.1%}")
+            with col3:
+                st.metric("Iterations", iterations)
+        else:
+            # Edge case: empty confidence array
+            st.warning("⚠️ No confidence data available for filtered forecast period")
+            confidence_filtered = None
     else:
         col1, col2 = st.columns(2)
         with col1:
