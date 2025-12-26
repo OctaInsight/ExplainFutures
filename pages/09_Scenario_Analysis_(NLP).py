@@ -926,56 +926,125 @@ Renewable energy reaches 40% by 2040.""",
                 st.info("📑 Segmenting scenarios...")
                 scenarios = segment_scenarios(scenario_text)
                 
-                # Improve title and year extraction
+                # === INTELLIGENT EXTRACTION: Use NLP to understand context ===
                 import re
-                for scenario in scenarios:
-                    # Extract year from title or text if not already set
-                    if not scenario.get('horizon') or scenario.get('horizon') == 2050:
-                        # Look for year in title first
-                        title = scenario.get('title', '')
-                        year_match = re.search(r'\b(20\d{2}|203\d|204\d|205\d)\b', title)
+                
+                # Try to use spaCy for intelligent extraction
+                try:
+                    import spacy
+                    try:
+                        nlp = spacy.load("en_core_web_sm")
+                        USE_SPACY = True
+                    except:
+                        USE_SPACY = False
+                except:
+                    USE_SPACY = False
+                
+                # Process each scenario
+                for idx, scenario in enumerate(scenarios):
+                    scenario_text_content = scenario.get('text', '')
+                    
+                    # === EXTRACT YEAR INTELLIGENTLY ===
+                    extracted_year = None
+                    
+                    if USE_SPACY:
+                        # Use spaCy NER to find dates
+                        doc = nlp(scenario_text_content[:500])  # First 500 chars
                         
-                        if year_match:
-                            scenario['horizon'] = int(year_match.group(1))
-                        else:
-                            # Look in full text
-                            full_text = scenario.get('text', '')
-                            # Look for patterns like "by 2030", "in 2040", "year 2050"
-                            year_patterns = [
-                                r'by\s+(20\d{2})',
-                                r'in\s+(20\d{2})',
-                                r'year\s+(20\d{2})',
-                                r'to\s+(20\d{2})',
-                                r'until\s+(20\d{2})',
-                                r'\b(20\d{2})\b'
-                            ]
-                            
-                            for pattern in year_patterns:
-                                match = re.search(pattern, full_text, re.IGNORECASE)
-                                if match:
-                                    scenario['horizon'] = int(match.group(1))
+                        # Look for DATE entities
+                        for ent in doc.ents:
+                            if ent.label_ == "DATE":
+                                # Extract 4-digit year from date entity
+                                year_match = re.search(r'\b(20\d{2})\b', ent.text)
+                                if year_match:
+                                    year = int(year_match.group(1))
+                                    if 2020 <= year <= 2100:
+                                        extracted_year = year
+                                        break
+                    
+                    # Fallback: Look for years in context (any format)
+                    if not extracted_year:
+                        # Find all 4-digit years in text
+                        year_candidates = re.findall(r'\b(20\d{2})\b', scenario_text_content[:500])
+                        
+                        # Prefer years that appear near temporal keywords
+                        temporal_keywords = ['by', 'in', 'until', 'to', 'year', 'horizon', 'target', 'projected']
+                        
+                        for year_str in year_candidates:
+                            year = int(year_str)
+                            if 2020 <= year <= 2100:
+                                # Check if year appears near temporal keywords
+                                for keyword in temporal_keywords:
+                                    # Look for "keyword year" or "year" near keyword
+                                    pattern = rf'\b{keyword}\b.{{0,20}}\b{year}\b|\b{year}\b.{{0,20}}\b{keyword}\b'
+                                    if re.search(pattern, scenario_text_content[:500], re.IGNORECASE):
+                                        extracted_year = year
+                                        break
+                                
+                                if extracted_year:
+                                    break
+                                
+                                # If still not found, just use first valid year
+                                if not extracted_year:
+                                    extracted_year = year
                                     break
                     
-                    # Improve title extraction
-                    if not scenario.get('title') or scenario.get('title').startswith('Scenario'):
-                        full_text = scenario.get('text', '')
+                    if extracted_year:
+                        scenario['horizon'] = extracted_year
+                    
+                    # === EXTRACT SCENARIO NAME INTELLIGENTLY ===
+                    extracted_name = None
+                    
+                    # Get first few lines (likely contains the title)
+                    lines = scenario_text_content.strip().split('\n')
+                    first_line = lines[0].strip() if lines else ""
+                    
+                    if USE_SPACY and first_line:
+                        # Use spaCy to understand the structure
+                        doc = nlp(first_line)
                         
-                        # Look for patterns like "Scenario 1:", "Scenario A:", "Name: Something"
-                        title_patterns = [
-                            r'Scenario\s+[A-Za-z0-9]+\s*[:：]\s*([^\n]+)',
-                            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s*[:：]',
-                            r'Scenario\s*[:：]\s*([^\n]+)',
-                        ]
+                        # Strategy 1: Extract noun phrases that look like titles
+                        noun_chunks = list(doc.noun_chunks)
+                        if noun_chunks:
+                            # Get the largest noun chunk (likely the title)
+                            title_chunk = max(noun_chunks, key=lambda x: len(x.text))
+                            candidate_name = title_chunk.text.strip()
+                            
+                            # Clean up common prefixes
+                            candidate_name = re.sub(r'^Scenario\s*\d*\s*[-:]\s*', '', candidate_name, flags=re.IGNORECASE)
+                            candidate_name = re.sub(r'^Scenario\s*[-:]\s*', '', candidate_name, flags=re.IGNORECASE)
+                            
+                            if candidate_name and len(candidate_name) > 3:
+                                extracted_name = candidate_name
+                    
+                    # Fallback: Smart pattern-based extraction
+                    if not extracted_name and first_line:
+                        # Remove year mentions
+                        clean_line = re.sub(r'\s*\(?\s*(?:by\s+)?(?:in\s+)?\d{4}\s*\)?', '', first_line)
                         
-                        for pattern in title_patterns:
-                            match = re.search(pattern, full_text[:200])  # Check first 200 chars
-                            if match:
-                                extracted_title = match.group(1).strip()
-                                if extracted_title and len(extracted_title) < 50:
-                                    scenario['title'] = extracted_title
-                                    break
+                        # Remove common prefixes
+                        clean_line = re.sub(r'^Scenario\s*\d*\s*[-:]\s*', '', clean_line, flags=re.IGNORECASE)
+                        clean_line = re.sub(r'^Scenario\s*[-:]\s*', '', clean_line, flags=re.IGNORECASE)
+                        
+                        # Remove trailing punctuation
+                        clean_line = clean_line.rstrip(':').strip()
+                        
+                        # If it doesn't look like a parameter line, use it as title
+                        if clean_line and not any(word in clean_line.lower() for word in ['increases', 'decreases', 'reaches', 'remains', '%']):
+                            if len(clean_line) > 3 and len(clean_line) < 100:
+                                extracted_name = clean_line
+                    
+                    if extracted_name:
+                        scenario['title'] = extracted_name
                 
-                st.success(f"✅ Detected {len(scenarios)} scenario(s)")
+                # Show what was extracted
+                extraction_summary = []
+                for s in scenarios:
+                    name = s.get('title', 'Unknown')
+                    year = s.get('horizon', 'Not detected')
+                    extraction_summary.append(f"'{name}' → {year}")
+                
+                st.success(f"✅ Detected {len(scenarios)} scenario(s): {', '.join(extraction_summary)}")
                 
                 # Step 3: Extract parameters from each scenario
                 st.info("🔎 Extracting parameters...")
