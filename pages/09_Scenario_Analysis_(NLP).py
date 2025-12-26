@@ -34,6 +34,12 @@ from core.nlp.schema import Scenario, ScenarioItem
 initialize_session_state()
 config = get_config()
 
+# Page configuration
+st.set_page_config(
+    page_title="Scenario Analysis", 
+    page_icon="📝", 
+    layout="wide"
+)
 
 # Render shared sidebar
 render_app_sidebar()
@@ -936,44 +942,131 @@ Renewable energy reaches 40% by 2040.""",
                 st.success("🎉 Analysis complete! Click button below to edit parameters.")
                 st.rerun()
     
-    # === STEP 2: EDIT IN COMPARISON TABLE ===
+    # === STEP 2: REVIEW DETECTED SCENARIOS ===
     if st.session_state.scenarios_processed and st.session_state.detected_scenarios:
         
         st.markdown("---")
-        st.subheader("📊 Step 2: Review & Edit Parameters")
+        st.subheader("📋 Step 2: Review Detected Scenarios")
+        st.caption("Verify scenario names and projected years before editing parameters")
         
-        # Show summary
-        total_params = sum(len(s['items']) for s in st.session_state.detected_scenarios)
-        st.info(f"**{len(st.session_state.detected_scenarios)} scenario(s)** with **{total_params} total parameter(s)** detected")
+        # === SCENARIO SUMMARY TABLE ===
+        st.markdown("**Detected Scenarios:**")
+        
+        summary_data = []
+        for idx, scenario in enumerate(st.session_state.detected_scenarios):
+            summary_data.append({
+                'Scenario': scenario.get('title', f'Scenario {idx+1}'),
+                'Year': scenario.get('horizon', 2050),
+                'Parameters': len(scenario.get('items', []))
+            })
+        
+        df_summary = pd.DataFrame(summary_data)
+        
+        # Configure editable columns
+        summary_config = {
+            "Scenario": st.column_config.TextColumn(
+                "Scenario Name",
+                help="Edit scenario name",
+                required=True,
+                width="large"
+            ),
+            "Year": st.column_config.NumberColumn(
+                "Projected Year",
+                help="Edit projected year",
+                min_value=2020,
+                max_value=2100,
+                step=1,
+                format="%d",
+                width="medium"
+            ),
+            "Parameters": st.column_config.NumberColumn(
+                "# Parameters",
+                help="Number of detected parameters (read-only)",
+                disabled=True,
+                width="small"
+            )
+        }
+        
+        edited_summary = st.data_editor(
+            df_summary,
+            column_config=summary_config,
+            use_container_width=True,
+            hide_index=True,
+            num_rows="fixed",
+            key="scenario_summary_editor"
+        )
+        
+        # Update scenarios with edited data
+        for idx, row in edited_summary.iterrows():
+            st.session_state.detected_scenarios[idx]['title'] = row['Scenario']
+            st.session_state.detected_scenarios[idx]['horizon'] = int(row['Year'])
+        
+        # Show info box
+        col_info1, col_info2 = st.columns([2, 1])
+        
+        with col_info1:
+            total_params = sum(len(s['items']) for s in st.session_state.detected_scenarios)
+            st.info(f"✅ **{len(st.session_state.detected_scenarios)} scenario(s)** detected with **{total_params} total parameters**")
+        
+        with col_info2:
+            if st.button("🔄 Re-analyze Text", use_container_width=True, help="Upload new text and run NLP analysis again"):
+                st.session_state.scenarios_processed = False
+                st.session_state.detected_scenarios = []
+                st.session_state.show_comparison_table = False
+                st.session_state.parameters_reviewed = False
+                st.session_state.scenarios_cleaned = False
+                st.session_state.scenarios_visualized = False
+                st.rerun()
+        
+        # Save and Continue
+        st.markdown("---")
         
         col_btn1, col_btn2 = st.columns([2, 3])
         
         with col_btn1:
-            if st.button("📊 Open Parameter Editor", type="primary", use_container_width=True):
+            if st.button("✅ Confirm & Edit Parameters", type="primary", use_container_width=True):
                 st.session_state.show_comparison_table = True
                 st.session_state.parameters_reviewed = True  # Mark as reviewed
                 st.rerun()
         
         with col_btn2:
-            st.caption("Click to edit all parameters in one table, grouped by category")
+            st.caption("Confirm scenario names and years, then edit parameter values")
         
-        # Show comparison table if button clicked
+        # === STEP 3: EDIT PARAMETERS IN TABLE ===
         if st.session_state.get('show_comparison_table', False):
-            display_editable_comparison_table()
-        
+            st.markdown("---")
+            st.subheader("📊 Step 3: Edit Parameter Values")
+            st.caption("Review and edit all parameters in one table, grouped by category")
             
-            # === STEP 3: CATEGORICAL COMPARISON PLOTS (Only show after scenarios cleaned) ===
-            if st.session_state.get('scenarios_cleaned', False):
-                st.markdown("---")
-                st.subheader("📊 Step 4: Visualize Scenarios by Category")
-                st.caption("Scatter plots showing parameter values across scenarios, grouped by category")
-                
-                display_categorical_comparison_plots()
-                
-                # Store data for next page (Page 10)
-                if st.session_state.get('show_comparison_table', False):
-                    # Store parameter data
-                    st.session_state.scenario_parameters = st.session_state.get('detected_scenarios', [])
+            display_editable_comparison_table()
+
+        # === STEP 4: VISUALIZE SCENARIOS (Only show after parameters reviewed) ===
+        if st.session_state.get('parameters_reviewed', False):
+            st.markdown("---")
+            st.subheader("📊 Step 4: Visualize Scenarios by Category")
+            st.caption("Scatter plots showing parameter values across scenarios, grouped by category")
+            
+            display_categorical_comparison_plots()
+            
+            # Store data for next page (Page 10)
+            st.session_state.scenario_parameters = st.session_state.get('detected_scenarios', [])
+            
+            # Mark as visualized
+            if not st.session_state.get('scenarios_visualized', False):
+                st.session_state.scenarios_visualized = True
+
+        # === STEP 5: GENERATE CLEANED TEXT (Only show after visualization) ===
+        if st.session_state.get('scenarios_visualized', False):
+            st.markdown("---")
+            st.subheader("📄 Step 5: Generate Cleaned Scenario Text")
+            st.caption("Create structured scenario descriptions using edited parameter values")
+            
+            if st.button("✨ Generate Cleaned Scenario Text", type="primary"):
+                generate_cleaned_scenarios()
+                st.session_state.scenarios_cleaned = True  # Mark as cleaned
+            
+            if st.session_state.cleaned_scenarios:
+                display_cleaned_scenarios()
 
 
 def display_categorical_comparison_plots():
@@ -1656,22 +1749,6 @@ def display_scenario_comparison():
     with st.expander("💾 Export Comparison Plot"):
         from core.viz.export import quick_export_buttons
         quick_export_buttons(fig, f"scenario_comparison_{x_param}_vs_{y_param}", ['png', 'pdf', 'html'])
-
-        
-
-        # === STEP 3: CLEANED SCENARIOS (Only show after parameters reviewed) ===
-        if st.session_state.get('parameters_reviewed', False):
-            st.markdown("---")
-            st.subheader("📄 Step 3: Review Cleaned Scenarios")
-            
-            if st.button("✨ Generate Cleaned Scenario Text", type="primary"):
-                generate_cleaned_scenarios()
-                st.session_state.scenarios_cleaned = True  # Mark as cleaned
-            
-            if st.session_state.cleaned_scenarios:
-                display_cleaned_scenarios()
-        
-
 
 
 if __name__ == "__main__":
