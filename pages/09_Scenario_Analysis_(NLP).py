@@ -998,8 +998,14 @@ Renewable energy reaches 40% by 2040.""",
         
         # Update scenarios with edited data
         for idx in range(len(edited_summary)):
-            st.session_state.detected_scenarios[idx]['title'] = edited_summary.iloc[idx]['Scenario']
-            st.session_state.detected_scenarios[idx]['horizon'] = int(edited_summary.iloc[idx]['Year'])
+            st.session_state.detected_scenarios[idx]['title'] = str(edited_summary.iloc[idx]['Scenario'])
+            
+            # Handle Year with type checking
+            year_value = edited_summary.iloc[idx]['Year']
+            if pd.notna(year_value):
+                st.session_state.detected_scenarios[idx]['horizon'] = int(float(year_value))
+            else:
+                st.session_state.detected_scenarios[idx]['horizon'] = 2050  # Default value
         
         # Show info box
         col_info1, col_info2 = st.columns([2, 1])
