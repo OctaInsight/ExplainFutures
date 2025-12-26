@@ -1051,6 +1051,12 @@ def display_forecast_tab(variable: str):
     forecast_values_filtered = forecast['forecast_values'][forecast_mask]
     forecast_timestamps_filtered = forecast['forecast_timestamps'][forecast_mask]
     
+    # Validate that we have forecast data
+    if len(forecast_values_filtered) == 0:
+        st.error(f"⚠️ No forecast data available for {variable} up to {target_date.strftime('%Y-%m-%d')}")
+        st.info("The target forecast date might be before the forecast start date. Please check your forecast configuration.")
+        return
+    
     # Get confidence scores
     confidence_scores = forecast.get('confidence_scores')
     confidence_filtered = None  # Initialize to avoid UnboundLocalError
@@ -1174,6 +1180,11 @@ def display_forecast_tab(variable: str):
     
     # === STATISTICS ===
     with st.expander("📊 Forecast Statistics"):
+        
+        # Validate we have data
+        if len(forecast_values_filtered) == 0:
+            st.warning("No forecast data available for the selected period")
+            return
         
         col1, col2, col3, col4 = st.columns(4)
         
