@@ -646,66 +646,23 @@ def create_forecast_plot(variable: str,
             showlegend=True
         ))
     
-    # Forecast data with confidence coloring
+    # Forecast data - SOLID COLOR (no colorbar)
     if customize.get('show_forecast', True):
-        # Check if there's meaningful confidence variation
-        show_colorbar = False
-        if confidence_to_show is not None:
-            confidence_range = np.max(confidence_to_show) - np.min(confidence_to_show)
-            show_colorbar = confidence_range > 0.01  # Only show if variation > 1%
-        
-        if show_colorbar and confidence_to_show is not None:
-            # Has confidence variation - show color-coded with colorbar
-            fig.add_trace(go.Scatter(
-                x=forecast_timestamps_to_show,
-                y=forecast_values_to_show,
-                mode='markers',
-                name='Forecast',
-                marker=dict(
-                    size=customize.get('forecast_size', 8),
-                    color=confidence_to_show * 100,  # Convert to 0-100 scale for better visibility
-                    colorscale=[
-                        [0.0, 'rgb(255, 99, 71)'],    # Red (50% confidence)
-                        [0.5, 'rgb(255, 215, 0)'],    # Gold (75% confidence)  
-                        [1.0, 'rgb(50, 205, 50)']     # Lime green (100% confidence)
-                    ],
-                    cmin=50,  # 50% confidence minimum
-                    cmax=100,  # 100% confidence maximum
-                    symbol='diamond',
-                    colorbar=dict(
-                        title=dict(
-                            text="Confidence<br>(%)",
-                            side="right"
-                        ),
-                        x=1.12,
-                        thickness=15,
-                        len=0.7,
-                        tickmode='linear',
-                        tick0=50,
-                        dtick=10,
-                        ticksuffix='%'
-                    ),
-                    line=dict(width=1, color='white')  # White border for better visibility
-                ),
-                showlegend=True,
-                hovertemplate='<b>Forecast</b><br>Date: %{x}<br>Value: %{y:.2f}<br>Confidence: %{marker.color:.0f}%<extra></extra>'
-            ))
-        else:
-            # No meaningful confidence variation - use solid color (no colorbar)
-            fig.add_trace(go.Scatter(
-                x=forecast_timestamps_to_show,
-                y=forecast_values_to_show,
-                mode='markers',
-                name='Forecast (High Confidence)',
-                marker=dict(
-                    size=customize.get('forecast_size', 8),
-                    color=customize.get('forecast_color', '#FF6B6B'),
-                    symbol='diamond',
-                    line=dict(width=1, color='white')
-                ),
-                showlegend=True,
-                hovertemplate='<b>Forecast</b><br>Date: %{x}<br>Value: %{y:.2f}<br>Confidence: ~100%<extra></extra>'
-            ))
+        # Always use solid color - no confusing colorbar
+        fig.add_trace(go.Scatter(
+            x=forecast_timestamps_to_show,
+            y=forecast_values_to_show,
+            mode='markers',
+            name='Forecast',
+            marker=dict(
+                size=customize.get('forecast_size', 8),
+                color=customize.get('forecast_color', '#FF6B6B'),
+                symbol='diamond',
+                line=dict(width=1, color='white')  # White border for visibility
+            ),
+            showlegend=True,
+            hovertemplate='<b>Forecast</b><br>Date: %{x}<br>Value: %{y:.2f}<extra></extra>'
+        ))
     
     # Model line
     if customize.get('show_model_line', True):
@@ -1093,7 +1050,6 @@ def display_forecast_tab(variable: str):
         confidence_filtered = confidence_scores[forecast_mask]
         avg_confidence = np.mean(confidence_filtered)
         min_confidence = np.min(confidence_filtered)
-        confidence_range = np.max(confidence_filtered) - min_confidence
         
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1102,22 +1058,12 @@ def display_forecast_tab(variable: str):
             st.metric("Min Confidence", f"{min_confidence:.1%}")
         with col3:
             st.metric("Iterations", iterations)
-        
-        # Explain confidence coloring
-        if confidence_range > 0.01:
-            st.info("""
-            📊 **Confidence Color-Coding:**  
-            🟢 Green = High confidence (90-100%)  
-            🟡 Yellow = Medium confidence (70-90%)  
-            🔴 Red = Lower confidence (50-70%)  
-            
-            💡 Confidence decreases with each iteration as uncertainty grows.
-            """)
-        else:
-            st.success(f"✅ All forecast points have consistently high confidence (~{avg_confidence:.0%})")
     else:
-        st.metric("Confidence", "High (Direct Forecast)")
-        st.info("📊 Direct forecast method - single prediction with consistent confidence")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Confidence", "~100%")
+        with col2:
+            st.metric("Method", "Direct Forecast")
     
     st.markdown("---")
     
