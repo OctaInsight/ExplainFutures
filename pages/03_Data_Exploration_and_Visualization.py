@@ -9,6 +9,13 @@ import sys
 from pathlib import Path
 import plotly.graph_objects as go
 
+# Page configuration - MUST be first Streamlit command
+st.set_page_config(
+    page_title="Data Exploration & Visualization",
+    page_icon="🔮",
+    layout="wide"  # CRITICAL: Use full page width
+)
+
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
