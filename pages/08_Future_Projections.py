@@ -1051,10 +1051,29 @@ def display_forecast_tab(variable: str):
     forecast_values_filtered = forecast['forecast_values'][forecast_mask]
     forecast_timestamps_filtered = forecast['forecast_timestamps'][forecast_mask]
     
-    # Validate that we have forecast data
+    # Validate that we have forecast data - with debugging
     if len(forecast_values_filtered) == 0:
         st.error(f"⚠️ No forecast data available for {variable} up to {target_date.strftime('%Y-%m-%d')}")
-        st.info("The target forecast date might be before the forecast start date. Please check your forecast configuration.")
+        
+        # Debug information
+        with st.expander("🔍 Debug Information"):
+            st.write("**Forecast Data:**")
+            st.write(f"- Total forecast points: {len(forecast['forecast_values'])}")
+            st.write(f"- Forecast start date: {forecast['forecast_timestamps'][0] if len(forecast['forecast_timestamps']) > 0 else 'N/A'}")
+            st.write(f"- Forecast end date: {forecast['forecast_timestamps'][-1] if len(forecast['forecast_timestamps']) > 0 else 'N/A'}")
+            st.write(f"- Target date: {target_date}")
+            st.write(f"- Last historical date: {historical_timestamps[-1] if len(historical_timestamps) > 0 else 'N/A'}")
+            
+            st.write("**Issue:**")
+            if len(forecast['forecast_timestamps']) > 0:
+                if forecast['forecast_timestamps'][0] > target_date:
+                    st.write(f"❌ Forecast starts AFTER target date ({forecast['forecast_timestamps'][0]} > {target_date})")
+                else:
+                    st.write("❌ Unknown filtering issue")
+            else:
+                st.write("❌ Forecast has no timestamps at all!")
+        
+        st.info("💡 **Suggestion:** Try generating the forecast again with a later target date, or check if the forecast was generated successfully.")
         return
     
     # Get confidence scores
