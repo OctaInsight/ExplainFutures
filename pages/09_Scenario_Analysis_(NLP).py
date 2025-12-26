@@ -1021,15 +1021,39 @@ Renewable energy reaches 40% by 2040.""",
                         st.session_state.detected_scenarios[idx]['title'] = new_title
                 
                 with col2:
-                    new_year = st.number_input(
-                        "Projected Year",
-                        min_value=2020,
-                        max_value=2100,
-                        value=int(scenario.get('horizon', 2050)),
-                        step=1,
-                        key=f"scenario_year_{idx}",
-                        label_visibility="collapsed"
-                    )
+                    # Get horizon value from NLP extraction (no hardcoded default)
+                    horizon_value = scenario.get('horizon')
+                    
+                    # Only use if it's a valid number
+                    if horizon_value is not None and isinstance(horizon_value, (int, float)):
+                        year_value = int(horizon_value)
+                    else:
+                        # No year extracted - use None to show placeholder
+                        year_value = None
+                    
+                    if year_value is not None:
+                        new_year = st.number_input(
+                            "Projected Year",
+                            min_value=2020,
+                            max_value=2100,
+                            value=year_value,
+                            step=1,
+                            key=f"scenario_year_{idx}",
+                            label_visibility="collapsed"
+                        )
+                    else:
+                        # Show empty input with placeholder
+                        new_year = st.number_input(
+                            "Projected Year",
+                            min_value=2020,
+                            max_value=2100,
+                            value=2030,  # Just for display, user must enter
+                            step=1,
+                            key=f"scenario_year_{idx}",
+                            label_visibility="collapsed",
+                            help="Year not detected - please enter manually"
+                        )
+                    
                     if new_year != scenario.get('horizon'):
                         st.session_state.detected_scenarios[idx]['horizon'] = int(new_year)
                 
