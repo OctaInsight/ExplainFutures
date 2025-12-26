@@ -961,20 +961,8 @@ Renewable energy reaches 40% by 2040.""",
         if st.session_state.get('show_comparison_table', False):
             display_editable_comparison_table()
         
-        # === STEP 3: CLEANED SCENARIOS (Only show after parameters reviewed) ===
-        if st.session_state.get('parameters_reviewed', False):
-            st.markdown("---")
-            st.subheader("📄 Step 3: Review Cleaned Scenarios")
             
-            if st.button("✨ Generate Cleaned Scenario Text", type="primary"):
-                generate_cleaned_scenarios()
-                st.session_state.scenarios_cleaned = True  # Mark as cleaned
-            
-            if st.session_state.cleaned_scenarios:
-                display_cleaned_scenarios()
-        
-            
-            # === STEP 4: CATEGORICAL COMPARISON PLOTS (Only show after scenarios cleaned) ===
+            # === STEP 3: CATEGORICAL COMPARISON PLOTS (Only show after scenarios cleaned) ===
             if st.session_state.get('scenarios_cleaned', False):
                 st.markdown("---")
                 st.subheader("📊 Step 4: Visualize Scenarios by Category")
@@ -1668,6 +1656,22 @@ def display_scenario_comparison():
     with st.expander("💾 Export Comparison Plot"):
         from core.viz.export import quick_export_buttons
         quick_export_buttons(fig, f"scenario_comparison_{x_param}_vs_{y_param}", ['png', 'pdf', 'html'])
+
+        
+
+        # === STEP 3: CLEANED SCENARIOS (Only show after parameters reviewed) ===
+        if st.session_state.get('parameters_reviewed', False):
+            st.markdown("---")
+            st.subheader("📄 Step 3: Review Cleaned Scenarios")
+            
+            if st.button("✨ Generate Cleaned Scenario Text", type="primary"):
+                generate_cleaned_scenarios()
+                st.session_state.scenarios_cleaned = True  # Mark as cleaned
+            
+            if st.session_state.cleaned_scenarios:
+                display_cleaned_scenarios()
+        
+
 
 
 if __name__ == "__main__":
