@@ -448,19 +448,45 @@ def reconcile_extractions(param_name: str, extractions: List[Dict]) -> Dict:
     if not extractions:
         return None
     
-    # Extract values and confidences
-    values = [e['value'] for e in extractions]
-    confidences = [e['confidence'] for e in extractions]
-    methods = [e['method'] for e in extractions]
+    # Extract values and confidences - filter out None values
+    raw_values = [e.get('value') for e in extractions]
+    raw_confidences = [e.get('confidence', 0.5) for e in extractions]
+    methods = [e.get('method', 'unknown') for e in extractions]
+    
+    # Filter to only valid numeric values
+    valid_entries = []
+    for i, val in enumerate(raw_values):
+        if val is not None:
+            try:
+                numeric_val = float(val)
+                if not np.isnan(numeric_val) and not np.isinf(numeric_val):
+                    valid_entries.append({
+                        'value': numeric_val,
+                        'confidence': float(raw_confidences[i]),
+                        'method': methods[i]
+                    })
+            except (ValueError, TypeError):
+                pass  # Skip non-numeric values
+    
+    if not valid_entries:
+        # No valid values, return None
+        return None
+    
+    values = [e['value'] for e in valid_entries]
+    confidences = [e['confidence'] for e in valid_entries]
+    methods_valid = [e['method'] for e in valid_entries]
     
     # Strategy 1: Voting (most common value)
     value_counts = Counter(values)
     most_common_value, vote_count = value_counts.most_common(1)[0]
     
     # Strategy 2: Weighted average
-    weighted_sum = sum(v * c for v, c in zip(values, confidences))
-    total_confidence = sum(confidences)
-    weighted_avg = weighted_sum / total_confidence if total_confidence > 0 else most_common_value
+    try:
+        weighted_sum = sum(v * c for v, c in zip(values, confidences))
+        total_confidence = sum(confidences)
+        weighted_avg = weighted_sum / total_confidence if total_confidence > 0 else most_common_value
+    except:
+        weighted_avg = most_common_value
     
     # Strategy 3: Highest confidence value
     max_conf_idx = confidences.index(max(confidences))
@@ -484,29 +510,29 @@ def reconcile_extractions(param_name: str, extractions: List[Dict]) -> Dict:
         confidence_level = 'MEDIUM'
         decision_method = 'highest_confidence'
     
-    # Get most common unit and direction
-    units = [e['unit'] for e in extractions]
-    directions = [e['direction'] for e in extractions]
+    # Get most common unit and direction from ALL extractions (not just valid ones)
+    units = [e.get('unit', '') for e in extractions if e.get('unit')]
+    directions = [e.get('direction', 'target') for e in extractions if e.get('direction')]
     
-    unit_counts = Counter(units)
-    direction_counts = Counter(directions)
+    unit_counts = Counter(units) if units else Counter([''])
+    direction_counts = Counter(directions) if directions else Counter(['target'])
     
-    final_unit = unit_counts.most_common(1)[0][0]
-    final_direction = direction_counts.most_common(1)[0][0]
+    final_unit = unit_counts.most_common(1)[0][0] if unit_counts else ''
+    final_direction = direction_counts.most_common(1)[0][0] if direction_counts else 'target'
     
     # Aggregate source sentences
-    sources = list(set([e['source_sentence'] for e in extractions]))
+    sources = list(set([e.get('source_sentence', '') for e in extractions if e.get('source_sentence')]))
     
     return {
-        'parameter': extractions[0]['parameter'],  # Use first original name
+        'parameter': extractions[0].get('parameter', param_name),  # Use first original name
         'parameter_normalized': param_name,
         'value': round(final_value, 2),
         'unit': final_unit,
         'direction': final_direction,
         'confidence_level': confidence_level,
-        'confidence_score': round(total_confidence / len(extractions), 2),
-        'extraction_count': len(extractions),
-        'methods_used': ', '.join(sorted(set(methods))),
+        'confidence_score': round(total_confidence / len(valid_entries), 2) if valid_entries else 0.5,
+        'extraction_count': len(valid_entries),
+        'methods_used': ', '.join(sorted(set(methods_valid))),
         'decision_method': decision_method,
         'all_values': values,
         'source_sentences': sources[:3]  # Limit to 3 sources
@@ -556,19 +582,24 @@ def extract_parameters_ensemble(text: str) -> pd.DataFrame:
             for _, row in matches.iterrows():
                 extractions.append({
                     'method': method,
-                    'parameter': row['parameter'],
-                    'value': row['value'],
-                    'unit': row['unit'],
-                    'direction': row['direction'],
-                    'confidence': row['confidence'],
-                    'source_sentence': row['source_sentence']
+                    'parameter': row.get('parameter', param_normalized),
+                    'value': row.get('value'),
+                    'unit': row.get('unit', ''),
+                    'direction': row.get('direction', 'target'),
+                    'confidence': row.get('confidence', 0.5),
+                    'source_sentence': row.get('source_sentence', '')
                 })
         
         # Reconcile
         if extractions:
-            reconciled = reconcile_extractions(param_normalized, extractions)
-            if reconciled:
-                unified_results.append(reconciled)
+            try:
+                reconciled = reconcile_extractions(param_normalized, extractions)
+                if reconciled:
+                    unified_results.append(reconciled)
+            except Exception as e:
+                # Skip this parameter if reconciliation fails
+                print(f"Warning: Failed to reconcile parameter '{param_normalized}': {e}")
+                continue
     
     return pd.DataFrame(unified_results)
 
