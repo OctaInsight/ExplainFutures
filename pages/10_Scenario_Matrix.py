@@ -13,10 +13,6 @@ import io
 from pathlib import Path
 import sys
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
     page_title="Scenario Matrix",
@@ -25,8 +21,55 @@ st.set_page_config(
 )
 
 # Import and render sidebar (after page config!)
-from core.shared_sidebar import render_app_sidebar
-render_app_sidebar()
+try:
+    # Try direct import (if shared_sidebar.py is in root)
+    from shared_sidebar import render_app_sidebar
+    render_app_sidebar()
+except ModuleNotFoundError:
+    try:
+        # Add parent directory to path
+        parent_dir = Path(__file__).parent.parent
+        sys.path.insert(0, str(parent_dir))
+        from shared_sidebar import render_app_sidebar
+        render_app_sidebar()
+    except:
+        # Fallback - minimal sidebar
+        st.sidebar.title("📊 Scenario Matrix")
+        st.sidebar.caption("Sidebar loading...")
+
+# Try to import export functions
+try:
+    from core.viz.export import quick_export_buttons
+    EXPORT_AVAILABLE = True
+except ImportError:
+    EXPORT_AVAILABLE = False
+    # Fallback function if export module is not available
+    def quick_export_buttons(fig, filename_prefix="figure", show_formats=None):
+        """Fallback export function"""
+        st.info("💡 Export functionality requires the core.viz.export module")
+        
+        # Provide basic download buttons
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📥 PNG", key=f"png_{filename_prefix}"):
+                st.info("Export as PNG - functionality will be available when export module is loaded")
+        
+        with col2:
+            if st.button("📥 PDF", key=f"pdf_{filename_prefix}"):
+                st.info("Export as PDF - functionality will be available when export module is loaded")
+        
+        with col3:
+            if st.button("📥 HTML", key=f"html_{filename_prefix}"):
+                # HTML export always works with Plotly
+                html_string = fig.to_html(include_plotlyjs='cdn')
+                st.download_button(
+                    label="Download HTML",
+                    data=html_string,
+                    file_name=f"{filename_prefix}.html",
+                    mime="text/html"
+                )
+
 
 
 # ====== UTILITY FUNCTIONS ======
@@ -594,66 +637,33 @@ if st.session_state.get('polarity_confirmed', False):
         # Display plot
         st.plotly_chart(fig, use_container_width=True)
         
-        # Export buttons
-        st.markdown("**📥 Export Plot:**")
-        
-        col_e1, col_e2, col_e3, col_e4 = st.columns(4)
-        
-        with col_e1:
-            try:
-                img_bytes = fig.to_image(format="png", width=1200, height=1200)
-                st.download_button(
-                    label="📥 PNG",
-                    data=img_bytes,
-                    file_name=f"scenario_matrix_{x_category}_vs_{y_category}.png",
-                    mime="image/png",
-                    use_container_width=True
-                )
-            except:
-                st.caption("⚠️ Install kaleido for PNG export")
-        
-        with col_e2:
-            try:
-                pdf_bytes = fig.to_image(format="pdf", width=1200, height=1200)
-                st.download_button(
-                    label="📥 PDF",
-                    data=pdf_bytes,
-                    file_name=f"scenario_matrix_{x_category}_vs_{y_category}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-            except:
-                st.caption("⚠️ Install kaleido for PDF export")
-        
-        with col_e3:
-            html_buffer = io.StringIO()
-            fig.write_html(html_buffer)
-            st.download_button(
-                label="📥 HTML",
-                data=html_buffer.getvalue(),
-                file_name=f"scenario_matrix_{x_category}_vs_{y_category}.html",
-                mime="text/html",
-                use_container_width=True
+        # Export buttons using quick_export_buttons
+        st.markdown("---")
+        with st.expander("💾 Export Plot", expanded=False):
+            quick_export_buttons(
+                fig,
+                filename_prefix=f"scenario_matrix_{x_category}_vs_{y_category}",
+                show_formats=['png', 'pdf', 'html']
             )
         
-        with col_e4:
-            # Export plot data
-            plot_data = []
-            for scenario_name, scores in category_scores.items():
-                plot_data.append({
-                    'Scenario': scenario_name,
-                    x_category: scores.get(x_category, 50),
-                    y_category: scores.get(y_category, 50)
-                })
-            df_plot = pd.DataFrame(plot_data)
-            csv_plot = df_plot.to_csv(index=False)
-            st.download_button(
-                label="📥 Data",
-                data=csv_plot,
-                file_name=f"scenario_matrix_data_{x_category}_vs_{y_category}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        # Export plot data separately
+        st.markdown("**📥 Export Data:**")
+        plot_data = []
+        for scenario_name, scores in category_scores.items():
+            plot_data.append({
+                'Scenario': scenario_name,
+                x_category: scores.get(x_category, 50),
+                y_category: scores.get(y_category, 50)
+            })
+        df_plot = pd.DataFrame(plot_data)
+        csv_plot = df_plot.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Plot Data (CSV)",
+            data=csv_plot,
+            file_name=f"scenario_matrix_data_{x_category}_vs_{y_category}.csv",
+            mime="text/csv",
+            use_container_width=False
+        )
 
 st.markdown("---")
 st.caption("💡 Tip: Use different category combinations to explore various scenario comparisons!")
