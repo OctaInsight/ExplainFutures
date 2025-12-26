@@ -28,7 +28,7 @@ sys.path.insert(0, str(project_root))
 from core.config import initialize_session_state
 from core.shared_sidebar import render_app_sidebar
 
-# Try to import export functions (same as page 4)
+# Try to import export functions
 try:
     from core.viz.export import quick_export_buttons
     EXPORT_AVAILABLE = True
@@ -37,8 +37,6 @@ except ImportError:
 
 # Initialize
 initialize_session_state()
-
-# Render shared sidebar
 render_app_sidebar()
 
 # === PAGE TITLE ===
@@ -59,187 +57,374 @@ def initialize_trajectory_state():
         st.session_state.absolute_values = {}
 
 
-def get_data_source_for_parameter(param_name: str) -> dict:
+def fuzzy_match_parameter(target: str, candidates: list) -> str:
     """
-    Get data source for a parameter following priority:
-    1. Forecasted data (Page 8)
-    2. Component data (Page 5) for PCA/ICA/Factor
-    3. Cleaned data (Page 2)
-    4. Raw data (Page 1)
+    Fuzzy match parameter name to find similar names
+    E.g., "CO2" matches "CO2_cleaned", "CO2_outlier_treated"
+    
+    Returns the best match or None
+    """
+    target_lower = target.lower()
+    
+    # Exact match first
+    for candidate in candidates:
+        if candidate.lower() == target_lower:
+            return candidate
+    
+    # Check if target is a prefix of candidate
+    for candidate in candidates:
+        if candidate.lower().startswith(target_lower):
+            return candidate
+    
+    # Check if candidate starts with target (without underscores)
+    target_base = target_lower.replace('_', '').replace('-', '').replace(' ', '')
+    for candidate in candidates:
+        candidate_base = candidate.lower().replace('_', '').replace('-', '').replace(' ', '')
+        if candidate_base.startswith(target_base):
+            return candidate
+    
+    return None
+
+
+def get_data_source_for_parameter(param_name: str, for_baseline: bool = False) -> dict:
+    """
+    Get data source for a parameter with STRICT priority:
+    
+    FOR REGULAR PARAMETERS:
+    1. Forecasted data (if exists, STOP - don't check others)
+    2. Cleaned data (with fuzzy matching, if exists, STOP)
+    3. Raw data (if exists, STOP)
+    
+    FOR COMPONENTS (PC1, IC1, Factor1, etc):
+    1. Forecasted components (if exists, STOP)
+    2. Calculated components from Page 5 (if exists, STOP)
+    
+    Parameters:
+    -----------
+    param_name : str
+        Parameter name
+    for_baseline : bool
+        If True, returns additional metadata about data availability
     
     Returns:
     --------
     dict with:
         - data: pd.DataFrame with columns [timestamp, value]
         - source: str ('forecasted', 'component', 'cleaned', 'raw')
-        - symbol: str emoji for UI
-        - full_name: str description
+        - symbol: str emoji
+        - full_name: str
+        - available_at_baseline: bool (only if for_baseline=True)
     """
     
-    # Priority 1: Forecasted data
-    if 'forecast_results' in st.session_state and param_name in st.session_state.forecast_results:
-        forecast = st.session_state.forecast_results[param_name]
-        df = pd.DataFrame({
-            'timestamp': forecast['forecast_timestamps'],
-            'value': forecast['forecast_values']
-        })
-        return {
-            'data': df,
-            'source': 'forecasted',
-            'symbol': '🔮',
-            'full_name': 'Forecasted (Future Projections)'
-        }
+    # Check if this is a component
+    is_component = any(comp in param_name.upper() for comp in ['PC', 'IC', 'FACTOR'])
     
-    # Priority 2: Component data (PCA, ICA, Factor)
-    if 'reduction_results' in st.session_state and st.session_state.reduction_results:
-        # Check if this is a PCA component
-        if 'pca' in st.session_state.reduction_results and 'pca_components' in st.session_state:
-            pca_results = st.session_state.reduction_results['pca']
-            n_components = pca_results.get('n_components', 0)
-            
-            # Match component names
-            for i in range(n_components):
-                if param_name in [f"PC{i+1}", f"PC{i+1} [PCA]"]:
-                    # Get component data
-                    if hasattr(st.session_state, 'pca_components'):
-                        component_values = st.session_state.pca_components[:, i]
-                        
-                        # Get timestamps from original data
-                        df_long = st.session_state.get('df_long')
-                        if df_long is not None:
-                            time_col = 'timestamp' if 'timestamp' in df_long.columns else 'time'
-                            unique_times = df_long[time_col].unique()
-                            
-                            df = pd.DataFrame({
-                                'timestamp': unique_times[:len(component_values)],
-                                'value': component_values
-                            })
-                            
-                            return {
-                                'data': df,
-                                'source': 'component',
-                                'symbol': '🔬',
-                                'full_name': 'Component (Dimensionality Reduction)'
-                            }
-    
-    # Priority 3: Cleaned data
-    if 'df_clean' in st.session_state and st.session_state.df_clean is not None:
-        df_clean = st.session_state.df_clean
+    if is_component:
+        # === COMPONENT PRIORITY ===
         
-        # Check if parameter exists in cleaned data
-        if param_name in df_clean['variable'].values:
-            param_data = df_clean[df_clean['variable'] == param_name].copy()
-            time_col = 'timestamp' if 'timestamp' in param_data.columns else 'time'
-            
+        # Priority 1: Forecasted component
+        if 'forecast_results' in st.session_state and param_name in st.session_state.forecast_results:
+            forecast = st.session_state.forecast_results[param_name]
             df = pd.DataFrame({
-                'timestamp': param_data[time_col],
-                'value': param_data['value']
+                'timestamp': forecast['forecast_timestamps'],
+                'value': forecast['forecast_values']
             })
-            
             return {
                 'data': df,
-                'source': 'cleaned',
-                'symbol': '🧹',
-                'full_name': 'Cleaned (Data Preprocessing)'
+                'source': 'forecasted',
+                'symbol': '🔮',
+                'full_name': 'Forecasted Component',
+                'available_at_baseline': True  # Forecast always has baseline
             }
-    
-    # Priority 4: Raw data
-    if 'df_long' in st.session_state and st.session_state.df_long is not None:
-        df_long = st.session_state.df_long
         
-        if param_name in df_long['variable'].values:
-            param_data = df_long[df_long['variable'] == param_name].copy()
-            time_col = 'timestamp' if 'timestamp' in param_data.columns else 'time'
+        # Priority 2: Calculated component from Page 5
+        if 'reduction_results' in st.session_state and st.session_state.reduction_results:
+            # PCA components
+            if 'PC' in param_name.upper() and 'pca' in st.session_state.reduction_results:
+                pca_results = st.session_state.reduction_results['pca']
+                n_components = pca_results.get('n_components', 0)
+                
+                for i in range(n_components):
+                    if param_name in [f"PC{i+1}", f"PC{i+1} [PCA]"]:
+                        if 'pca_components' in st.session_state:
+                            component_values = st.session_state.pca_components[:, i]
+                            
+                            df_long = st.session_state.get('df_long')
+                            if df_long is not None:
+                                time_col = 'timestamp' if 'timestamp' in df_long.columns else 'time'
+                                unique_times = df_long[time_col].unique()
+                                
+                                df = pd.DataFrame({
+                                    'timestamp': unique_times[:len(component_values)],
+                                    'value': component_values
+                                })
+                                
+                                return {
+                                    'data': df,
+                                    'source': 'component',
+                                    'symbol': '🔬',
+                                    'full_name': 'Calculated PCA Component',
+                                    'available_at_baseline': False  # Only historical
+                                }
             
+            # ICA components
+            if 'IC' in param_name.upper() and 'ica' in st.session_state.reduction_results:
+                # Similar logic for ICA
+                pass
+            
+            # Factor Analysis
+            if 'FACTOR' in param_name.upper() and 'factor_analysis' in st.session_state.reduction_results:
+                # Similar logic for Factor
+                pass
+    
+    else:
+        # === REGULAR PARAMETER PRIORITY ===
+        
+        # Priority 1: Forecasted data (STOP if found)
+        if 'forecast_results' in st.session_state and param_name in st.session_state.forecast_results:
+            forecast = st.session_state.forecast_results[param_name]
             df = pd.DataFrame({
-                'timestamp': param_data[time_col],
-                'value': param_data['value']
+                'timestamp': forecast['forecast_timestamps'],
+                'value': forecast['forecast_values']
             })
-            
             return {
                 'data': df,
-                'source': 'raw',
-                'symbol': '📊',
-                'full_name': 'Raw (Upload & Diagnostics)'
+                'source': 'forecasted',
+                'symbol': '🔮',
+                'full_name': 'Forecasted',
+                'available_at_baseline': True
             }
+        
+        # Priority 2: Cleaned data with fuzzy matching (STOP if found)
+        if 'df_clean' in st.session_state and st.session_state.df_clean is not None:
+            df_clean = st.session_state.df_clean
+            all_cleaned_vars = df_clean['variable'].unique().tolist()
+            
+            # Try fuzzy match
+            matched_var = fuzzy_match_parameter(param_name, all_cleaned_vars)
+            
+            if matched_var:
+                param_data = df_clean[df_clean['variable'] == matched_var].copy()
+                time_col = 'timestamp' if 'timestamp' in param_data.columns else 'time'
+                
+                df = pd.DataFrame({
+                    'timestamp': param_data[time_col],
+                    'value': param_data['value']
+                })
+                
+                return {
+                    'data': df,
+                    'source': 'cleaned',
+                    'symbol': '🧹',
+                    'full_name': f'Cleaned ({matched_var})',
+                    'available_at_baseline': False
+                }
+        
+        # Priority 3: Raw data (STOP if found)
+        if 'df_long' in st.session_state and st.session_state.df_long is not None:
+            df_long = st.session_state.df_long
+            
+            if param_name in df_long['variable'].values:
+                param_data = df_long[df_long['variable'] == param_name].copy()
+                time_col = 'timestamp' if 'timestamp' in param_data.columns else 'time'
+                
+                df = pd.DataFrame({
+                    'timestamp': param_data[time_col],
+                    'value': param_data['value']
+                })
+                
+                return {
+                    'data': df,
+                    'source': 'raw',
+                    'symbol': '📊',
+                    'full_name': 'Raw',
+                    'available_at_baseline': False
+                }
     
     # Not found
     return {
         'data': None,
         'source': 'not_found',
         'symbol': '❌',
-        'full_name': 'Not Found'
+        'full_name': 'Not Found',
+        'available_at_baseline': False
     }
 
 
-def get_historical_parameters_with_source():
+def get_all_available_parameters() -> dict:
     """
-    Get all parameters from historical data with source information
+    Get all available parameters organized by type and source
     
     Returns:
     --------
-    dict with parameter names as keys and source info as values
+    dict with:
+        - regular_params: list of regular parameter names
+        - components: list of component names
+        - source_info: dict mapping parameter -> source info
     """
     
-    params_with_source = {}
+    regular_params = set()
+    components = set()
+    source_info = {}
     
-    # Get all unique parameter names from all sources
-    all_param_names = set()
-    
-    # From forecasts
+    # Get all from forecast
     if 'forecast_results' in st.session_state:
-        all_param_names.update(st.session_state.forecast_results.keys())
+        for param in st.session_state.forecast_results.keys():
+            if any(comp in param.upper() for comp in ['PC', 'IC', 'FACTOR']):
+                components.add(param)
+            else:
+                regular_params.add(param)
     
-    # From components
-    if 'reduction_results' in st.session_state and st.session_state.reduction_results:
+    # Get all from cleaned
+    if 'df_clean' in st.session_state and st.session_state.df_clean is not None:
+        for param in st.session_state.df_clean['variable'].unique():
+            if param not in regular_params and param not in components:
+                if any(comp in param.upper() for comp in ['PC', 'IC', 'FACTOR']):
+                    components.add(param)
+                else:
+                    regular_params.add(param)
+    
+    # Get all from raw
+    if 'df_long' in st.session_state and st.session_state.df_long is not None:
+        for param in st.session_state.df_long['variable'].unique():
+            if param not in regular_params and param not in components:
+                if any(comp in param.upper() for comp in ['PC', 'IC', 'FACTOR']):
+                    components.add(param)
+                else:
+                    regular_params.add(param)
+    
+    # Get all from reduction results
+    if 'reduction_results' in st.session_state:
         if 'pca' in st.session_state.reduction_results:
-            n_components = st.session_state.reduction_results['pca'].get('n_components', 0)
-            for i in range(n_components):
-                all_param_names.add(f"PC{i+1}")
-        
-        if 'factor_analysis' in st.session_state.reduction_results:
-            n_factors = st.session_state.reduction_results['factor_analysis'].get('n_factors', 0)
-            for i in range(n_factors):
-                all_param_names.add(f"Factor{i+1}")
+            n = st.session_state.reduction_results['pca'].get('n_components', 0)
+            for i in range(n):
+                components.add(f"PC{i+1}")
         
         if 'ica' in st.session_state.reduction_results:
-            n_components = st.session_state.reduction_results['ica'].get('n_components', 0)
-            for i in range(n_components):
-                all_param_names.add(f"IC{i+1}")
+            n = st.session_state.reduction_results['ica'].get('n_components', 0)
+            for i in range(n):
+                components.add(f"IC{i+1}")
+        
+        if 'factor_analysis' in st.session_state.reduction_results:
+            n = st.session_state.reduction_results['factor_analysis'].get('n_factors', 0)
+            for i in range(n):
+                components.add(f"Factor{i+1}")
     
-    # From cleaned data
-    if 'df_clean' in st.session_state and st.session_state.df_clean is not None:
-        all_param_names.update(st.session_state.df_clean['variable'].unique())
+    # Get source info for each
+    for param in list(regular_params) + list(components):
+        source_info[param] = get_data_source_for_parameter(param)
     
-    # From raw data
+    return {
+        'regular_params': sorted(list(regular_params)),
+        'components': sorted(list(components)),
+        'source_info': source_info
+    }
+
+
+def get_data_time_range() -> dict:
+    """
+    Get the time range of original data and forecast point
+    
+    Returns:
+    --------
+    dict with:
+        - min_date: earliest date in original data
+        - max_date: latest date in original data
+        - forecast_start: date where forecasting started
+        - has_forecast: bool
+    """
+    
+    min_date = None
+    max_date = None
+    forecast_start = None
+    
+    # Get from original data
     if 'df_long' in st.session_state and st.session_state.df_long is not None:
-        all_param_names.update(st.session_state.df_long['variable'].unique())
+        df = st.session_state.df_long
+        time_col = 'timestamp' if 'timestamp' in df.columns else 'time'
+        
+        df[time_col] = pd.to_datetime(df[time_col])
+        min_date = df[time_col].min()
+        max_date = df[time_col].max()
     
-    # Get source for each parameter
-    for param in all_param_names:
-        source_info = get_data_source_for_parameter(param)
-        if source_info['source'] != 'not_found':
-            params_with_source[param] = source_info
+    # Get forecast start point
+    if 'forecast_results' in st.session_state and st.session_state.forecast_results:
+        # Get from any forecast
+        first_forecast = list(st.session_state.forecast_results.values())[0]
+        forecast_timestamps = first_forecast['forecast_timestamps']
+        forecast_start = pd.to_datetime(forecast_timestamps[0])
     
-    return params_with_source
+    return {
+        'min_date': min_date,
+        'max_date': max_date,
+        'forecast_start': forecast_start,
+        'has_forecast': forecast_start is not None
+    }
+
+
+def check_baseline_data_availability(param_name: str, baseline_date: pd.Timestamp) -> dict:
+    """
+    Check if data is available for parameter at baseline date
+    
+    Returns:
+    --------
+    dict with:
+        - available: bool
+        - source: str
+        - message: str
+        - suggestion: str
+    """
+    
+    source_info = get_data_source_for_parameter(param_name, for_baseline=True)
+    
+    if source_info['source'] == 'forecasted':
+        # Forecasted data - always available
+        return {
+            'available': True,
+            'source': 'forecasted',
+            'message': f"✅ Data available from forecast",
+            'suggestion': None
+        }
+    
+    elif source_info['source'] in ['component', 'cleaned', 'raw']:
+        # Historical data only - check if baseline is within range
+        df = source_info['data']
+        
+        if df is not None:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            min_date = df['timestamp'].min()
+            max_date = df['timestamp'].max()
+            
+            if baseline_date < min_date or baseline_date > max_date:
+                return {
+                    'available': False,
+                    'source': source_info['source'],
+                    'message': f"⚠️ No data at {baseline_date.year} (available: {min_date.year}-{max_date.year})",
+                    'suggestion': "Consider forecasting this parameter in 'Future Projections' page"
+                }
+            else:
+                return {
+                    'available': True,
+                    'source': source_info['source'],
+                    'message': f"✅ Data available from {source_info['source']} data",
+                    'suggestion': None
+                }
+    
+    return {
+        'available': False,
+        'source': 'not_found',
+        'message': "❌ Parameter not found",
+        'suggestion': "Check parameter mapping"
+    }
 
 
 def get_scenario_parameters():
-    """
-    Get parameters from detected scenarios (Page 9)
-    Priority: Saved table > Current table
-    
-    Returns:
-    --------
-    list of dicts with parameter info
-    """
+    """Get parameters from detected scenarios"""
     
     if 'detected_scenarios' not in st.session_state or not st.session_state.detected_scenarios:
         return []
     
     scenarios = st.session_state.detected_scenarios
-    
-    # Collect unique parameters across all scenarios
     params = {}
     
     for scenario in scenarios:
@@ -254,7 +439,6 @@ def get_scenario_parameters():
                     'scenarios': []
                 }
             
-            # Add scenario info
             params[param_name]['scenarios'].append({
                 'scenario': scenario['title'],
                 'value': item.get('value'),
@@ -265,14 +449,8 @@ def get_scenario_parameters():
     return list(params.values())
 
 
-def calculate_compatibility(scenario_params: list, historical_params_with_source: dict, mappings: dict) -> dict:
-    """
-    Calculate compatibility between scenario and historical parameters
-    
-    Returns:
-    --------
-    dict with score and details
-    """
+def calculate_compatibility(scenario_params: list, available_params: dict, mappings: dict) -> dict:
+    """Calculate compatibility score"""
     
     if not scenario_params:
         return {'score': 0, 'mapped': 0, 'total': 0, 'unmapped': []}
@@ -281,7 +459,6 @@ def calculate_compatibility(scenario_params: list, historical_params_with_source
     total_params = len(scenario_params)
     
     score = mapped_count / total_params if total_params > 0 else 0
-    
     unmapped = [p['name'] for p in scenario_params if mappings.get(p['name'], 'None') == 'None']
     
     return {
@@ -292,116 +469,67 @@ def calculate_compatibility(scenario_params: list, historical_params_with_source
     }
 
 
-def extract_baseline_value(historical_param: str, reference_year: int = None, use_forecast: bool = True) -> dict:
-    """
-    Extract baseline value for a parameter at a specific year
+def extract_baseline_value(historical_param: str, baseline_date: pd.Timestamp) -> dict:
+    """Extract baseline value at specific date"""
     
-    Parameters:
-    -----------
-    historical_param : str
-        Historical parameter name
-    reference_year : int
-        Year to extract baseline from
-    use_forecast : bool
-        Whether to use forecast if year is beyond historical data
-        
-    Returns:
-    --------
-    dict with:
-        - value: float
-        - year: int
-        - source: str
-    """
-    
-    # Get data source
     source_info = get_data_source_for_parameter(historical_param)
     
     if source_info['data'] is None:
-        return {'value': None, 'year': reference_year, 'source': 'not_found'}
+        return {'value': None, 'year': None, 'source': 'not_found', 'available': False}
     
     df = source_info['data']
-    
-    # Convert to datetime if not already
     df['timestamp'] = pd.to_datetime(df['timestamp'])
     df = df.sort_values('timestamp')
     
-    # Extract year
+    # Extract year from baseline_date
+    baseline_year = baseline_date.year
     df['year'] = df['timestamp'].dt.year
     
-    # If reference year not specified, use last year
-    if reference_year is None:
-        reference_year = df['year'].max()
-    
-    # Try to find data for that year
-    year_data = df[df['year'] == reference_year]
+    # Find data for that year
+    year_data = df[df['year'] == baseline_year]
     
     if len(year_data) > 0:
-        # Take mean of values in that year
         baseline_value = year_data['value'].mean()
         return {
             'value': float(baseline_value),
-            'year': reference_year,
-            'source': source_info['full_name']
+            'year': baseline_year,
+            'source': source_info['full_name'],
+            'available': True
         }
     
-    # Year not found - use closest available
-    closest_year = df['year'].iloc[(df['year'] - reference_year).abs().argsort()[0]]
+    # Year not found - use closest
+    closest_year = df['year'].iloc[(df['year'] - baseline_year).abs().argsort()[0]]
     closest_data = df[df['year'] == closest_year]
-    
     baseline_value = closest_data['value'].mean()
     
     return {
         'value': float(baseline_value),
         'year': closest_year,
-        'source': f"{source_info['full_name']} (closest: {closest_year})"
+        'source': f"{source_info['full_name']} (closest: {closest_year})",
+        'available': True
     }
 
 
 def convert_scenario_to_absolute(param_name: str, scenario_value: float, direction: str, 
                                  unit: str, baseline_value: float) -> float:
-    """
-    Convert scenario description to absolute value
-    
-    Parameters:
-    -----------
-    param_name : str
-        Parameter name
-    scenario_value : float
-        Scenario value (e.g., 20 for "20% increase")
-    direction : str
-        Direction (increase, decrease, target, stable, etc.)
-    unit : str
-        Unit (%, absolute, etc.)
-    baseline_value : float
-        Baseline reference value
-        
-    Returns:
-    --------
-    absolute_value : float
-    """
+    """Convert scenario to absolute value"""
     
     if unit == '%' or unit == 'percent':
-        # Percentage change
         if direction == 'increase':
             return baseline_value * (1 + scenario_value / 100)
         elif direction == 'decrease':
             return baseline_value * (1 - scenario_value / 100)
         elif direction == 'target':
-            return scenario_value  # Already absolute
+            return scenario_value
         else:
             return baseline_value
-    
     elif direction == 'double':
         return baseline_value * 2
-    
     elif direction == 'halve':
         return baseline_value * 0.5
-    
     elif direction == 'stable':
         return baseline_value
-    
     else:
-        # Absolute value
         return scenario_value
 
 
@@ -427,15 +555,15 @@ def main():
         st.info("Please ensure your scenarios have parameters defined in Page 9, Step 3")
         return
     
-    # Get historical parameters with source
-    historical_params_with_source = get_historical_parameters_with_source()
+    # Get all available parameters
+    available_params = get_all_available_parameters()
     
-    if not historical_params_with_source:
+    if not available_params['regular_params'] and not available_params['components']:
         st.warning("⚠️ No historical data available!")
         st.info("Please upload data first in **Upload & Data Diagnostics**")
         return
     
-    st.success(f"✅ Found {len(scenario_params)} scenario parameters and {len(historical_params_with_source)} historical parameters")
+    st.success(f"✅ Found {len(scenario_params)} scenario parameters and {len(available_params['regular_params']) + len(available_params['components'])} historical parameters")
     
     st.markdown("---")
     
@@ -444,7 +572,10 @@ def main():
     st.caption("Match each scenario parameter to its equivalent in historical data")
     
     # Calculate compatibility
-    compatibility = calculate_compatibility(scenario_params, historical_params_with_source, 
+    all_available = available_params['regular_params'] + available_params['components']
+    source_info_dict = available_params['source_info']
+    
+    compatibility = calculate_compatibility(scenario_params, available_params, 
                                            st.session_state.parameter_mappings)
     
     # Show compatibility score
@@ -485,7 +616,7 @@ def main():
             params_by_category[cat] = []
         params_by_category[cat].append(param)
     
-    # Create mapping interface for each category
+    # Create mapping interface
     for category in sorted(params_by_category.keys()):
         params_in_category = params_by_category[category]
         
@@ -516,58 +647,65 @@ def main():
                 with col2:
                     current_mapping = st.session_state.parameter_mappings.get(param_name, 'None')
                     
-                    # Build options with symbols
+                    # Build dropdown with STRICT ordering:
+                    # 1. Regular parameters (forecasted > cleaned > raw)
+                    # 2. Components (forecasted > calculated)
+                    
                     options = ['None']
                     
-                    # Priority order in dropdown
-                    forecasted = [(name, info) for name, info in historical_params_with_source.items() 
-                                 if info['source'] == 'forecasted']
-                    components = [(name, info) for name, info in historical_params_with_source.items() 
-                                 if info['source'] == 'component']
-                    cleaned = [(name, info) for name, info in historical_params_with_source.items() 
-                               if info['source'] == 'cleaned']
-                    raw = [(name, info) for name, info in historical_params_with_source.items() 
-                          if info['source'] == 'raw']
+                    # === REGULAR PARAMETERS ===
+                    forecasted_params = [p for p in available_params['regular_params'] 
+                                        if source_info_dict[p]['source'] == 'forecasted']
+                    cleaned_params = [p for p in available_params['regular_params']
+                                     if source_info_dict[p]['source'] == 'cleaned']
+                    raw_params = [p for p in available_params['regular_params']
+                                 if source_info_dict[p]['source'] == 'raw']
                     
-                    if forecasted:
-                        options.append('─── 🔮 Forecasted (Future Projections) ───')
-                        for name, info in sorted(forecasted):
-                            options.append(f"🔮 {name}")
+                    if forecasted_params:
+                        options.append('─── 🔮 Forecasted Parameters ───')
+                        for p in sorted(forecasted_params):
+                            options.append(f"🔮 {p}")
                     
-                    if components:
-                        options.append('─── 🔬 Components (PCA/ICA/Factor) ───')
-                        for name, info in sorted(components):
-                            # Clean up component name
-                            if 'Principal Component' in name:
-                                clean_name = name.replace(' (Principal Component)', '')
-                                options.append(f"🔬 {clean_name} [PCA]")
-                            elif 'Latent Factor' in name:
-                                clean_name = name.replace(' (Latent Factor)', '')
-                                options.append(f"🔬 {clean_name} [Factor]")
-                            elif 'Independent Component' in name:
-                                clean_name = name.replace(' (Independent Component)', '')
-                                options.append(f"🔬 {clean_name} [ICA]")
+                    if cleaned_params:
+                        options.append('─── 🧹 Cleaned Parameters ───')
+                        for p in sorted(cleaned_params):
+                            options.append(f"🧹 {p}")
+                    
+                    if raw_params:
+                        options.append('─── 📊 Raw Parameters ───')
+                        for p in sorted(raw_params):
+                            options.append(f"📊 {p}")
+                    
+                    # === COMPONENTS ===
+                    forecasted_comps = [c for c in available_params['components']
+                                       if source_info_dict[c]['source'] == 'forecasted']
+                    calculated_comps = [c for c in available_params['components']
+                                       if source_info_dict[c]['source'] == 'component']
+                    
+                    if forecasted_comps:
+                        options.append('─── 🔮 Forecasted Components ───')
+                        for c in sorted(forecasted_comps):
+                            options.append(f"🔮 {c}")
+                    
+                    if calculated_comps:
+                        options.append('─── 🔬 Calculated Components ───')
+                        for c in sorted(calculated_comps):
+                            if 'PC' in c:
+                                options.append(f"🔬 {c} [PCA]")
+                            elif 'IC' in c:
+                                options.append(f"🔬 {c} [ICA]")
+                            elif 'Factor' in c:
+                                options.append(f"🔬 {c} [Factor]")
                             else:
-                                options.append(f"🔬 {name}")
-                    
-                    if cleaned:
-                        options.append('─── 🧹 Cleaned (Data Preprocessing) ───')
-                        for name, info in sorted(cleaned):
-                            options.append(f"🧹 {name}")
-                    
-                    if raw:
-                        options.append('─── 📊 Raw (Upload & Diagnostics) ───')
-                        for name, info in sorted(raw):
-                            options.append(f"📊 {name}")
+                                options.append(f"🔬 {c}")
                     
                     # Find current selection
                     default_idx = 0
                     if current_mapping in options:
                         default_idx = options.index(current_mapping)
                     else:
-                        # Try to find without symbol
                         for i, opt in enumerate(options):
-                            if opt.startswith(('🔮', '🔬', '🧹', '📊')):
+                            if opt.startswith(('🔮', '🧹', '📊', '🔬')):
                                 clean_opt = opt.split(' ', 1)[1] if ' ' in opt else opt
                                 clean_opt = clean_opt.split(' [')[0] if ' [' in clean_opt else clean_opt
                                 if clean_opt == current_mapping:
@@ -582,9 +720,9 @@ def main():
                         label_visibility="collapsed"
                     )
                     
-                    # Store mapping (clean the selection)
+                    # Store mapping
                     if not selected.startswith('───'):
-                        if selected.startswith(('🔮', '🔬', '🧹', '📊')):
+                        if selected.startswith(('🔮', '🧹', '📊', '🔬')):
                             clean_selected = selected.split(' ', 1)[1]
                             clean_selected = clean_selected.split(' [')[0] if ' [' in clean_selected else clean_selected
                             st.session_state.parameter_mappings[param_name] = clean_selected
@@ -599,7 +737,7 @@ def main():
                 
                 st.markdown("")
     
-    # Show unmapped parameters
+    # Show unmapped
     if compatibility['unmapped']:
         st.markdown("---")
         st.warning(f"⚠️ **{len(compatibility['unmapped'])} Unmapped Parameters**")
@@ -626,59 +764,104 @@ def main():
     else:
         st.success("🎉 **Perfect! All parameters mapped!**")
     
-    # === STEP 2: BASELINE EXTRACTION ===
+    # === STEP 2: BASELINE SELECTION ===
     if compatibility['score'] > 0:
         st.markdown("---")
-        st.subheader("📍 Step 2: Extract Baseline Values")
-        st.caption("Define baseline reference year for percentage-based calculations")
+        st.subheader("📍 Step 2: Select Baseline Date")
+        st.caption("Choose the reference date for calculating percentage changes")
         
-        st.info("""
-        💡 **Baseline Year Selection:**
-        - Enter the reference year for calculating percentage changes
-        - Typically: last historical year OR a specific policy year
-        - Should be BEFORE scenario horizon years
-        - Example: If scenarios are for 2040, baseline might be 2020 or 2025
+        # Get time range
+        time_range = get_data_time_range()
+        
+        if time_range['min_date'] is None:
+            st.error("❌ No time range data available")
+            return
+        
+        st.info(f"""
+        📅 **Data Time Range:**
+        - Original data: {time_range['min_date'].strftime('%Y-%m-%d')} to {time_range['max_date'].strftime('%Y-%m-%d')}
+        {'- Forecast starts: ' + time_range['forecast_start'].strftime('%Y-%m-%d') if time_range['has_forecast'] else '- No forecasts available'}
         """)
         
-        # Get scenario years for reference
-        scenario_years = []
-        if 'detected_scenarios' in st.session_state:
-            for scenario in st.session_state.detected_scenarios:
-                horizon = scenario.get('horizon')
-                if horizon and isinstance(horizon, (int, float)):
-                    scenario_years.append(int(horizon))
+        # Determine baseline range
+        baseline_min = time_range['min_date']
         
-        if scenario_years:
-            min_year = min(scenario_years)
-            max_year = max(scenario_years)
-            st.caption(f"📅 Your scenario years range: {min_year} - {max_year}")
-            st.caption(f"💡 Recommended baseline: {min_year - 10} or earlier")
+        if time_range['has_forecast']:
+            baseline_max = time_range['forecast_start']
+            st.success(f"✅ Baseline must be between {baseline_min.strftime('%Y-%m-%d')} and {baseline_max.strftime('%Y-%m-%d')}")
+        else:
+            baseline_max = time_range['max_date']
+            st.info(f"ℹ️ Baseline can be between {baseline_min.strftime('%Y-%m-%d')} and {baseline_max.strftime('%Y-%m-%d')}")
         
-        # User enters baseline year (NO DEFAULT)
-        baseline_year = st.number_input(
-            "Enter Baseline Reference Year:",
-            min_value=2000,
-            max_value=2100,
-            value=2020,  # Neutral default
+        # Calculate date range in years
+        year_min = baseline_min.year
+        year_max = baseline_max.year
+        
+        # Slider for baseline year
+        baseline_year = st.slider(
+            "Baseline Year:",
+            min_value=year_min,
+            max_value=year_max,
+            value=year_max,
             step=1,
-            help="Enter the year to use as baseline for percentage calculations"
+            help=f"Select baseline year between {year_min} and {year_max}"
         )
         
-        # Warning if baseline >= scenario
-        if scenario_years and baseline_year >= min(scenario_years):
-            st.warning(f"""
-            ⚠️ **Warning:** Baseline year ({baseline_year}) is at or after scenario year ({min(scenario_years)}).
-            
-            **Scientific Issue:** Baseline should be BEFORE the scenario period.
-            
-            **Recommendation:** Use {min(scenario_years) - 10} or earlier.
-            """)
+        # Convert to timestamp
+        baseline_date = pd.Timestamp(year=baseline_year, month=1, day=1)
         
-        use_forecast = st.checkbox(
-            "Use forecast values if year beyond historical data",
-            value=True,
-            help="If baseline year is in future, use forecasted values"
-        )
+        st.caption(f"Selected baseline: **{baseline_date.strftime('%Y-%m-%d')}**")
+        
+        # Check data availability for each mapped parameter
+        st.markdown("---")
+        st.markdown("### 📊 Data Availability Check")
+        
+        availability_results = {}
+        missing_params = []
+        
+        for scenario_param, historical_param in st.session_state.parameter_mappings.items():
+            if historical_param != 'None':
+                avail = check_baseline_data_availability(historical_param, baseline_date)
+                availability_results[scenario_param] = avail
+                
+                if not avail['available']:
+                    missing_params.append((scenario_param, historical_param, avail))
+        
+        # Display availability table
+        avail_data = []
+        for scenario_param, avail in availability_results.items():
+            historical_param = st.session_state.parameter_mappings[scenario_param]
+            avail_data.append({
+                'Scenario Parameter': scenario_param,
+                'Historical Parameter': historical_param,
+                'Status': avail['message'],
+                'Source': avail['source']
+            })
+        
+        df_avail = pd.DataFrame(avail_data)
+        st.dataframe(df_avail, use_container_width=True, hide_index=True)
+        
+        # Show warnings for missing data
+        if missing_params:
+            st.markdown("---")
+            st.warning(f"⚠️ **{len(missing_params)} parameter(s) have no data at baseline year {baseline_year}**")
+            
+            st.markdown("**Parameters with missing baseline data:**")
+            for scenario_param, historical_param, avail in missing_params:
+                with st.expander(f"❌ {scenario_param} → {historical_param}"):
+                    st.error(avail['message'])
+                    if avail['suggestion']:
+                        st.info(f"💡 **Suggestion:** {avail['suggestion']}")
+                        
+                        # Link to relevant pages
+                        st.markdown("**Steps to fix:**")
+                        st.markdown("1. Go to **Time-Based Models & ML Training** (Page 6)")
+                        st.markdown("2. Train a model for this parameter")
+                        st.markdown("3. Go to **Future Projections** (Page 8) to generate forecast")
+                        st.markdown("4. Return here to extract baseline from forecast")
+        
+        # Extract baselines button
+        st.markdown("---")
         
         if st.button("🔍 Extract Baselines", type="primary"):
             with st.spinner("Extracting baseline values..."):
@@ -686,17 +869,14 @@ def main():
                 
                 for scenario_param, historical_param in st.session_state.parameter_mappings.items():
                     if historical_param != 'None':
-                        baseline = extract_baseline_value(
-                            historical_param,
-                            reference_year=baseline_year,
-                            use_forecast=use_forecast
-                        )
+                        baseline = extract_baseline_value(historical_param, baseline_date)
                         
                         baseline_results[scenario_param] = {
                             'historical_param': historical_param,
                             'value': baseline['value'],
                             'year': baseline['year'],
-                            'source': baseline['source']
+                            'source': baseline['source'],
+                            'available': baseline['available']
                         }
                 
                 st.session_state.baseline_references = baseline_results
@@ -883,7 +1063,7 @@ def display_trajectory_visualizations():
                             mime="image/png"
                         )
                     except:
-                        st.caption("⚠️ Install kaleido for PNG export")
+                        st.caption("⚠️ Install kaleido")
                 
                 with col2:
                     try:
@@ -895,7 +1075,7 @@ def display_trajectory_visualizations():
                             mime="application/pdf"
                         )
                     except:
-                        st.caption("⚠️ Install kaleido for PDF export")
+                        st.caption("⚠️ Install kaleido")
                 
                 with col3:
                     html_buffer = io.StringIO()
@@ -915,11 +1095,7 @@ def create_trajectory_plot(x_param: str, y_param: str, scenario_colors: dict,
     
     fig = go.Figure()
     
-    # Get absolute values
     absolute_vals = st.session_state.absolute_values
-    
-    # Get baseline references for forecast points
-    baseline_refs = st.session_state.baseline_references
     
     # Plot each scenario as a box
     for scenario_name, params in absolute_vals.items():
@@ -933,7 +1109,7 @@ def create_trajectory_plot(x_param: str, y_param: str, scenario_colors: dict,
             
             color = scenario_colors.get(scenario_name, '#1f77b4')
             
-            # Add box (rectangle)
+            # Add box
             fig.add_shape(
                 type="rect",
                 x0=x_val - x_size,
@@ -960,7 +1136,6 @@ def create_trajectory_plot(x_param: str, y_param: str, scenario_colors: dict,
     
     # Plot forecast points if available
     if show_forecast:
-        # Get forecast data for x_param and y_param
         x_source = get_data_source_for_parameter(x_param)
         y_source = get_data_source_for_parameter(y_param)
         
