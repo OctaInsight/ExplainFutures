@@ -581,42 +581,80 @@ if st.session_state.get('polarity_confirmed', False):
                 )
             ))
         
-        # Update layout
+        # Get scenario year if available (from first scenario)
+        scenario_year = None
+        if scenarios and len(scenarios) > 0:
+            # Try to extract year from scenario metadata or title
+            first_scenario = scenarios[0]
+            if 'year' in first_scenario:
+                scenario_year = first_scenario['year']
+            elif 'target_year' in first_scenario:
+                scenario_year = first_scenario['target_year']
+            # Try to extract from title (e.g., "Scenario 2030" or "2030 Vision")
+            elif 'title' in first_scenario:
+                import re
+                year_match = re.search(r'\b(20\d{2})\b', first_scenario['title'])
+                if year_match:
+                    scenario_year = year_match.group(1)
+        
+        # Build title with year if available
+        if scenario_year:
+            plot_title = f"Scenario Comparison: {x_category} vs {y_category} (Projected {scenario_year})"
+        else:
+            plot_title = f"Scenario Comparison: {x_category} vs {y_category}"
+        
+        # Update layout with export-friendly styling
         fig.update_layout(
             title=dict(
-                text=f"Scenario Comparison: {x_category} vs {y_category}",
-                font=dict(color='white', size=18)
+                text=plot_title,
+                font=dict(
+                    color='white',  # White for dark mode display
+                    size=18
+                ),
+                x=0.5,  # Center title
+                xanchor='center'
             ),
+            # Position axis titles OUTSIDE the plot area
             xaxis_title=dict(
-                text=f"{x_category} Score (0-100)",
-                font=dict(color='white', size=14)
+                text=f"{x_category} Score",
+                font=dict(color='white', size=14),
+                standoff=20  # Distance from axis
             ),
             yaxis_title=dict(
-                text=f"{y_category} Score (0-100)",
-                font=dict(color='white', size=14)
+                text=f"{y_category} Score",
+                font=dict(color='white', size=14),
+                standoff=20  # Distance from axis
             ),
             xaxis=dict(
                 range=[0, 100],
                 showgrid=True,
                 gridwidth=0.5,
-                gridcolor='rgba(255, 255, 255, 0.2)',
-                showticklabels=False,  # Hide tick numbers
-                tickvals=[],  # No tick values
+                gridcolor='rgba(255, 255, 255, 0.2)',  # Light grid for dark mode
+                showticklabels=False,
+                tickvals=[],
                 zeroline=False,
-                color='white'
+                color='white',
+                showline=True,  # Show axis line (box border)
+                linewidth=2,
+                linecolor='rgba(255, 255, 255, 0.5)',
+                mirror=True  # Show on both sides (creates box)
             ),
             yaxis=dict(
                 range=[0, 100],
                 showgrid=True,
                 gridwidth=0.5,
-                gridcolor='rgba(255, 255, 255, 0.2)',
-                showticklabels=False,  # Hide tick numbers
-                tickvals=[],  # No tick values
+                gridcolor='rgba(255, 255, 255, 0.2)',  # Light grid for dark mode
+                showticklabels=False,
+                tickvals=[],
                 zeroline=False,
-                color='white'
+                color='white',
+                showline=True,  # Show axis line (box border)
+                linewidth=2,
+                linecolor='rgba(255, 255, 255, 0.5)',
+                mirror=True  # Show on both sides (creates box)
             ),
-            plot_bgcolor='#0E1117',  # Dark background
-            paper_bgcolor='#0E1117',  # Dark background
+            plot_bgcolor='#0E1117',  # Dark background for display
+            paper_bgcolor='#0E1117',  # Dark background for display
             font=dict(color='white'),
             hovermode='closest',
             width=800,
@@ -624,24 +662,116 @@ if st.session_state.get('polarity_confirmed', False):
             showlegend=show_legend,
             legend=dict(
                 font=dict(color='white'),
-                bgcolor='rgba(0,0,0,0.5)'
+                bgcolor='rgba(0,0,0,0.5)',
+                bordercolor='rgba(255,255,255,0.3)',
+                borderwidth=1
+            ),
+            margin=dict(l=80, r=40, t=100, b=80)  # Margins for axis labels outside
+        )
+        
+        # Add quadrant labels with offset to avoid overlap
+        fig.add_annotation(
+            x=75, y=80,  # Offset from corner
+            text="High-High",
+            showarrow=False,
+            font=dict(size=12, color="white"),
+            bgcolor='rgba(0,0,0,0.5)',
+            bordercolor='rgba(255,255,255,0.3)',
+            borderwidth=1,
+            borderpad=4
+        )
+        fig.add_annotation(
+            x=25, y=80,  # Offset from corner
+            text="Low-High",
+            showarrow=False,
+            font=dict(size=12, color="white"),
+            bgcolor='rgba(0,0,0,0.5)',
+            bordercolor='rgba(255,255,255,0.3)',
+            borderwidth=1,
+            borderpad=4
+        )
+        fig.add_annotation(
+            x=75, y=20,  # Offset from corner
+            text="High-Low",
+            showarrow=False,
+            font=dict(size=12, color="white"),
+            bgcolor='rgba(0,0,0,0.5)',
+            bordercolor='rgba(255,255,255,0.3)',
+            borderwidth=1,
+            borderpad=4
+        )
+        fig.add_annotation(
+            x=25, y=20,  # Offset from corner
+            text="Low-Low",
+            showarrow=False,
+            font=dict(size=12, color="white"),
+            bgcolor='rgba(0,0,0,0.5)',
+            bordercolor='rgba(255,255,255,0.3)',
+            borderwidth=1,
+            borderpad=4
+        )
+        
+        # Store original layout for export modification
+        # Create a copy of the figure for export with white background
+        export_fig = go.Figure(fig)
+        
+        # Modify export figure to have white background and dark elements
+        export_fig.update_layout(
+            title=dict(
+                font=dict(color='black', size=18)  # Black title for export
+            ),
+            xaxis_title=dict(
+                font=dict(color='black', size=14)  # Black axis title
+            ),
+            yaxis_title=dict(
+                font=dict(color='black', size=14)  # Black axis title
+            ),
+            xaxis=dict(
+                gridcolor='rgba(0, 0, 0, 0.1)',  # Light gray grid for white bg
+                color='black',
+                linecolor='black'
+            ),
+            yaxis=dict(
+                gridcolor='rgba(0, 0, 0, 0.1)',  # Light gray grid for white bg
+                color='black',
+                linecolor='black'
+            ),
+            plot_bgcolor='white',  # White background for export
+            paper_bgcolor='white',  # White background for export
+            font=dict(color='black'),  # Black text
+            legend=dict(
+                font=dict(color='black'),
+                bgcolor='rgba(255,255,255,0.9)',
+                bordercolor='black',
+                borderwidth=1
             )
         )
         
-        # Add quadrant labels
-        fig.add_annotation(x=75, y=75, text="High-High", showarrow=False, font=dict(size=12, color="white"))
-        fig.add_annotation(x=25, y=75, text="Low-High", showarrow=False, font=dict(size=12, color="white"))
-        fig.add_annotation(x=75, y=25, text="High-Low", showarrow=False, font=dict(size=12, color="white"))
-        fig.add_annotation(x=25, y=25, text="Low-Low", showarrow=False, font=dict(size=12, color="white"))
+        # Update cross lines for export figure
+        export_fig.update_shapes(
+            dict(line=dict(color='rgba(0, 0, 0, 0.3)', width=2))
+        )
         
-        # Display plot
+        # Update quadrant annotations for export
+        for annotation in export_fig.layout.annotations:
+            annotation.font.color = 'black'
+            annotation.bgcolor = 'rgba(255, 255, 255, 0.8)'
+            annotation.bordercolor = 'black'
+        
+        # Store export figure in session state for export function
+        if 'export_figures' not in st.session_state:
+            st.session_state.export_figures = {}
+        st.session_state.export_figures['scenario_matrix'] = export_fig
+        
+        # Display plot (with dark background)
         st.plotly_chart(fig, use_container_width=True)
         
-        # Export buttons using quick_export_buttons
+        # Export buttons using quick_export_buttons with WHITE background figure
         st.markdown("---")
         with st.expander("💾 Export Plot", expanded=False):
+            # Use export_fig (white background) for exports
             quick_export_buttons(
-                fig,
+                export_fig,  # Use the white background version
                 filename_prefix=f"scenario_matrix_{x_category}_vs_{y_category}",
                 show_formats=['png', 'pdf', 'html']
             )
