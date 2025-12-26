@@ -926,138 +926,136 @@ Renewable energy reaches 40% by 2040.""",
                 st.info("📑 Segmenting scenarios...")
                 scenarios = segment_scenarios(scenario_text)
                 
-                # === INTELLIGENT EXTRACTION: Use NLP to understand context ===
-                import re
+                # === MULTI-METHOD TITLE & YEAR EXTRACTION ===
+                st.info("🎯 Extracting scenario names and years with multiple methods...")
                 
-                # Try to use spaCy for intelligent extraction
-                try:
-                    import spacy
-                    try:
-                        nlp = spacy.load("en_core_web_sm")
-                        USE_SPACY = True
-                    except:
-                        USE_SPACY = False
-                except:
-                    USE_SPACY = False
+                from ensemble_extraction import extract_title_and_year_ensemble
                 
-                # Process each scenario
-                for idx, scenario in enumerate(scenarios):
+                for scenario in scenarios:
                     scenario_text_content = scenario.get('text', '')
                     
-                    # === EXTRACT YEAR INTELLIGENTLY ===
-                    extracted_year = None
+                    # Extract with ensemble methods
+                    best_title, best_year = extract_title_and_year_ensemble(scenario_text_content)
                     
-                    if USE_SPACY:
-                        # Use spaCy NER to find dates
-                        doc = nlp(scenario_text_content[:500])  # First 500 chars
-                        
-                        # Look for DATE entities
-                        for ent in doc.ents:
-                            if ent.label_ == "DATE":
-                                # Extract 4-digit year from date entity
-                                year_match = re.search(r'\b(20\d{2})\b', ent.text)
-                                if year_match:
-                                    year = int(year_match.group(1))
-                                    if 2020 <= year <= 2100:
-                                        extracted_year = year
-                                        break
+                    if best_title:
+                        scenario['title'] = best_title
                     
-                    # Fallback: Look for years in context (any format)
-                    if not extracted_year:
-                        # Find all 4-digit years in text
-                        year_candidates = re.findall(r'\b(20\d{2})\b', scenario_text_content[:500])
-                        
-                        # Prefer years that appear near temporal keywords
-                        temporal_keywords = ['by', 'in', 'until', 'to', 'year', 'horizon', 'target', 'projected']
-                        
-                        for year_str in year_candidates:
-                            year = int(year_str)
-                            if 2020 <= year <= 2100:
-                                # Check if year appears near temporal keywords
-                                for keyword in temporal_keywords:
-                                    # Look for "keyword year" or "year" near keyword
-                                    pattern = rf'\b{keyword}\b.{{0,20}}\b{year}\b|\b{year}\b.{{0,20}}\b{keyword}\b'
-                                    if re.search(pattern, scenario_text_content[:500], re.IGNORECASE):
-                                        extracted_year = year
-                                        break
-                                
-                                if extracted_year:
-                                    break
-                                
-                                # If still not found, just use first valid year
-                                if not extracted_year:
-                                    extracted_year = year
-                                    break
-                    
-                    if extracted_year:
-                        scenario['horizon'] = extracted_year
-                    
-                    # === EXTRACT SCENARIO NAME INTELLIGENTLY ===
-                    extracted_name = None
-                    
-                    # Get first few lines (likely contains the title)
-                    lines = scenario_text_content.strip().split('\n')
-                    first_line = lines[0].strip() if lines else ""
-                    
-                    if USE_SPACY and first_line:
-                        # Use spaCy to understand the structure
-                        doc = nlp(first_line)
-                        
-                        # Strategy 1: Extract noun phrases that look like titles
-                        noun_chunks = list(doc.noun_chunks)
-                        if noun_chunks:
-                            # Get the largest noun chunk (likely the title)
-                            title_chunk = max(noun_chunks, key=lambda x: len(x.text))
-                            candidate_name = title_chunk.text.strip()
-                            
-                            # Clean up common prefixes
-                            candidate_name = re.sub(r'^Scenario\s*\d*\s*[-:]\s*', '', candidate_name, flags=re.IGNORECASE)
-                            candidate_name = re.sub(r'^Scenario\s*[-:]\s*', '', candidate_name, flags=re.IGNORECASE)
-                            
-                            if candidate_name and len(candidate_name) > 3:
-                                extracted_name = candidate_name
-                    
-                    # Fallback: Smart pattern-based extraction
-                    if not extracted_name and first_line:
-                        # Remove year mentions
-                        clean_line = re.sub(r'\s*\(?\s*(?:by\s+)?(?:in\s+)?\d{4}\s*\)?', '', first_line)
-                        
-                        # Remove common prefixes
-                        clean_line = re.sub(r'^Scenario\s*\d*\s*[-:]\s*', '', clean_line, flags=re.IGNORECASE)
-                        clean_line = re.sub(r'^Scenario\s*[-:]\s*', '', clean_line, flags=re.IGNORECASE)
-                        
-                        # Remove trailing punctuation
-                        clean_line = clean_line.rstrip(':').strip()
-                        
-                        # If it doesn't look like a parameter line, use it as title
-                        if clean_line and not any(word in clean_line.lower() for word in ['increases', 'decreases', 'reaches', 'remains', '%']):
-                            if len(clean_line) > 3 and len(clean_line) < 100:
-                                extracted_name = clean_line
-                    
-                    if extracted_name:
-                        scenario['title'] = extracted_name
+                    if best_year:
+                        scenario['horizon'] = best_year
                 
                 # Show what was extracted
                 extraction_summary = []
                 for s in scenarios:
                     name = s.get('title', 'Unknown')
                     year = s.get('horizon', 'Not detected')
-                    extraction_summary.append(f"'{name}' → {year}")
+                    extraction_summary.append(f"'{name}' ({year})")
                 
                 st.success(f"✅ Detected {len(scenarios)} scenario(s): {', '.join(extraction_summary)}")
                 
-                # Step 3: Extract parameters from each scenario
-                st.info("🔎 Extracting parameters...")
-                scenarios_with_params = extract_parameters_from_scenarios(scenarios)
+                # Step 3: Extract parameters from each scenario using ENSEMBLE METHODS
+                st.info("🔎 Extracting parameters with 5 different methods...")
+                
+                # Import ensemble extraction
+                import sys
+                sys.path.insert(0, '/home/claude')
+                from ensemble_extraction import (
+                    extract_parameters_ensemble,
+                    normalize_across_scenarios
+                )
+                
+                # Track extraction stats
+                method_stats = {
+                    'template': 0,
+                    'regex': 0,
+                    'semantic': 0,
+                    'statistical': 0,
+                    'gliner': 0
+                }
+                
+                total_consensus = 0
+                total_single_method = 0
+                
+                scenarios_with_params = []
+                
+                # Extract from each scenario
+                for scenario in scenarios:
+                    scenario_text = scenario.get('text', '')
+                    
+                    # Run ensemble extraction
+                    unified_df = extract_parameters_ensemble(scenario_text)
+                    
+                    # Convert to items format
+                    items = []
+                    
+                    for _, row in unified_df.iterrows():
+                        # Count methods
+                        methods_used = row['methods_used'].split(', ')
+                        for method in methods_used:
+                            if method in method_stats:
+                                method_stats[method] += 1
+                        
+                        # Track consensus
+                        if row['extraction_count'] >= 2:
+                            total_consensus += 1
+                        else:
+                            total_single_method += 1
+                        
+                        item = {
+                            'parameter': row['parameter'],
+                            'parameter_canonical': row['parameter_normalized'],
+                            'direction': row['direction'],
+                            'value': row['value'],
+                            'unit': row['unit'],
+                            'value_type': 'percent' if row['unit'] == '%' else 'absolute',
+                            'confidence': row['confidence_score'],
+                            'confidence_level': row['confidence_level'],
+                            'extraction_count': row['extraction_count'],
+                            'extraction_method': row['methods_used'],
+                            'decision_method': row['decision_method'],
+                            'source_sentence': row['source_sentences'][0] if row['source_sentences'] else '',
+                            'all_sources': row['source_sentences']
+                        }
+                        
+                        items.append(item)
+                    
+                    scenario['items'] = items
+                    scenarios_with_params.append(scenario)
+                
+                # CRITICAL: Cross-scenario normalization
+                st.info("🔄 Normalizing parameters across all scenarios...")
+                scenarios_with_params = normalize_across_scenarios(scenarios_with_params)
                 
                 total_params = sum(len(s['items']) for s in scenarios_with_params)
+                
+                # Show extraction statistics
                 st.success(f"✅ Extracted {total_params} parameter(s) across all scenarios")
+                
+                with st.expander("📊 Extraction Statistics", expanded=False):
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("Total Parameters", total_params)
+                        st.metric("High Confidence (2+ methods)", total_consensus)
+                        st.metric("Single Method", total_single_method)
+                    
+                    with col2:
+                        st.markdown("**Extractions by Method:**")
+                        for method, count in sorted(method_stats.items(), key=lambda x: x[1], reverse=True):
+                            if count > 0:
+                                st.markdown(f"- {method.title()}: {count}")
+                    
+                    with col3:
+                        st.markdown("**Quality Metrics:**")
+                        if total_params > 0:
+                            consensus_pct = round(100 * total_consensus / total_params)
+                            st.markdown(f"- Consensus: {consensus_pct}%")
+                            st.markdown(f"- Methods Used: {len([m for m, c in method_stats.items() if c > 0])}/5")
                 
                 # Store results
                 st.session_state.detected_scenarios = scenarios_with_params
                 st.session_state.scenarios_processed = True
                 
-                st.success("🎉 Analysis complete! Click button below to edit parameters.")
+                st.success("🎉 Analysis complete! Click button below to review scenarios.")
                 st.rerun()
     
     # === STEP 2: REVIEW DETECTED SCENARIOS ===
@@ -1090,38 +1088,29 @@ Renewable energy reaches 40% by 2040.""",
                         st.session_state.detected_scenarios[idx]['title'] = new_title
                 
                 with col2:
-                    # Get horizon value from NLP extraction (no hardcoded default)
+                    # Get horizon value from NLP extraction
                     horizon_value = scenario.get('horizon')
                     
-                    # Only use if it's a valid number
+                    # Display the extracted year or allow user to enter
                     if horizon_value is not None and isinstance(horizon_value, (int, float)):
                         year_value = int(horizon_value)
+                        year_help = f"Extracted year: {year_value}"
                     else:
-                        # No year extracted - use None to show placeholder
-                        year_value = None
+                        # No year extracted - show current year + 10 as placeholder
+                        from datetime import datetime
+                        year_value = datetime.now().year + 10
+                        year_help = "⚠️ Year not detected - please enter manually"
                     
-                    if year_value is not None:
-                        new_year = st.number_input(
-                            "Projected Year",
-                            min_value=2020,
-                            max_value=2100,
-                            value=year_value,
-                            step=1,
-                            key=f"scenario_year_{idx}",
-                            label_visibility="collapsed"
-                        )
-                    else:
-                        # Show empty input with placeholder
-                        new_year = st.number_input(
-                            "Projected Year",
-                            min_value=2020,
-                            max_value=2100,
-                            value=2030,  # Just for display, user must enter
-                            step=1,
-                            key=f"scenario_year_{idx}",
-                            label_visibility="collapsed",
-                            help="Year not detected - please enter manually"
-                        )
+                    new_year = st.number_input(
+                        "Projected Year",
+                        min_value=2020,
+                        max_value=2100,
+                        value=year_value,
+                        step=1,
+                        key=f"scenario_year_{idx}",
+                        label_visibility="collapsed",
+                        help=year_help
+                    )
                     
                     if new_year != scenario.get('horizon'):
                         st.session_state.detected_scenarios[idx]['horizon'] = int(new_year)
