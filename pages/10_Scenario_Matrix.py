@@ -22,20 +22,12 @@ st.set_page_config(
 
 # Import and render sidebar (after page config!)
 try:
-    # Try direct import (if shared_sidebar.py is in root)
-    from shared_sidebar import render_app_sidebar
+    from core.shared_sidebar import render_app_sidebar
     render_app_sidebar()
-except ModuleNotFoundError:
-    try:
-        # Add parent directory to path
-        parent_dir = Path(__file__).parent.parent
-        sys.path.insert(0, str(parent_dir))
-        from shared_sidebar import render_app_sidebar
-        render_app_sidebar()
-    except:
-        # Fallback - minimal sidebar
-        st.sidebar.title("📊 Scenario Matrix")
-        st.sidebar.caption("Sidebar loading...")
+except:
+    # Fallback - minimal sidebar
+    st.sidebar.title("📊 Scenario Matrix")
+    st.sidebar.markdown("---")
 
 # Try to import export functions
 try:
@@ -122,7 +114,10 @@ def infer_polarity(param_name: str, category: str = "") -> bool:
 
 def normalize_parameter(values: list, better_when_higher: bool) -> list:
     """
-    Normalize parameter values to 0-100 scale
+    Normalize parameter values to -100 to +100 scale
+    
+    This allows proper representation of negative values (decreases)
+    and positive values (increases).
     
     Parameters:
     -----------
@@ -134,7 +129,7 @@ def normalize_parameter(values: list, better_when_higher: bool) -> list:
     Returns:
     --------
     list of float
-        Normalized scores (0-100)
+        Normalized scores (-100 to +100)
     """
     
     if not values or len(values) == 0:
@@ -144,27 +139,36 @@ def normalize_parameter(values: list, better_when_higher: bool) -> list:
     valid_values = [v for v in values if v is not None]
     
     if len(valid_values) == 0:
-        return [50] * len(values)  # All None, return neutral
+        return [0] * len(values)  # All None, return neutral (0)
     
     min_val = min(valid_values)
     max_val = max(valid_values)
     
     # All values equal
     if max_val == min_val:
-        return [50] * len(values)
+        # If all values are the same, map to 0 (neutral)
+        # Unless the value itself suggests direction
+        if min_val > 0:
+            return [50] * len(values)  # Positive values → slightly positive score
+        elif min_val < 0:
+            return [-50] * len(values)  # Negative values → slightly negative score
+        else:
+            return [0] * len(values)  # Zero → neutral
     
     normalized = []
     
     for v in values:
         if v is None:
-            normalized.append(50)  # Neutral for None
+            normalized.append(0)  # Neutral for None
         elif better_when_higher:
-            # Higher is better: max gets 100, min gets 0
-            score = 100 * (v - min_val) / (max_val - min_val)
+            # Higher is better: map to [-100, +100]
+            # max gets +100, min gets -100
+            score = 200 * (v - min_val) / (max_val - min_val) - 100
             normalized.append(score)
         else:
-            # Lower is better: min gets 100, max gets 0
-            score = 100 * (max_val - v) / (max_val - min_val)
+            # Lower is better: map to [-100, +100]
+            # min gets +100, max gets -100
+            score = 200 * (max_val - v) / (max_val - min_val) - 100
             normalized.append(score)
     
     return normalized
@@ -182,12 +186,18 @@ def calculate_category_scores(scenarios: list, polarity_dict: dict) -> dict:
     """
     
     # Group parameters by category
+    # Key insight: Use parameter_canonical for matching across scenarios
     params_by_category = {}
     
     for scenario in scenarios:
         for item in scenario['items']:
             category = item.get('category', 'Other')
-            param = item.get('parameter', '')
+            
+            # Use canonical name for consistent matching
+            param = item.get('parameter_canonical', item.get('parameter', ''))
+            
+            if not param:  # Skip if no parameter name
+                continue
             
             if category not in params_by_category:
                 params_by_category[category] = {}
@@ -195,9 +205,19 @@ def calculate_category_scores(scenarios: list, polarity_dict: dict) -> dict:
             if param not in params_by_category[category]:
                 params_by_category[category][param] = []
             
+            # Get the value - handle different value types
+            value = item.get('value')
+            
+            # Convert to float if possible
+            if value is not None:
+                try:
+                    value = float(value)
+                except (ValueError, TypeError):
+                    value = None
+            
             params_by_category[category][param].append({
                 'scenario': scenario['title'],
-                'value': item.get('value'),
+                'value': value,
                 'direction': item.get('direction', 'target')
             })
     
@@ -208,7 +228,7 @@ def calculate_category_scores(scenarios: list, polarity_dict: dict) -> dict:
         for param, data_points in params.items():
             values = [d['value'] for d in data_points]
             
-            # Get polarity
+            # Get polarity - check both canonical and original parameter names
             better_when_higher = polarity_dict.get(param, True)
             
             # Normalize
@@ -224,7 +244,9 @@ def calculate_category_scores(scenarios: list, polarity_dict: dict) -> dict:
                 if category not in normalized_scores[scenario_name]:
                     normalized_scores[scenario_name][category] = []
                 
-                normalized_scores[scenario_name][category].append(scores[i])
+                # Only add valid scores
+                if scores[i] is not None:
+                    normalized_scores[scenario_name][category].append(scores[i])
     
     # Average scores within each category
     category_scores = {}
@@ -234,11 +256,21 @@ def calculate_category_scores(scenarios: list, polarity_dict: dict) -> dict:
         
         for category, scores in categories.items():
             # Filter out None values
-            valid_scores = [s for s in scores if s is not None]
+            valid_scores = [s for s in scores if s is not None and not np.isnan(s)]
             if valid_scores:
                 category_scores[scenario_name][category] = np.mean(valid_scores)
             else:
-                category_scores[scenario_name][category] = 50  # Neutral
+                category_scores[scenario_name][category] = 0  # Neutral (0) if no valid scores
+    
+    # Ensure all scenarios have all categories (fill missing with 0)
+    all_categories = set()
+    for scores in category_scores.values():
+        all_categories.update(scores.keys())
+    
+    for scenario_name in category_scores:
+        for category in all_categories:
+            if category not in category_scores[scenario_name]:
+                category_scores[scenario_name][category] = 0  # Neutral
     
     return category_scores
 
@@ -280,9 +312,12 @@ with st.expander("📖 **How to Use This Page**", expanded=False):
     5. **Export Results** - Download plots and data
     
     ### Scoring:
-    - **0-100 scale** for each category
-    - **100** = Best performance in that category
-    - **0** = Worst performance in that category
+    - **-100 to +100 scale** for each category
+    - **+100** = Best performance in that category
+    - **-100** = Worst performance in that category
+    - **0** = Neutral/baseline performance
+    - **Positive scores (+)** indicate improvements or favorable outcomes
+    - **Negative scores (-)** indicate declines or unfavorable outcomes
     - Scores are **relative** between scenarios (not absolute)
     """)
 
@@ -292,11 +327,16 @@ st.markdown("---")
 st.subheader("🎯 Step 1: Parameter Polarity Detection")
 st.caption("Review and confirm whether higher values are better for each parameter")
 
-# Collect all unique parameters
+# Collect all unique parameters (use canonical names for consistency)
 all_parameters = {}
 for scenario in scenarios:
     for item in scenario['items']:
-        param = item.get('parameter', '')
+        # Use canonical name if available, fallback to parameter
+        param = item.get('parameter_canonical', item.get('parameter', ''))
+        
+        if not param:  # Skip empty parameter names
+            continue
+        
         category = item.get('category', 'Other')
         
         if param not in all_parameters:
@@ -394,8 +434,8 @@ if st.button("✅ Confirm All Polarities & Calculate Scores", type="primary", us
 # === STEP 3: CALCULATE SCORES ===
 if st.session_state.get('polarity_confirmed', False):
     st.markdown("---")
-    st.subheader("📊 Step 2: Category Scores (0-100)")
-    st.caption("Normalized scores for each category across scenarios")
+    st.subheader("📊 Step 2: Category Scores (-100 to +100)")
+    st.caption("Normalized scores for each category across scenarios (negative = decline, positive = improvement)")
     
     # Calculate scores
     category_scores = calculate_category_scores(scenarios, st.session_state.polarity_dict)
@@ -421,6 +461,28 @@ if st.session_state.get('polarity_confirmed', False):
                 display_df[col] = display_df[col].apply(lambda x: f"{x:.1f}")
         
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+        
+        # Debug info - show parameter counts per category
+        st.markdown("**Debug: Parameter Counts by Category**")
+        param_counts = {}
+        for scenario in scenarios:
+            for item in scenario['items']:
+                category = item.get('category', 'Other')
+                param = item.get('parameter_canonical', item.get('parameter', 'Unknown'))
+                
+                if category not in param_counts:
+                    param_counts[category] = set()
+                param_counts[category].add(param)
+        
+        debug_data = []
+        for cat, params in sorted(param_counts.items()):
+            debug_data.append({
+                'Category': cat,
+                'Parameter Count': len(params),
+                'Parameters': ', '.join(sorted(params)[:5]) + ('...' if len(params) > 5 else '')
+            })
+        
+        st.dataframe(pd.DataFrame(debug_data), use_container_width=True, hide_index=True)
         
         # Download scores
         col_d1, col_d2 = st.columns(2)
@@ -526,36 +588,43 @@ if st.session_state.get('polarity_confirmed', False):
         # Create plot
         fig = go.Figure()
         
-        # Add cross at origin (0, 0) centered at (50, 50)
+        # Add cross at origin (0, 0) - TRUE CENTER
         fig.add_shape(
             type="line",
-            x0=0, y0=50, x1=100, y1=50,
+            x0=-110, y0=0, x1=110, y1=0,  # Horizontal line through y=0
             line=dict(color="rgba(255, 255, 255, 0.5)", width=2, dash="dash"),
             layer="below"
         )
         fig.add_shape(
             type="line",
-            x0=50, y0=0, x1=50, y1=100,
+            x0=0, y0=-110, x1=0, y1=110,  # Vertical line through x=0
             line=dict(color="rgba(255, 255, 255, 0.5)", width=2, dash="dash"),
             layer="below"
         )
         
         # Add each scenario as a box
         for scenario_name, scores in category_scores.items():
-            x_val = scores.get(x_category, 50)
-            y_val = scores.get(y_category, 50)
+            x_val = scores.get(x_category, 0)  # Default to 0 (neutral)
+            y_val = scores.get(y_category, 0)  # Default to 0 (neutral)
             
             # Calculate error ranges
-            x_error = (error_margin / 100) * x_val
-            y_error = (error_margin / 100) * y_val
+            x_error = (error_margin / 100) * abs(x_val) if x_val != 0 else 5  # Min error of 5
+            y_error = (error_margin / 100) * abs(y_val) if y_val != 0 else 5  # Min error of 5
             
             color = scenario_colors.get(scenario_name, '#636EFA')
+            
+            # CRITICAL FIX: Clamp box boundaries to [-110, 110] range
+            # This prevents boxes from appearing outside the diagram
+            x0 = max(-110, x_val - x_error)
+            y0 = max(-110, y_val - y_error)
+            x1 = min(110, x_val + x_error)
+            y1 = min(110, y_val + y_error)
             
             # Add box as a rectangle
             fig.add_shape(
                 type="rect",
-                x0=x_val - x_error, y0=y_val - y_error,
-                x1=x_val + x_error, y1=y_val + y_error,
+                x0=x0, y0=y0,
+                x1=x1, y1=y1,
                 fillcolor=color,
                 opacity=box_opacity,
                 line=dict(color=color, width=2),
@@ -626,13 +695,15 @@ if st.session_state.get('polarity_confirmed', False):
                 standoff=20  # Distance from axis
             ),
             xaxis=dict(
-                range=[0, 100],
+                range=[-110, 110],  # NEW: -110 to +110 range
                 showgrid=True,
                 gridwidth=0.5,
                 gridcolor='rgba(255, 255, 255, 0.2)',  # Light grid for dark mode
                 showticklabels=False,
                 tickvals=[],
-                zeroline=False,
+                zeroline=True,  # Show zero line
+                zerolinewidth=2,
+                zerolinecolor='rgba(255, 255, 255, 0.7)',  # Highlight zero
                 color='white',
                 showline=True,  # Show axis line (box border)
                 linewidth=2,
@@ -640,13 +711,15 @@ if st.session_state.get('polarity_confirmed', False):
                 mirror=True  # Show on both sides (creates box)
             ),
             yaxis=dict(
-                range=[0, 100],
+                range=[-110, 110],  # NEW: -110 to +110 range
                 showgrid=True,
                 gridwidth=0.5,
                 gridcolor='rgba(255, 255, 255, 0.2)',  # Light grid for dark mode
                 showticklabels=False,
                 tickvals=[],
-                zeroline=False,
+                zeroline=True,  # Show zero line
+                zerolinewidth=2,
+                zerolinecolor='rgba(255, 255, 255, 0.7)',  # Highlight zero
                 color='white',
                 showline=True,  # Show axis line (box border)
                 linewidth=2,
@@ -669,46 +742,50 @@ if st.session_state.get('polarity_confirmed', False):
             margin=dict(l=80, r=40, t=100, b=80)  # Margins for axis labels outside
         )
         
-        # Add quadrant labels with offset to avoid overlap
+        # Add quadrant labels for new coordinate system
+        # Quadrant I (top-right): +X, +Y
         fig.add_annotation(
-            x=75, y=80,  # Offset from corner
-            text="High-High",
+            x=55, y=55,  # Positive X, Positive Y
+            text="+ / +",
             showarrow=False,
-            font=dict(size=12, color="white"),
-            bgcolor='rgba(0,0,0,0.5)',
-            bordercolor='rgba(255,255,255,0.3)',
+            font=dict(size=14, color="white", family="monospace"),
+            bgcolor='rgba(0,100,0,0.3)',  # Green background (both positive)
+            bordercolor='rgba(255,255,255,0.5)',
             borderwidth=1,
-            borderpad=4
+            borderpad=6
         )
+        # Quadrant II (top-left): -X, +Y
         fig.add_annotation(
-            x=25, y=80,  # Offset from corner
-            text="Low-High",
+            x=-55, y=55,  # Negative X, Positive Y
+            text="- / +",
             showarrow=False,
-            font=dict(size=12, color="white"),
-            bgcolor='rgba(0,0,0,0.5)',
-            bordercolor='rgba(255,255,255,0.3)',
+            font=dict(size=14, color="white", family="monospace"),
+            bgcolor='rgba(128,128,0,0.3)',  # Yellow background (mixed)
+            bordercolor='rgba(255,255,255,0.5)',
             borderwidth=1,
-            borderpad=4
+            borderpad=6
         )
+        # Quadrant III (bottom-left): -X, -Y
         fig.add_annotation(
-            x=75, y=20,  # Offset from corner
-            text="High-Low",
+            x=-55, y=-55,  # Negative X, Negative Y
+            text="- / -",
             showarrow=False,
-            font=dict(size=12, color="white"),
-            bgcolor='rgba(0,0,0,0.5)',
-            bordercolor='rgba(255,255,255,0.3)',
+            font=dict(size=14, color="white", family="monospace"),
+            bgcolor='rgba(100,0,0,0.3)',  # Red background (both negative)
+            bordercolor='rgba(255,255,255,0.5)',
             borderwidth=1,
-            borderpad=4
+            borderpad=6
         )
+        # Quadrant IV (bottom-right): +X, -Y
         fig.add_annotation(
-            x=25, y=20,  # Offset from corner
-            text="Low-Low",
+            x=55, y=-55,  # Positive X, Negative Y
+            text="+ / -",
             showarrow=False,
-            font=dict(size=12, color="white"),
-            bgcolor='rgba(0,0,0,0.5)',
-            bordercolor='rgba(255,255,255,0.3)',
+            font=dict(size=14, color="white", family="monospace"),
+            bgcolor='rgba(128,128,0,0.3)',  # Yellow background (mixed)
+            bordercolor='rgba(255,255,255,0.5)',
             borderwidth=1,
-            borderpad=4
+            borderpad=6
         )
         
         # Store original layout for export modification
@@ -727,14 +804,22 @@ if st.session_state.get('polarity_confirmed', False):
                 font=dict(color='black', size=14)  # Black axis title
             ),
             xaxis=dict(
+                range=[-110, 110],  # Same range
                 gridcolor='rgba(0, 0, 0, 0.1)',  # Light gray grid for white bg
                 color='black',
-                linecolor='black'
+                linecolor='black',
+                zeroline=True,
+                zerolinewidth=2,
+                zerolinecolor='rgba(0, 0, 0, 0.5)'  # Dark zero line for export
             ),
             yaxis=dict(
+                range=[-110, 110],  # Same range
                 gridcolor='rgba(0, 0, 0, 0.1)',  # Light gray grid for white bg
                 color='black',
-                linecolor='black'
+                linecolor='black',
+                zeroline=True,
+                zerolinewidth=2,
+                zerolinecolor='rgba(0, 0, 0, 0.5)'  # Dark zero line for export
             ),
             plot_bgcolor='white',  # White background for export
             paper_bgcolor='white',  # White background for export
@@ -747,15 +832,21 @@ if st.session_state.get('polarity_confirmed', False):
             )
         )
         
-        # Update cross lines for export figure
-        export_fig.update_shapes(
-            dict(line=dict(color='rgba(0, 0, 0, 0.3)', width=2))
-        )
+        # Update cross lines for export figure (at origin 0,0)
+        for shape in export_fig.layout.shapes[:2]:  # First two shapes are cross lines
+            shape.line.color = 'rgba(0, 0, 0, 0.3)'
+            shape.line.width = 2
         
         # Update quadrant annotations for export
         for annotation in export_fig.layout.annotations:
             annotation.font.color = 'black'
-            annotation.bgcolor = 'rgba(255, 255, 255, 0.8)'
+            # Update background colors for export (lighter versions)
+            if annotation.text == "+ / +":
+                annotation.bgcolor = 'rgba(0,150,0,0.15)'  # Light green
+            elif annotation.text == "- / -":
+                annotation.bgcolor = 'rgba(150,0,0,0.15)'  # Light red
+            else:  # Mixed quadrants
+                annotation.bgcolor = 'rgba(150,150,0,0.15)'  # Light yellow
             annotation.bordercolor = 'black'
         
         # Store export figure in session state for export function
