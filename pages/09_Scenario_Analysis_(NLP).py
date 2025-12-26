@@ -997,9 +997,9 @@ Renewable energy reaches 40% by 2040.""",
         )
         
         # Update scenarios with edited data
-        for idx, row in edited_summary.iterrows():
-            st.session_state.detected_scenarios[idx]['title'] = row['Scenario']
-            st.session_state.detected_scenarios[idx]['horizon'] = int(row['Year'])
+        for idx in range(len(edited_summary)):
+            st.session_state.detected_scenarios[idx]['title'] = edited_summary.iloc[idx]['Scenario']
+            st.session_state.detected_scenarios[idx]['horizon'] = int(edited_summary.iloc[idx]['Year'])
         
         # Show info box
         col_info1, col_info2 = st.columns([2, 1])
