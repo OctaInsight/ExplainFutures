@@ -205,18 +205,47 @@ def extract_baseline_value(historical_param, reference_year=None, use_forecast=T
     if len(var_data) == 0:
         return {'value': None, 'year': None, 'source': None}
     
+    # Ensure date column exists and is datetime
+    # df_long should have a date/time column - find it
+    date_col = None
+    for col in ['date', 'Date', 'timestamp', 'time', 'Time']:
+        if col in var_data.columns:
+            date_col = col
+            break
+    
+    if date_col is None:
+        # No date column found - use index if it's a datetime
+        if isinstance(var_data.index, pd.DatetimeIndex):
+            var_data = var_data.copy()
+            var_data['date'] = var_data.index
+            date_col = 'date'
+        else:
+            # Fallback: assume data is sorted and use last value
+            baseline_value = var_data['value'].iloc[-1]
+            return {
+                'value': float(baseline_value),
+                'year': reference_year if reference_year else datetime.now().year,
+                'source': 'historical (no date column)'
+            }
+    
+    # Ensure date column is datetime
+    if not pd.api.types.is_datetime64_any_dtype(var_data[date_col]):
+        var_data[date_col] = pd.to_datetime(var_data[date_col])
+    
     # Sort by date
-    var_data = var_data.sort_values('date')
+    var_data = var_data.sort_values(date_col)
+    
+    # Extract year
+    var_data['year'] = var_data[date_col].dt.year
     
     if reference_year is None:
         # Use last historical year
-        last_date = var_data['date'].max()
-        baseline_value = var_data[var_data['date'] == last_date]['value'].iloc[0]
+        last_date = var_data[date_col].max()
+        baseline_value = var_data[var_data[date_col] == last_date]['value'].iloc[0]
         baseline_year = last_date.year
         source = 'historical'
     else:
         # Try to find exact year
-        var_data['year'] = pd.to_datetime(var_data['date']).dt.year
         year_data = var_data[var_data['year'] == reference_year]
         
         if len(year_data) > 0:
@@ -461,7 +490,7 @@ def main():
     
     st.markdown("---")
     
-    # === STEP 1: PARAMETER MAPPING ===
+    # === UNIFIED PARAMETER MAPPING INTERFACE ===
     st.subheader("🔗 Step 1: Map Scenario Parameters to Historical Parameters")
     st.caption("Create semantic equivalence between your scenario definitions and historical data")
     
@@ -469,169 +498,272 @@ def main():
     historical_params = get_historical_parameters()
     scenario_params = get_scenario_parameters()
     
-    # Display in two columns
-    col_left, col_right = st.columns(2)
+    # Create unified three-column interface
+    st.markdown("### 📋 Parameter Mapping Table")
+    st.caption("Map each scenario parameter to its equivalent historical parameter")
     
-    with col_left:
-        st.markdown("### 📊 Historical Parameters")
+    if not scenario_params:
+        st.warning("⚠️ **No scenarios defined.** Please create scenarios in Page 9 (NLP Analysis) first.")
+        st.info("💡 You can still explore historical parameters below.")
         
-        if historical_params['forecast_params']:
-            with st.expander(f"✅ **Forecasted Parameters** ({len(historical_params['forecast_params'])})", expanded=True):
-                for param in historical_params['forecast_params']:
+        # Show historical parameters summary
+        st.markdown("---")
+        st.markdown("### 📊 Available Historical Parameters")
+        
+        col_hist1, col_hist2 = st.columns(2)
+        
+        with col_hist1:
+            if historical_params['forecast_params']:
+                st.markdown(f"**✅ Forecasted Parameters ({len(historical_params['forecast_params'])})**")
+                for param in historical_params['forecast_params'][:10]:  # Show first 10
                     st.markdown(f"- `{param}`")
+                if len(historical_params['forecast_params']) > 10:
+                    st.caption(f"...and {len(historical_params['forecast_params']) - 10} more")
         
-        if historical_params['other_params']:
-            with st.expander(f"📈 **Other Historical Parameters** ({len(historical_params['other_params'])})", expanded=False):
-                for param in historical_params['other_params']:
+        with col_hist2:
+            if historical_params['other_params']:
+                st.markdown(f"**📈 Other Parameters ({len(historical_params['other_params'])})**")
+                for param in historical_params['other_params'][:10]:  # Show first 10
                     st.markdown(f"- `{param}`")
+                if len(historical_params['other_params']) > 10:
+                    st.caption(f"...and {len(historical_params['other_params']) - 10} more")
         
-        total_historical = len(historical_params['forecast_params']) + len(historical_params['other_params'])
-        st.metric("Total Historical Parameters", total_historical)
+        return
     
-    with col_right:
-        st.markdown("### 🎯 Scenario Parameters")
+    # All historical parameters for dropdown
+    all_historical = historical_params['forecast_params'] + historical_params['other_params']
+    
+    # Display mapping interface as a table
+    st.markdown(f"**{len(scenario_params)} scenario parameters** ready for mapping")
+    
+    # Group parameters by category
+    params_by_category = {}
+    for param in scenario_params:
+        cat = param['category']
+        if cat not in params_by_category:
+            params_by_category[cat] = []
+        params_by_category[cat].append(param)
+    
+    # Create mapping table for each category
+    for category in sorted(params_by_category.keys()):
+        params_in_category = params_by_category[category]
         
-        if scenario_params:
-            # Group by category
-            categories = {}
-            for param in scenario_params:
-                cat = param['category']
-                if cat not in categories:
-                    categories[cat] = []
-                categories[cat].append(param)
+        with st.expander(f"**{category}** ({len(params_in_category)} parameters)", expanded=True):
             
-            for category, params in sorted(categories.items()):
-                with st.expander(f"**{category}** ({len(params)} parameters)", expanded=True):
-                    for param in params:
-                        # Show parameter with metadata
-                        scenarios_str = ", ".join([f"{s['scenario']} ({s['direction']})" for s in param['scenarios']])
-                        st.markdown(f"- `{param['name']}` - *{scenarios_str}*")
+            # Create table header
+            col_header1, col_header2, col_header3, col_header4 = st.columns([3, 3, 3, 1])
             
-            st.metric("Total Scenario Parameters", len(scenario_params))
+            with col_header1:
+                st.markdown("**Scenario Parameter**")
+            
+            with col_header2:
+                st.markdown("**Historical Parameter**")
+            
+            with col_header3:
+                st.markdown("**Scenarios Using This**")
+            
+            with col_header4:
+                st.markdown("**Status**")
+            
+            st.markdown("---")
+            
+            # Display each parameter
+            for param in params_in_category:
+                param_name = param['name']
+                
+                col1, col2, col3, col4 = st.columns([3, 3, 3, 1])
+                
+                with col1:
+                    # Scenario parameter name
+                    st.markdown(f"**{param_name}**")
+                    
+                    # Show unit if available
+                    if param.get('unit'):
+                        st.caption(f"Unit: {param['unit']}")
+                
+                with col2:
+                    # Dropdown for mapping to historical parameter
+                    current_mapping = st.session_state.parameter_mappings.get(param_name, 'None')
+                    
+                    # Create options: None + forecasted params (priority) + other params
+                    options = ['None']
+                    
+                    # Add forecasted params first (they're more likely to be useful)
+                    if historical_params['forecast_params']:
+                        options.append('--- Forecasted Parameters ---')
+                        options.extend(historical_params['forecast_params'])
+                    
+                    # Add other params
+                    if historical_params['other_params']:
+                        options.append('--- Other Parameters ---')
+                        options.extend(historical_params['other_params'])
+                    
+                    # Find current selection
+                    default_idx = 0
+                    if current_mapping in options:
+                        default_idx = options.index(current_mapping)
+                    
+                    selected = st.selectbox(
+                        "Select historical parameter:",
+                        options=options,
+                        index=default_idx,
+                        key=f"mapping_{param_name}_{category}",
+                        label_visibility="collapsed"
+                    )
+                    
+                    # Store mapping (don't store separators)
+                    if not selected.startswith('---'):
+                        st.session_state.parameter_mappings[param_name] = selected
+                    else:
+                        # User selected a separator - keep previous mapping
+                        pass
+                
+                with col3:
+                    # Show which scenarios use this parameter
+                    scenario_list = []
+                    for scenario_info in param['scenarios']:
+                        scenario_name = scenario_info['scenario']
+                        value = scenario_info.get('value')
+                        direction = scenario_info.get('direction', '')
+                        
+                        if value is not None:
+                            scenario_list.append(f"{scenario_name} ({direction} {value})")
+                        else:
+                            scenario_list.append(f"{scenario_name} ({direction})")
+                    
+                    # Display as bullet points
+                    for s in scenario_list:
+                        st.caption(f"• {s}")
+                
+                with col4:
+                    # Status indicator
+                    if selected != 'None' and not selected.startswith('---'):
+                        st.success("✓")
+                    else:
+                        st.warning("⚠️")
+                
+                st.markdown("")  # Small spacer
+    
+    # Summary statistics
+    st.markdown("---")
+    st.markdown("### 📊 Mapping Summary")
+    
+    # Calculate compatibility
+    compatibility = calculate_compatibility_score(
+        st.session_state.parameter_mappings,
+        scenario_params
+    )
+    
+    st.session_state.compatibility_score = compatibility
+    
+    # Display compatibility metrics
+    col_comp1, col_comp2, col_comp3, col_comp4 = st.columns(4)
+    
+    with col_comp1:
+        # Color-code the score
+        if compatibility['score'] == 100:
+            st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Perfect!", delta_color="normal")
+        elif compatibility['score'] >= 80:
+            st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Good", delta_color="normal")
+        elif compatibility['score'] >= 50:
+            st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Fair", delta_color="normal")
         else:
-            st.info("No scenario parameters available. Create scenarios in Page 9.")
+            st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Low", delta_color="inverse")
     
-    if scenario_params and has_historical:
+    with col_comp2:
+        st.metric("Mapped Parameters", f"{compatibility['covered']}/{compatibility['total']}")
+    
+    with col_comp3:
+        st.metric("Coverage", f"{compatibility['covered']}/{len(scenario_params)}")
+    
+    with col_comp4:
+        unmapped_count = len(compatibility['unmapped'])
+        if unmapped_count == 0:
+            st.metric("Unmapped", "0", delta="Complete!")
+        else:
+            st.metric("Unmapped", unmapped_count, delta="Action needed", delta_color="inverse")
+    
+    # Show recommendations if not 100%
+    if compatibility['score'] < 100:
         st.markdown("---")
-        st.markdown("### 🔄 Create Parameter Mappings")
-        st.caption("Map each scenario parameter to an equivalent historical parameter")
+        st.markdown("### 💡 Recommendations")
         
-        # Create mapping interface
-        all_historical = historical_params['forecast_params'] + historical_params['other_params']
+        st.warning(f"**{len(compatibility['unmapped'])} scenario parameter(s) are not mapped to historical data.**")
         
-        for scenario_param in scenario_params:
-            param_name = scenario_param['name']
-            
-            col_map1, col_map2, col_map3 = st.columns([2, 3, 1])
-            
-            with col_map1:
-                st.markdown(f"**{param_name}**")
-                st.caption(f"Category: {scenario_param['category']}")
-            
-            with col_map2:
-                # Dropdown for mapping
-                current_mapping = st.session_state.parameter_mappings.get(param_name, 'None')
-                
-                # Create options: None + all historical parameters
-                options = ['None'] + all_historical
-                default_idx = options.index(current_mapping) if current_mapping in options else 0
-                
-                selected = st.selectbox(
-                    "Maps to historical parameter:",
-                    options=options,
-                    index=default_idx,
-                    key=f"mapping_{param_name}",
-                    label_visibility="collapsed"
-                )
-                
-                # Store mapping
-                st.session_state.parameter_mappings[param_name] = selected
-            
-            with col_map3:
-                if selected != 'None':
-                    st.success("✓ Mapped")
-                else:
-                    st.warning("⚠️ Unmapped")
+        with st.expander("📋 View Unmapped Parameters", expanded=True):
+            for param in compatibility['unmapped']:
+                st.markdown(f"- `{param}`")
         
-        # Calculate compatibility
-        st.markdown("---")
-        st.markdown("### 📊 Compatibility Analysis")
+        st.markdown("**Suggested Actions:**")
         
-        compatibility = calculate_compatibility_score(
-            st.session_state.parameter_mappings,
-            scenario_params
+        col_rec1, col_rec2 = st.columns(2)
+        
+        with col_rec1:
+            st.info("""
+            **Option 1: Add Historical Parameters**
+            - Upload additional historical data
+            - Include parameters equivalent to unmapped scenarios
+            - Re-run the mapping process
+            """)
+        
+        with col_rec2:
+            st.info("""
+            **Option 2: Modify Scenarios**
+            - Return to Page 9 (Scenario Analysis)
+            - Remove or merge unmapped parameters
+            - Focus on parameters with historical equivalents
+            """)
+        
+        st.info("""
+        **Option 3: Proceed with Partial Coverage**
+        - Continue analysis with mapped parameters only
+        - Note: Compatibility score will reflect partial coverage
+        - Unmapped parameters will not appear in trajectory visualizations
+        """)
+    else:
+        st.success("🎉 **Perfect Compatibility!** All scenario parameters are mapped to historical data.")
+    
+    # Show historical parameters summary at bottom
+    st.markdown("---")
+    st.markdown("### 📊 Historical Data Overview")
+    
+    col_hist_summary1, col_hist_summary2 = st.columns(2)
+    
+    with col_hist_summary1:
+        st.metric(
+            "Forecasted Parameters",
+            len(historical_params['forecast_params']),
+            help="Parameters with available forecasts"
         )
         
-        st.session_state.compatibility_score = compatibility
+        if historical_params['forecast_params']:
+            with st.expander("View forecasted parameters", expanded=False):
+                for param in historical_params['forecast_params']:
+                    # Check if mapped
+                    is_mapped = param in st.session_state.parameter_mappings.values()
+                    if is_mapped:
+                        st.markdown(f"✅ `{param}`")
+                    else:
+                        st.markdown(f"- `{param}`")
+    
+    with col_hist_summary2:
+        st.metric(
+            "Other Historical Parameters",
+            len(historical_params['other_params']),
+            help="Parameters available but not forecasted"
+        )
         
-        # Display compatibility score
-        col_comp1, col_comp2, col_comp3, col_comp4 = st.columns(4)
-        
-        with col_comp1:
-            # Color-code the score
-            if compatibility['score'] == 100:
-                st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Perfect!")
-            elif compatibility['score'] >= 80:
-                st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Good")
-            elif compatibility['score'] >= 50:
-                st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Fair")
-            else:
-                st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Low")
-        
-        with col_comp2:
-            st.metric("Mapped Parameters", f"{compatibility['covered']}/{compatibility['total']}")
-        
-        with col_comp3:
-            st.metric("Coverage", f"{compatibility['covered']}/{len(scenario_params)}")
-        
-        with col_comp4:
-            unmapped_count = len(compatibility['unmapped'])
-            if unmapped_count == 0:
-                st.metric("Unmapped", "0", delta="Complete!")
-            else:
-                st.metric("Unmapped", unmapped_count, delta="Action needed")
-        
-        # Show recommendations if not 100%
-        if compatibility['score'] < 100:
-            st.markdown("---")
-            st.markdown("### 💡 Recommendations")
-            
-            st.warning(f"**{len(compatibility['unmapped'])} scenario parameter(s) are not mapped to historical data.**")
-            
-            with st.expander("📋 View Unmapped Parameters", expanded=True):
-                for param in compatibility['unmapped']:
-                    st.markdown(f"- `{param}`")
-            
-            st.markdown("**Suggested Actions:**")
-            
-            col_rec1, col_rec2 = st.columns(2)
-            
-            with col_rec1:
-                st.info("""
-                **Option 1: Add Historical Parameters**
-                - Upload additional historical data
-                - Include parameters equivalent to unmapped scenarios
-                - Re-run the mapping process
-                """)
-            
-            with col_rec2:
-                st.info("""
-                **Option 2: Modify Scenarios**
-                - Return to Page 9 (Scenario Analysis)
-                - Remove or merge unmapped parameters
-                - Focus on parameters with historical equivalents
-                """)
-            
-            st.info("""
-            **Option 3: Proceed with Partial Coverage**
-            - Continue analysis with mapped parameters only
-            - Note: Compatibility score will reflect partial coverage
-            - Unmapped parameters will not appear in trajectory visualizations
-            """)
-        else:
-            st.success("🎉 **Perfect Compatibility!** All scenario parameters are mapped to historical data.")
-        
-        # === STEP 2: BASELINE EXTRACTION ===
+        if historical_params['other_params']:
+            with st.expander("View other parameters", expanded=False):
+                for param in historical_params['other_params']:
+                    # Check if mapped
+                    is_mapped = param in st.session_state.parameter_mappings.values()
+                    if is_mapped:
+                        st.markdown(f"✅ `{param}`")
+                    else:
+                        st.markdown(f"- `{param}`")
+    
+    # === STEP 2: BASELINE EXTRACTION ===
         if compatibility['score'] > 0:
             st.markdown("---")
             st.subheader("📍 Step 2: Extract Baseline Values")
