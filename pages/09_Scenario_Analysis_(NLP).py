@@ -929,7 +929,7 @@ Renewable energy reaches 40% by 2040.""",
                 # === MULTI-METHOD TITLE & YEAR EXTRACTION ===
                 st.info("🎯 Extracting scenario names and years with multiple methods...")
                 
-                from ensemble_extraction import extract_title_and_year_ensemble
+                from core.nlp.ensemble_extraction import extract_title_and_year_ensemble
                 
                 for scenario in scenarios:
                     scenario_text_content = scenario.get('text', '')
@@ -955,10 +955,8 @@ Renewable energy reaches 40% by 2040.""",
                 # Step 3: Extract parameters from each scenario using ENSEMBLE METHODS
                 st.info("🔎 Extracting parameters with 5 different methods...")
                 
-                # Import ensemble extraction
-                import sys
-                sys.path.insert(0, '/home/claude')
-                from ensemble_extraction import (
+                # Import ensemble extraction from core.nlp
+                from core.nlp.ensemble_extraction import (
                     extract_parameters_ensemble,
                     normalize_across_scenarios
                 )
