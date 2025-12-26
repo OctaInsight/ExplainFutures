@@ -1,7 +1,7 @@
 """
 Page 11: Trajectory-Scenario Space
-Map historical parameters to scenario parameters, assess compatibility, 
-extract baselines, and visualize the trajectory space
+Map historical parameters to scenario parameters with intelligent data source prioritization,
+assess compatibility, extract baselines, and visualize the trajectory space
 """
 
 import streamlit as st
@@ -28,6 +28,13 @@ sys.path.insert(0, str(project_root))
 from core.config import initialize_session_state
 from core.shared_sidebar import render_app_sidebar
 
+# Try to import export functions (same as page 4)
+try:
+    from core.viz.export import quick_export_buttons
+    EXPORT_AVAILABLE = True
+except ImportError:
+    EXPORT_AVAILABLE = False
+
 # Initialize
 initialize_session_state()
 
@@ -52,528 +59,425 @@ def initialize_trajectory_state():
         st.session_state.absolute_values = {}
 
 
-def get_historical_parameters():
+def get_data_source_for_parameter(param_name: str) -> dict:
     """
-    Get all parameters from historical data including Page 5 reduction results
+    Get data source for a parameter following priority:
+    1. Forecasted data (Page 8)
+    2. Component data (Page 5) for PCA/ICA/Factor
+    3. Cleaned data (Page 2)
+    4. Raw data (Page 1)
     
     Returns:
     --------
-    dict with three lists:
-        - forecast_params: Parameters used in forecasting
-        - other_params: Parameters not used in forecasting
-        - reduction_params: Parameters from dimensionality reduction (PCA, factors, etc.)
+    dict with:
+        - data: pd.DataFrame with columns [timestamp, value]
+        - source: str ('forecasted', 'component', 'cleaned', 'raw')
+        - symbol: str emoji for UI
+        - full_name: str description
     """
     
-    forecast_params = []
-    other_params = []
-    reduction_params = []
+    # Priority 1: Forecasted data
+    if 'forecast_results' in st.session_state and param_name in st.session_state.forecast_results:
+        forecast = st.session_state.forecast_results[param_name]
+        df = pd.DataFrame({
+            'timestamp': forecast['forecast_timestamps'],
+            'value': forecast['forecast_values']
+        })
+        return {
+            'data': df,
+            'source': 'forecasted',
+            'symbol': '🔮',
+            'full_name': 'Forecasted (Future Projections)'
+        }
     
-    # Check if data is loaded
-    if 'df_long' not in st.session_state or st.session_state.df_long is None:
-        return {'forecast_params': [], 'other_params': [], 'reduction_params': []}
-    
-    df = st.session_state.df_long
-    all_variables = df['variable'].unique().tolist()
-    
-    # Check which parameters were used in forecasting
-    if 'forecast_results' in st.session_state and st.session_state.forecast_results:
-        forecasted_vars = list(st.session_state.forecast_results.keys())
-        
-        for var in all_variables:
-            if var in forecasted_vars:
-                forecast_params.append(var)
-            else:
-                other_params.append(var)
-    else:
-        # No forecasts - all are "other"
-        other_params = all_variables
-    
-    # Add dimensionality reduction results from Page 5
+    # Priority 2: Component data (PCA, ICA, Factor)
     if 'reduction_results' in st.session_state and st.session_state.reduction_results:
-        
-        # PCA components
-        if 'pca' in st.session_state.reduction_results:
+        # Check if this is a PCA component
+        if 'pca' in st.session_state.reduction_results and 'pca_components' in st.session_state:
             pca_results = st.session_state.reduction_results['pca']
             n_components = pca_results.get('n_components', 0)
+            
+            # Match component names
             for i in range(n_components):
-                reduction_params.append(f"PC{i+1} (Principal Component)")
-        
-        # Factor Analysis
-        if 'factor_analysis' in st.session_state.reduction_results:
-            fa_results = st.session_state.reduction_results['factor_analysis']
-            n_factors = fa_results.get('n_factors', 0)
-            for i in range(n_factors):
-                reduction_params.append(f"Factor{i+1} (Latent Factor)")
-        
-        # ICA components
-        if 'ica' in st.session_state.reduction_results:
-            ica_results = st.session_state.reduction_results['ica']
-            n_components = ica_results.get('n_components', 0)
-            for i in range(n_components):
-                reduction_params.append(f"IC{i+1} (Independent Component)")
-        
-        # Filtered features from correlation analysis
-        if 'correlation' in st.session_state.reduction_results:
-            corr_results = st.session_state.reduction_results['correlation']
-            selected_features = corr_results.get('selected', [])
-            for feat in selected_features:
-                if feat not in forecast_params and feat not in other_params:
-                    reduction_params.append(f"{feat} (Filtered)")
+                if param_name in [f"PC{i+1}", f"PC{i+1} [PCA]"]:
+                    # Get component data
+                    if hasattr(st.session_state, 'pca_components'):
+                        component_values = st.session_state.pca_components[:, i]
+                        
+                        # Get timestamps from original data
+                        df_long = st.session_state.get('df_long')
+                        if df_long is not None:
+                            time_col = 'timestamp' if 'timestamp' in df_long.columns else 'time'
+                            unique_times = df_long[time_col].unique()
+                            
+                            df = pd.DataFrame({
+                                'timestamp': unique_times[:len(component_values)],
+                                'value': component_values
+                            })
+                            
+                            return {
+                                'data': df,
+                                'source': 'component',
+                                'symbol': '🔬',
+                                'full_name': 'Component (Dimensionality Reduction)'
+                            }
     
+    # Priority 3: Cleaned data
+    if 'df_clean' in st.session_state and st.session_state.df_clean is not None:
+        df_clean = st.session_state.df_clean
+        
+        # Check if parameter exists in cleaned data
+        if param_name in df_clean['variable'].values:
+            param_data = df_clean[df_clean['variable'] == param_name].copy()
+            time_col = 'timestamp' if 'timestamp' in param_data.columns else 'time'
+            
+            df = pd.DataFrame({
+                'timestamp': param_data[time_col],
+                'value': param_data['value']
+            })
+            
+            return {
+                'data': df,
+                'source': 'cleaned',
+                'symbol': '🧹',
+                'full_name': 'Cleaned (Data Preprocessing)'
+            }
+    
+    # Priority 4: Raw data
+    if 'df_long' in st.session_state and st.session_state.df_long is not None:
+        df_long = st.session_state.df_long
+        
+        if param_name in df_long['variable'].values:
+            param_data = df_long[df_long['variable'] == param_name].copy()
+            time_col = 'timestamp' if 'timestamp' in param_data.columns else 'time'
+            
+            df = pd.DataFrame({
+                'timestamp': param_data[time_col],
+                'value': param_data['value']
+            })
+            
+            return {
+                'data': df,
+                'source': 'raw',
+                'symbol': '📊',
+                'full_name': 'Raw (Upload & Diagnostics)'
+            }
+    
+    # Not found
     return {
-        'forecast_params': sorted(forecast_params),
-        'other_params': sorted(other_params),
-        'reduction_params': sorted(reduction_params)
+        'data': None,
+        'source': 'not_found',
+        'symbol': '❌',
+        'full_name': 'Not Found'
     }
+
+
+def get_historical_parameters_with_source():
+    """
+    Get all parameters from historical data with source information
+    
+    Returns:
+    --------
+    dict with parameter names as keys and source info as values
+    """
+    
+    params_with_source = {}
+    
+    # Get all unique parameter names from all sources
+    all_param_names = set()
+    
+    # From forecasts
+    if 'forecast_results' in st.session_state:
+        all_param_names.update(st.session_state.forecast_results.keys())
+    
+    # From components
+    if 'reduction_results' in st.session_state and st.session_state.reduction_results:
+        if 'pca' in st.session_state.reduction_results:
+            n_components = st.session_state.reduction_results['pca'].get('n_components', 0)
+            for i in range(n_components):
+                all_param_names.add(f"PC{i+1}")
+        
+        if 'factor_analysis' in st.session_state.reduction_results:
+            n_factors = st.session_state.reduction_results['factor_analysis'].get('n_factors', 0)
+            for i in range(n_factors):
+                all_param_names.add(f"Factor{i+1}")
+        
+        if 'ica' in st.session_state.reduction_results:
+            n_components = st.session_state.reduction_results['ica'].get('n_components', 0)
+            for i in range(n_components):
+                all_param_names.add(f"IC{i+1}")
+    
+    # From cleaned data
+    if 'df_clean' in st.session_state and st.session_state.df_clean is not None:
+        all_param_names.update(st.session_state.df_clean['variable'].unique())
+    
+    # From raw data
+    if 'df_long' in st.session_state and st.session_state.df_long is not None:
+        all_param_names.update(st.session_state.df_long['variable'].unique())
+    
+    # Get source for each parameter
+    for param in all_param_names:
+        source_info = get_data_source_for_parameter(param)
+        if source_info['source'] != 'not_found':
+            params_with_source[param] = source_info
+    
+    return params_with_source
 
 
 def get_scenario_parameters():
     """
-    Get all parameters from scenario analysis (Page 9)
+    Get parameters from detected scenarios (Page 9)
+    Priority: Saved table > Current table
     
     Returns:
     --------
-    list: List of scenario parameters with metadata
+    list of dicts with parameter info
     """
     
     if 'detected_scenarios' not in st.session_state or not st.session_state.detected_scenarios:
         return []
     
-    # Collect all unique parameters across scenarios
-    scenario_params = {}
+    scenarios = st.session_state.detected_scenarios
     
-    for scenario in st.session_state.detected_scenarios:
+    # Collect unique parameters across all scenarios
+    params = {}
+    
+    for scenario in scenarios:
         for item in scenario['items']:
             param_name = item.get('parameter_canonical', item.get('parameter', ''))
             
-            if param_name not in scenario_params:
-                scenario_params[param_name] = {
+            if param_name not in params:
+                params[param_name] = {
                     'name': param_name,
                     'category': item.get('category', 'Other'),
                     'unit': item.get('unit', ''),
-                    'direction': item.get('direction', ''),
                     'scenarios': []
                 }
             
-            scenario_params[param_name]['scenarios'].append({
+            # Add scenario info
+            params[param_name]['scenarios'].append({
                 'scenario': scenario['title'],
                 'value': item.get('value'),
-                'direction': item.get('direction')
+                'direction': item.get('direction', ''),
+                'unit': item.get('unit', '')
             })
     
-    return list(scenario_params.values())
+    return list(params.values())
 
 
-def calculate_compatibility_score(mappings, scenario_params):
+def calculate_compatibility(scenario_params: list, historical_params_with_source: dict, mappings: dict) -> dict:
     """
-    Calculate compatibility score between historical and scenario parameters
-    
-    Parameters:
-    -----------
-    mappings : dict
-        Mapping of scenario params to historical params
-    scenario_params : list
-        List of scenario parameters
+    Calculate compatibility between scenario and historical parameters
     
     Returns:
     --------
-    dict with:
-        - score: float (0-100)
-        - covered: int (number of mapped params)
-        - total: int (total scenario params)
-        - unmapped: list (unmapped scenario params)
+    dict with score and details
     """
     
+    if not scenario_params:
+        return {'score': 0, 'mapped': 0, 'total': 0, 'unmapped': []}
+    
+    mapped_count = sum(1 for p in scenario_params if mappings.get(p['name'], 'None') != 'None')
     total_params = len(scenario_params)
     
-    if total_params == 0:
-        return {
-            'score': 0,
-            'covered': 0,
-            'total': 0,
-            'unmapped': []
-        }
+    score = mapped_count / total_params if total_params > 0 else 0
     
-    # Count mapped parameters
-    mapped_params = [p['name'] for p in scenario_params if p['name'] in mappings and mappings[p['name']] != 'None']
-    covered = len(mapped_params)
-    
-    # Calculate score
-    score = (covered / total_params) * 100 if total_params > 0 else 0
-    
-    # Find unmapped
-    unmapped = [p['name'] for p in scenario_params if p['name'] not in mappings or mappings[p['name']] == 'None']
+    unmapped = [p['name'] for p in scenario_params if mappings.get(p['name'], 'None') == 'None']
     
     return {
         'score': score,
-        'covered': covered,
+        'mapped': mapped_count,
         'total': total_params,
         'unmapped': unmapped
     }
 
 
-def extract_baseline_value(historical_param, reference_year=None, use_forecast=True):
+def extract_baseline_value(historical_param: str, reference_year: int = None, use_forecast: bool = True) -> dict:
     """
-    Extract baseline value from historical data or forecast
+    Extract baseline value for a parameter at a specific year
     
     Parameters:
     -----------
     historical_param : str
-        Name of historical parameter
+        Historical parameter name
     reference_year : int
-        Year to use as baseline (None = last historical)
+        Year to extract baseline from
     use_forecast : bool
-        If True and forecast available, use forecast value
-    
+        Whether to use forecast if year is beyond historical data
+        
     Returns:
     --------
     dict with:
         - value: float
         - year: int
-        - source: str ('historical' or 'forecast')
+        - source: str
     """
     
-    # Get historical data
-    df = st.session_state.df_long
-    var_data = df[df['variable'] == historical_param].copy()
+    # Get data source
+    source_info = get_data_source_for_parameter(historical_param)
     
-    if len(var_data) == 0:
-        return {'value': None, 'year': None, 'source': None}
+    if source_info['data'] is None:
+        return {'value': None, 'year': reference_year, 'source': 'not_found'}
     
-    # Ensure date column exists and is datetime
-    # df_long should have a date/time column - find it
-    date_col = None
-    for col in ['date', 'Date', 'timestamp', 'time', 'Time']:
-        if col in var_data.columns:
-            date_col = col
-            break
+    df = source_info['data']
     
-    if date_col is None:
-        # No date column found - use index if it's a datetime
-        if isinstance(var_data.index, pd.DatetimeIndex):
-            var_data = var_data.copy()
-            var_data['date'] = var_data.index
-            date_col = 'date'
-        else:
-            # Fallback: assume data is sorted and use last value
-            baseline_value = var_data['value'].iloc[-1]
-            return {
-                'value': float(baseline_value),
-                'year': reference_year if reference_year else datetime.now().year,
-                'source': 'historical (no date column)'
-            }
-    
-    # Ensure date column is datetime
-    if not pd.api.types.is_datetime64_any_dtype(var_data[date_col]):
-        var_data[date_col] = pd.to_datetime(var_data[date_col])
-    
-    # Sort by date
-    var_data = var_data.sort_values(date_col)
+    # Convert to datetime if not already
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df = df.sort_values('timestamp')
     
     # Extract year
-    var_data['year'] = var_data[date_col].dt.year
+    df['year'] = df['timestamp'].dt.year
     
+    # If reference year not specified, use last year
     if reference_year is None:
-        # Use last historical year
-        last_date = var_data[date_col].max()
-        baseline_value = var_data[var_data[date_col] == last_date]['value'].iloc[0]
-        baseline_year = last_date.year
-        source = 'historical'
-    else:
-        # Try to find exact year
-        year_data = var_data[var_data['year'] == reference_year]
-        
-        if len(year_data) > 0:
-            baseline_value = year_data['value'].iloc[0]
-            baseline_year = reference_year
-            source = 'historical'
-        else:
-            # Year not in historical - try forecast
-            if use_forecast and 'forecast_results' in st.session_state:
-                forecast = st.session_state.forecast_results.get(historical_param)
-                
-                if forecast:
-                    # Find closest forecast year
-                    forecast_dates = pd.to_datetime(forecast['forecast_timestamps'])
-                    forecast_years = forecast_dates.year
-                    
-                    closest_idx = np.argmin(np.abs(forecast_years - reference_year))
-                    baseline_value = forecast['forecast_values'][closest_idx]
-                    baseline_year = forecast_years[closest_idx]
-                    source = 'forecast'
-                else:
-                    # No forecast - use last historical
-                    baseline_value = var_data['value'].iloc[-1]
-                    baseline_year = var_data['year'].iloc[-1]
-                    source = 'historical (fallback)'
-            else:
-                # Use last historical
-                baseline_value = var_data['value'].iloc[-1]
-                baseline_year = var_data['year'].iloc[-1]
-                source = 'historical (fallback)'
+        reference_year = df['year'].max()
+    
+    # Try to find data for that year
+    year_data = df[df['year'] == reference_year]
+    
+    if len(year_data) > 0:
+        # Take mean of values in that year
+        baseline_value = year_data['value'].mean()
+        return {
+            'value': float(baseline_value),
+            'year': reference_year,
+            'source': source_info['full_name']
+        }
+    
+    # Year not found - use closest available
+    closest_year = df['year'].iloc[(df['year'] - reference_year).abs().argsort()[0]]
+    closest_data = df[df['year'] == closest_year]
+    
+    baseline_value = closest_data['value'].mean()
     
     return {
         'value': float(baseline_value),
-        'year': int(baseline_year),
-        'source': source
+        'year': closest_year,
+        'source': f"{source_info['full_name']} (closest: {closest_year})"
     }
 
 
-def convert_scenario_to_absolute(scenario_param, scenario_value, direction, unit, baseline_value):
+def convert_scenario_to_absolute(param_name: str, scenario_value: float, direction: str, 
+                                 unit: str, baseline_value: float) -> float:
     """
-    Convert scenario parameter from percentage/direction to absolute value
+    Convert scenario description to absolute value
     
     Parameters:
     -----------
-    scenario_param : str
+    param_name : str
         Parameter name
     scenario_value : float
-        Value from scenario (could be percentage, absolute, etc.)
+        Scenario value (e.g., 20 for "20% increase")
     direction : str
-        Direction (increase, decrease, target, etc.)
+        Direction (increase, decrease, target, stable, etc.)
     unit : str
         Unit (%, absolute, etc.)
     baseline_value : float
-        Baseline value from historical data
-    
+        Baseline reference value
+        
     Returns:
     --------
-    float: Absolute value
+    absolute_value : float
     """
     
-    if unit == '%':
+    if unit == '%' or unit == 'percent':
         # Percentage change
         if direction == 'increase':
             return baseline_value * (1 + scenario_value / 100)
         elif direction == 'decrease':
             return baseline_value * (1 - scenario_value / 100)
         elif direction == 'target':
-            # Target is absolute percentage (e.g., "reach 70%")
-            # Interpret as fraction
-            return scenario_value
-        elif direction == 'double':
-            return baseline_value * 2
-        elif direction == 'halve':
-            return baseline_value * 0.5
-        elif direction == 'stable':
-            return baseline_value
+            return scenario_value  # Already absolute
         else:
-            # Default: treat as percentage of baseline
-            return baseline_value * (scenario_value / 100)
+            return baseline_value
     
-    elif unit == 'absolute' or unit == '':
-        # Already absolute
-        if direction == 'target':
-            return scenario_value
-        elif direction == 'increase':
-            return baseline_value + scenario_value
-        elif direction == 'decrease':
-            return baseline_value - scenario_value
-        elif direction == 'double':
-            return baseline_value * 2
-        elif direction == 'halve':
-            return baseline_value * 0.5
-        elif direction == 'stable':
-            return baseline_value
-        else:
-            return scenario_value
+    elif direction == 'double':
+        return baseline_value * 2
+    
+    elif direction == 'halve':
+        return baseline_value * 0.5
+    
+    elif direction == 'stable':
+        return baseline_value
     
     else:
-        # Other units (MtCO2, GW, etc.) - assume absolute
+        # Absolute value
         return scenario_value
 
 
-def aggregate_category_value(parameters_dict, category):
-    """
-    Aggregate multiple parameters into a single category value
-    
-    Scientific approach: Weighted normalization + aggregation
-    
-    Parameters:
-    -----------
-    parameters_dict : dict
-        {param_name: absolute_value}
-    category : str
-        Category name (e.g., '1. Economic')
-    
-    Returns:
-    --------
-    float: Aggregated category value (normalized 0-100 scale)
-    """
-    
-    # Filter parameters for this category
-    category_params = {}
-    
-    if 'detected_scenarios' in st.session_state:
-        for scenario in st.session_state.detected_scenarios:
-            for item in scenario['items']:
-                param_name = item.get('parameter_canonical', item.get('parameter', ''))
-                param_category = item.get('category', '')
-                
-                if param_category == category and param_name in parameters_dict:
-                    category_params[param_name] = parameters_dict[param_name]
-    
-    if not category_params:
-        return 0.0
-    
-    # Normalize each parameter to 0-100 scale
-    # Use min-max normalization based on historical ranges
-    normalized_values = []
-    
-    for param_name, value in category_params.items():
-        # Get historical range
-        if 'df_long' in st.session_state:
-            df = st.session_state.df_long
-            
-            # Try to find corresponding historical parameter
-            # (might need mapping)
-            if param_name in df['variable'].values:
-                hist_data = df[df['variable'] == param_name]['value']
-                min_val = hist_data.min()
-                max_val = hist_data.max()
-                
-                # Normalize
-                if max_val > min_val:
-                    normalized = ((value - min_val) / (max_val - min_val)) * 100
-                else:
-                    normalized = 50  # Default if no range
-            else:
-                # No historical data - use value directly
-                normalized = value
-        else:
-            normalized = value
-        
-        # Clip to 0-100
-        normalized = np.clip(normalized, 0, 100)
-        normalized_values.append(normalized)
-    
-    # Aggregate: simple mean (could use weighted mean if weights defined)
-    aggregated = np.mean(normalized_values)
-    
-    return float(aggregated)
-
-
 def main():
-    """Main page function"""
+    """Main function"""
     
-    # Initialize state
     initialize_trajectory_state()
     
-    # === INFORMATION PANEL ===
-    with st.expander("ℹ️ About Trajectory-Scenario Space Analysis", expanded=False):
-        st.markdown("""
-        ### Scientific Methodology
-        
-        **Purpose:**
-        Bridge the gap between historical data analysis and scenario planning by:
-        1. Mapping scenario parameters to historical parameters
-        2. Assessing compatibility between the two systems
-        3. Extracting baseline values for percentage-based scenarios
-        4. Converting scenario parameters to absolute values
-        5. Visualizing trajectories in multi-dimensional parameter space
-        
-        **Scientific Approach:**
-        
-        **1. Parameter Mapping**
-        - Manual mapping by domain expert (you!)
-        - Ensures semantic equivalence between historical and scenario parameters
-        - Allows for one-to-one or many-to-one relationships
-        
-        **2. Compatibility Analysis**
-        - Percentage of scenario parameters covered by historical data
-        - Identifies gaps and suggests remediation strategies
-        
-        **3. Baseline Extraction**
-        - Automatically extracts baseline values from historical data
-        - Uses forecasted values if reference year beyond historical range
-        - Provides transparency on baseline source
-        
-        **4. Absolute Value Conversion**
-        - Converts percentage changes to absolute values
-        - Handles different directions: increase, decrease, target, stable
-        - Ensures consistency with historical units
-        
-        **5. Category Aggregation**
-        - Normalizes parameters to 0-100 scale using min-max normalization
-        - Aggregates multiple parameters into category indicators
-        - Enables comparison across different measurement units
-        
-        **6. Trajectory Visualization**
-        - Parameter vs Parameter plots show scenario position vs forecast
-        - Category vs Category plots enable systems-level comparison
-        - Distance metrics quantify scenario divergence from forecast
-        
-        **Applications:**
-        - Policy scenario analysis
-        - Climate change trajectory assessment
-        - Economic development pathway evaluation
-        - Multi-criteria decision analysis
-        """)
-    
     # Check prerequisites
-    has_historical = 'df_long' in st.session_state and st.session_state.df_long is not None
-    has_scenarios = 'detected_scenarios' in st.session_state and st.session_state.detected_scenarios
-    has_forecasts = 'forecast_results' in st.session_state and st.session_state.forecast_results
-    
-    if not has_historical:
-        st.error("❌ **No historical data loaded.** Please load data in Page 1 first.")
+    if 'detected_scenarios' not in st.session_state or not st.session_state.detected_scenarios:
+        st.warning("⚠️ No scenarios detected!")
+        st.info("👈 Please go to **Scenario Analysis (NLP)** to create scenarios first")
+        
+        if st.button("📝 Go to Scenario Analysis"):
+            st.switch_page("pages/9_Scenario_Analysis_(NLP).py")
         return
     
-    if not has_scenarios:
-        st.warning("⚠️ **No scenarios defined.** Please create scenarios in Page 9 (NLP Analysis) first.")
-        st.info("💡 You can still explore this page with historical data only.")
+    # Get scenario parameters
+    scenario_params = get_scenario_parameters()
+    
+    if not scenario_params:
+        st.error("❌ No parameters found in scenarios")
+        st.info("Please ensure your scenarios have parameters defined in Page 9, Step 3")
+        return
+    
+    # Get historical parameters with source
+    historical_params_with_source = get_historical_parameters_with_source()
+    
+    if not historical_params_with_source:
+        st.warning("⚠️ No historical data available!")
+        st.info("Please upload data first in **Upload & Data Diagnostics**")
+        return
+    
+    st.success(f"✅ Found {len(scenario_params)} scenario parameters and {len(historical_params_with_source)} historical parameters")
     
     st.markdown("---")
     
-    # === UNIFIED PARAMETER MAPPING INTERFACE ===
-    st.subheader("🔗 Step 1: Map Scenario Parameters to Historical Parameters")
-    st.caption("Create semantic equivalence between your scenario definitions and historical data")
+    # === STEP 1: PARAMETER MAPPING ===
+    st.subheader("🔗 Step 1: Map Scenario Parameters to Historical Data")
+    st.caption("Match each scenario parameter to its equivalent in historical data")
     
-    # Get parameters
-    historical_params = get_historical_parameters()
-    scenario_params = get_scenario_parameters()
+    # Calculate compatibility
+    compatibility = calculate_compatibility(scenario_params, historical_params_with_source, 
+                                           st.session_state.parameter_mappings)
     
-    # Create unified three-column interface
+    # Show compatibility score
+    col1, col2, col3, col4 = st.columns(4)
+    
+    score_pct = compatibility['score'] * 100
+    
+    if score_pct >= 80:
+        score_color = "🟢"
+        score_label = "Excellent"
+    elif score_pct >= 60:
+        score_color = "🟡"
+        score_label = "Good"
+    elif score_pct >= 40:
+        score_color = "🟠"
+        score_label = "Fair"
+    else:
+        score_color = "🔴"
+        score_label = "Poor"
+    
+    col1.metric("Compatibility", f"{score_pct:.0f}%", score_label)
+    col2.metric("Mapped Parameters", f"{compatibility['mapped']}/{compatibility['total']}")
+    col3.metric("Coverage", f"{compatibility['mapped']}/{compatibility['total']}")
+    col4.metric("Unmapped", len(compatibility['unmapped']))
+    
+    st.markdown(f"### {score_color} Compatibility: {score_label}")
+    
+    st.markdown("---")
+    
+    # Display mapping table
     st.markdown("### 📋 Parameter Mapping Table")
-    st.caption("Map each scenario parameter to its equivalent historical parameter")
     
-    if not scenario_params:
-        st.warning("⚠️ **No scenarios defined.** Please create scenarios in Page 9 (NLP Analysis) first.")
-        st.info("💡 You can still explore historical parameters below.")
-        
-        # Show historical parameters summary
-        st.markdown("---")
-        st.markdown("### 📊 Available Historical Parameters")
-        
-        col_hist1, col_hist2 = st.columns(2)
-        
-        with col_hist1:
-            if historical_params['forecast_params']:
-                st.markdown(f"**✅ Forecasted Parameters ({len(historical_params['forecast_params'])})**")
-                for param in historical_params['forecast_params'][:10]:  # Show first 10
-                    st.markdown(f"- `{param}`")
-                if len(historical_params['forecast_params']) > 10:
-                    st.caption(f"...and {len(historical_params['forecast_params']) - 10} more")
-        
-        with col_hist2:
-            if historical_params['other_params']:
-                st.markdown(f"**📈 Other Parameters ({len(historical_params['other_params'])})**")
-                for param in historical_params['other_params'][:10]:  # Show first 10
-                    st.markdown(f"- `{param}`")
-                if len(historical_params['other_params']) > 10:
-                    st.caption(f"...and {len(historical_params['other_params']) - 10} more")
-        
-        return
-    
-    # All historical parameters for dropdown (including reduction results)
-    all_historical = (historical_params['forecast_params'] + 
-                     historical_params['other_params'] + 
-                     historical_params['reduction_params'])
-    
-    # Display mapping interface as a table
-    st.markdown(f"**{len(scenario_params)} scenario parameters** ready for mapping")
-    
-    # Group parameters by category
+    # Group by category
     params_by_category = {}
     for param in scenario_params:
         cat = param['category']
@@ -581,74 +485,80 @@ def main():
             params_by_category[cat] = []
         params_by_category[cat].append(param)
     
-    # Create mapping table for each category
+    # Create mapping interface for each category
     for category in sorted(params_by_category.keys()):
         params_in_category = params_by_category[category]
         
         with st.expander(f"**{category}** ({len(params_in_category)} parameters)", expanded=True):
             
-            # Create table header
-            col_header1, col_header2, col_header3 = st.columns([3, 4, 1])
-            
-            with col_header1:
+            # Header
+            col_h1, col_h2, col_h3 = st.columns([3, 4, 1])
+            with col_h1:
                 st.markdown("**Scenario Parameter**")
-            
-            with col_header2:
+            with col_h2:
                 st.markdown("**Historical Parameter / Component**")
-            
-            with col_header3:
+            with col_h3:
                 st.markdown("**Status**")
             
             st.markdown("---")
             
-            # Display each parameter
+            # Each parameter
             for param in params_in_category:
                 param_name = param['name']
                 
                 col1, col2, col3 = st.columns([3, 4, 1])
                 
                 with col1:
-                    # Scenario parameter name
                     st.markdown(f"**{param_name}**")
-                    
-                    # Show unit if available
                     if param.get('unit'):
                         st.caption(f"Unit: {param['unit']}")
                 
                 with col2:
-                    # Dropdown for mapping to historical parameter
                     current_mapping = st.session_state.parameter_mappings.get(param_name, 'None')
                     
-                    # Create options with symbols and clear labeling
+                    # Build options with symbols
                     options = ['None']
                     
-                    # Priority 1: Forecasted parameters (highest priority for baseline)
-                    if historical_params['forecast_params']:
+                    # Priority order in dropdown
+                    forecasted = [(name, info) for name, info in historical_params_with_source.items() 
+                                 if info['source'] == 'forecasted']
+                    components = [(name, info) for name, info in historical_params_with_source.items() 
+                                 if info['source'] == 'component']
+                    cleaned = [(name, info) for name, info in historical_params_with_source.items() 
+                               if info['source'] == 'cleaned']
+                    raw = [(name, info) for name, info in historical_params_with_source.items() 
+                          if info['source'] == 'raw']
+                    
+                    if forecasted:
                         options.append('─── 🔮 Forecasted (Future Projections) ───')
-                        for param in historical_params['forecast_params']:
-                            options.append(f"🔮 {param}")
+                        for name, info in sorted(forecasted):
+                            options.append(f"🔮 {name}")
                     
-                    # Priority 2: Cleaned/raw historical data
-                    if historical_params['other_params']:
-                        options.append('─── 📊 Historical Data (Raw/Cleaned) ───')
-                        for param in historical_params['other_params']:
-                            options.append(f"📊 {param}")
-                    
-                    # Priority 3: Dimensionality reduction components
-                    if historical_params['reduction_params']:
-                        options.append('─── 🔬 Reduced Components (PCA/ICA/Factor) ───')
-                        for param in historical_params['reduction_params']:
-                            # Extract component type and add symbol
-                            if 'Principal Component' in param:
-                                options.append(f"🔬 {param.replace(' (Principal Component)', '')} [PCA]")
-                            elif 'Latent Factor' in param:
-                                options.append(f"🔬 {param.replace(' (Latent Factor)', '')} [Factor]")
-                            elif 'Independent Component' in param:
-                                options.append(f"🔬 {param.replace(' (Independent Component)', '')} [ICA]")
-                            elif 'Filtered' in param:
-                                options.append(f"🔬 {param.replace(' (Filtered)', '')} [Filtered]")
+                    if components:
+                        options.append('─── 🔬 Components (PCA/ICA/Factor) ───')
+                        for name, info in sorted(components):
+                            # Clean up component name
+                            if 'Principal Component' in name:
+                                clean_name = name.replace(' (Principal Component)', '')
+                                options.append(f"🔬 {clean_name} [PCA]")
+                            elif 'Latent Factor' in name:
+                                clean_name = name.replace(' (Latent Factor)', '')
+                                options.append(f"🔬 {clean_name} [Factor]")
+                            elif 'Independent Component' in name:
+                                clean_name = name.replace(' (Independent Component)', '')
+                                options.append(f"🔬 {clean_name} [ICA]")
                             else:
-                                options.append(f"🔬 {param}")
+                                options.append(f"🔬 {name}")
+                    
+                    if cleaned:
+                        options.append('─── 🧹 Cleaned (Data Preprocessing) ───')
+                        for name, info in sorted(cleaned):
+                            options.append(f"🧹 {name}")
+                    
+                    if raw:
+                        options.append('─── 📊 Raw (Upload & Diagnostics) ───')
+                        for name, info in sorted(raw):
+                            options.append(f"📊 {name}")
                     
                     # Find current selection
                     default_idx = 0
@@ -657,140 +567,80 @@ def main():
                     else:
                         # Try to find without symbol
                         for i, opt in enumerate(options):
-                            if opt.startswith('🔮 ') or opt.startswith('📊 ') or opt.startswith('🔬 '):
-                                # Extract name without symbol
+                            if opt.startswith(('🔮', '🔬', '🧹', '📊')):
                                 clean_opt = opt.split(' ', 1)[1] if ' ' in opt else opt
-                                # Remove [PCA], [ICA], etc. tags
                                 clean_opt = clean_opt.split(' [')[0] if ' [' in clean_opt else clean_opt
                                 if clean_opt == current_mapping:
                                     default_idx = i
                                     break
                     
                     selected = st.selectbox(
-                        "Select historical parameter:",
+                        "Select:",
                         options=options,
                         index=default_idx,
                         key=f"mapping_{param_name}_{category}",
                         label_visibility="collapsed"
                     )
                     
-                    # Store mapping (remove symbols and tags for storage)
+                    # Store mapping (clean the selection)
                     if not selected.startswith('───'):
-                        # Remove symbol prefix (🔮, 📊, 🔬)
-                        if selected.startswith('🔮 ') or selected.startswith('📊 ') or selected.startswith('🔬 '):
+                        if selected.startswith(('🔮', '🔬', '🧹', '📊')):
                             clean_selected = selected.split(' ', 1)[1]
-                            # Remove tags like [PCA], [ICA], [Factor]
                             clean_selected = clean_selected.split(' [')[0] if ' [' in clean_selected else clean_selected
                             st.session_state.parameter_mappings[param_name] = clean_selected
                         else:
                             st.session_state.parameter_mappings[param_name] = selected
-                    else:
-                        # User selected a separator - keep previous mapping
-                        pass
                 
                 with col3:
-                    # Status indicator
                     if selected != 'None' and not selected.startswith('───'):
                         st.success("✓")
                     else:
                         st.warning("⚠️")
                 
-                st.markdown("")  # Small spacer
+                st.markdown("")
     
-    # Summary statistics
-    st.markdown("---")
-    st.markdown("### 📊 Mapping Summary")
-    
-    # Calculate compatibility
-    compatibility = calculate_compatibility_score(
-        st.session_state.parameter_mappings,
-        scenario_params
-    )
-    
-    st.session_state.compatibility_score = compatibility
-    
-    # Display compatibility metrics
-    col_comp1, col_comp2, col_comp3, col_comp4 = st.columns(4)
-    
-    with col_comp1:
-        # Color-code the score
-        if compatibility['score'] == 100:
-            st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Perfect!", delta_color="normal")
-        elif compatibility['score'] >= 80:
-            st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Good", delta_color="normal")
-        elif compatibility['score'] >= 50:
-            st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Fair", delta_color="normal")
-        else:
-            st.metric("Compatibility Score", f"{compatibility['score']:.0f}%", delta="Low", delta_color="inverse")
-    
-    with col_comp2:
-        st.metric("Mapped Parameters", f"{compatibility['covered']}/{compatibility['total']}")
-    
-    with col_comp3:
-        st.metric("Coverage", f"{compatibility['covered']}/{len(scenario_params)}")
-    
-    with col_comp4:
-        unmapped_count = len(compatibility['unmapped'])
-        if unmapped_count == 0:
-            st.metric("Unmapped", "0", delta="Complete!")
-        else:
-            st.metric("Unmapped", unmapped_count, delta="Action needed", delta_color="inverse")
-    
-    # Show recommendations if not 100%
-    if compatibility['score'] < 100:
+    # Show unmapped parameters
+    if compatibility['unmapped']:
         st.markdown("---")
-        st.markdown("### 💡 Recommendations")
-        
-        st.warning(f"**{len(compatibility['unmapped'])} scenario parameter(s) are not mapped to historical data.**")
-        
-        with st.expander("📋 View Unmapped Parameters", expanded=True):
-            for param in compatibility['unmapped']:
-                st.markdown(f"- `{param}`")
+        st.warning(f"⚠️ **{len(compatibility['unmapped'])} Unmapped Parameters**")
         
         st.markdown("**Suggested Actions:**")
         
-        col_rec1, col_rec2 = st.columns(2)
+        col1, col2 = st.columns(2)
         
-        with col_rec1:
+        with col1:
             st.info("""
             **Option 1: Add Historical Parameters**
-            - Upload additional historical data
-            - Include parameters equivalent to unmapped scenarios
-            - Re-run the mapping process
+            - Upload additional data
+            - Include equivalent parameters
+            - Re-run mapping
             """)
         
-        with col_rec2:
+        with col2:
             st.info("""
             **Option 2: Modify Scenarios**
-            - Return to Page 9 (Scenario Analysis)
-            - Remove or merge unmapped parameters
-            - Focus on parameters with historical equivalents
+            - Go to Page 9
+            - Remove/merge unmapped parameters
+            - Focus on mapped parameters
             """)
-        
-        st.info("""
-        **Option 3: Proceed with Partial Coverage**
-        - Continue analysis with mapped parameters only
-        - Note: Compatibility score will reflect partial coverage
-        - Unmapped parameters will not appear in trajectory visualizations
-        """)
     else:
-        st.success("🎉 **Perfect Compatibility!** All scenario parameters are mapped to historical data.")
+        st.success("🎉 **Perfect! All parameters mapped!**")
     
     # === STEP 2: BASELINE EXTRACTION ===
     if compatibility['score'] > 0:
         st.markdown("---")
         st.subheader("📍 Step 2: Extract Baseline Values")
-        st.caption("Define baseline reference for percentage-based scenario parameters")
+        st.caption("Define baseline reference year for percentage-based calculations")
         
         st.info("""
         💡 **Baseline Year Selection:**
-        - Choose a reference year for calculating percentage changes
-        - Typically: last available historical year OR a specific policy year
-        - Should be BEFORE the scenario horizon years (not the same year)
+        - Enter the reference year for calculating percentage changes
+        - Typically: last historical year OR a specific policy year
+        - Should be BEFORE scenario horizon years
         - Example: If scenarios are for 2040, baseline might be 2020 or 2025
         """)
         
-        # Get scenario horizon years for reference (but don't use as default)
+        # Get scenario years for reference
         scenario_years = []
         if 'detected_scenarios' in st.session_state:
             for scenario in st.session_state.detected_scenarios:
@@ -798,47 +648,40 @@ def main():
                 if horizon and isinstance(horizon, (int, float)):
                     scenario_years.append(int(horizon))
         
-        # Show scenario years for reference
         if scenario_years:
-            min_scenario_year = min(scenario_years)
-            max_scenario_year = max(scenario_years)
-            st.caption(f"📅 Your scenario years range: {min_scenario_year} - {max_scenario_year}")
-            
-            # Suggest baseline 10 years before earliest scenario
-            suggested_baseline = min_scenario_year - 10
-        else:
-            # Default: current year
-            suggested_baseline = datetime.now().year
+            min_year = min(scenario_years)
+            max_year = max(scenario_years)
+            st.caption(f"📅 Your scenario years range: {min_year} - {max_year}")
+            st.caption(f"💡 Recommended baseline: {min_year - 10} or earlier")
         
-        # Single column for baseline year selection
+        # User enters baseline year (NO DEFAULT)
         baseline_year = st.number_input(
-            "Baseline Reference Year:",
+            "Enter Baseline Reference Year:",
             min_value=2000,
             max_value=2100,
-            value=suggested_baseline,
+            value=2020,  # Neutral default
             step=1,
-            help="Choose a year BEFORE your scenario horizons to serve as baseline for percentage calculations"
+            help="Enter the year to use as baseline for percentage calculations"
         )
         
-        # Warning if baseline is same as or after scenarios
+        # Warning if baseline >= scenario
         if scenario_years and baseline_year >= min(scenario_years):
             st.warning(f"""
-            ⚠️ **Warning:** Baseline year ({baseline_year}) is at or after your earliest scenario year ({min(scenario_years)}).
+            ⚠️ **Warning:** Baseline year ({baseline_year}) is at or after scenario year ({min(scenario_years)}).
             
-            **Scientific Issue:** Baseline should be BEFORE the scenario period to measure change.
+            **Scientific Issue:** Baseline should be BEFORE the scenario period.
             
-            **Recommendation:** Use {min(scenario_years) - 10} or earlier as baseline.
+            **Recommendation:** Use {min(scenario_years) - 10} or earlier.
             """)
         
-        use_forecast_baseline = st.checkbox(
+        use_forecast = st.checkbox(
             "Use forecast values if year beyond historical data",
             value=True,
-            help="If baseline year is in the future, use forecasted values instead of last historical"
+            help="If baseline year is in future, use forecasted values"
         )
         
         if st.button("🔍 Extract Baselines", type="primary"):
             with st.spinner("Extracting baseline values..."):
-                # Extract baseline for each mapped parameter
                 baseline_results = {}
                 
                 for scenario_param, historical_param in st.session_state.parameter_mappings.items():
@@ -846,7 +689,7 @@ def main():
                         baseline = extract_baseline_value(
                             historical_param,
                             reference_year=baseline_year,
-                            use_forecast=use_forecast_baseline
+                            use_forecast=use_forecast
                         )
                         
                         baseline_results[scenario_param] = {
@@ -859,15 +702,14 @@ def main():
                 st.session_state.baseline_references = baseline_results
             
             st.success(f"✅ Extracted {len(baseline_results)} baseline values!")
+            st.rerun()
         
-        # Display baseline results if available
+        # Display baseline results
         if st.session_state.baseline_references:
             st.markdown("### 📊 Baseline Values")
             
-            # Create DataFrame for display
             baseline_data = []
             for scenario_param, baseline_info in st.session_state.baseline_references.items():
-                # Handle None values safely
                 value_str = f"{baseline_info['value']:.2f}" if baseline_info['value'] is not None else "N/A"
                 year_str = str(baseline_info['year']) if baseline_info['year'] is not None else "N/A"
                 
@@ -880,23 +722,17 @@ def main():
                 })
             
             df_baselines = pd.DataFrame(baseline_data)
+            st.dataframe(df_baselines, use_container_width=True, hide_index=True)
             
-            st.dataframe(
-                df_baselines,
-                use_container_width=True,
-                hide_index=True
-            )
-            
-            # === STEP 3: CONVERT TO ABSOLUTE VALUES ===
+            # === STEP 3: CONVERT TO ABSOLUTE ===
             st.markdown("---")
             st.subheader("🔢 Step 3: Convert Scenarios to Absolute Values")
-            st.caption("Transform percentage-based changes to absolute values using extracted baselines")
+            st.caption("Transform percentage-based changes to absolute values")
             
             if st.button("⚙️ Convert to Absolute Values", type="primary"):
-                with st.spinner("Converting scenario values..."):
+                with st.spinner("Converting..."):
                     absolute_results = {}
                     
-                    # Process each scenario
                     for scenario in st.session_state.detected_scenarios:
                         scenario_name = scenario['title']
                         absolute_results[scenario_name] = {}
@@ -904,26 +740,19 @@ def main():
                         for item in scenario['items']:
                             param_name = item.get('parameter_canonical', item.get('parameter', ''))
                             
-                            # Check if we have baseline
                             if param_name in st.session_state.baseline_references:
                                 baseline_info = st.session_state.baseline_references[param_name]
                                 baseline_value = baseline_info['value']
                                 
-                                # Skip if baseline is None
                                 if baseline_value is None:
                                     continue
                                 
-                                # Convert to absolute
                                 scenario_value = item.get('value', 0)
                                 direction = item.get('direction', 'target')
                                 unit = item.get('unit', '')
                                 
                                 absolute_value = convert_scenario_to_absolute(
-                                    param_name,
-                                    scenario_value,
-                                    direction,
-                                    unit,
-                                    baseline_value
+                                    param_name, scenario_value, direction, unit, baseline_value
                                 )
                                 
                                 absolute_results[scenario_name][param_name] = {
@@ -937,248 +766,236 @@ def main():
                     
                     st.session_state.absolute_values = absolute_results
                 
-                st.success(f"✅ Converted {len(absolute_results)} scenarios to absolute values!")
+                st.success(f"✅ Converted {len(absolute_results)} scenarios!")
+                st.rerun()
             
-            # Display absolute values if available
+            # Display absolute values
             if st.session_state.absolute_values:
-                    st.markdown("### 📊 Absolute Values by Scenario")
-                    
-                    for scenario_name, params in st.session_state.absolute_values.items():
-                        with st.expander(f"**{scenario_name}** ({len(params)} parameters)", expanded=False):
-                            # Create DataFrame
-                            abs_data = []
-                            for param, info in params.items():
-                                abs_data.append({
-                                    'Parameter': param,
-                                    'Category': info['category'],
-                                    'Original': f"{info['direction']} {info['original_value']:.1f} {info['unit']}",
-                                    'Baseline': f"{info['baseline']:.2f}",
-                                    'Absolute Value': f"{info['absolute_value']:.2f}"
-                                })
-                            
-                            df_abs = pd.DataFrame(abs_data)
-                            st.dataframe(df_abs, use_container_width=True, hide_index=True)
-                    
-                    # === STEP 4: VISUALIZATIONS ===
-                    st.markdown("---")
-                    st.subheader("📊 Step 4: Trajectory Visualizations")
-                    st.caption("Compare scenario trajectories with historical forecasts")
-                    
-                    # Create tabs for different visualization types
-                    viz_tab1, viz_tab2 = st.tabs([
-                        "📈 Parameter vs Parameter",
-                        "🎯 Category vs Category"
-                    ])
-                    
-                    # === TAB 1: Parameter vs Parameter ===
-                    with viz_tab1:
-                        st.markdown("### Parameter vs Parameter Comparison")
-                        st.caption("Plot scenario positions against forecasted values")
-                        
-                        # Get list of mapped parameters
-                        mapped_params = [p for p, h in st.session_state.parameter_mappings.items() if h != 'None']
-                        
-                        if len(mapped_params) >= 2:
-                            col_viz1, col_viz2 = st.columns(2)
-                            
-                            with col_viz1:
-                                x_param = st.selectbox(
-                                    "X-axis parameter:",
-                                    options=mapped_params,
-                                    key="x_param_select"
-                                )
-                            
-                            with col_viz2:
-                                y_param = st.selectbox(
-                                    "Y-axis parameter:",
-                                    options=[p for p in mapped_params if p != x_param],
-                                    key="y_param_select"
-                                )
-                            
-                            if st.button("📊 Generate Parameter Plot"):
-                                generate_parameter_plot(x_param, y_param)
-                        else:
-                            st.warning("Need at least 2 mapped parameters for visualization.")
-                    
-                    # === TAB 2: Category vs Category ===
-                    with viz_tab2:
-                        st.markdown("### Category vs Category Comparison")
-                        st.caption("Aggregate parameters into categories and visualize system-level trajectories")
-                        
-                        # Get unique categories
-                        categories = set()
-                        for params in st.session_state.absolute_values.values():
-                            for info in params.values():
-                                categories.add(info['category'])
-                        
-                        categories = sorted(list(categories))
-                        
-                        if len(categories) >= 2:
-                            col_cat1, col_cat2 = st.columns(2)
-                            
-                            with col_cat1:
-                                x_category = st.selectbox(
-                                    "X-axis category:",
-                                    options=categories,
-                                    key="x_cat_select"
-                                )
-                            
-                            with col_cat2:
-                                y_category = st.selectbox(
-                                    "Y-axis category:",
-                                    options=[c for c in categories if c != x_category],
-                                    key="y_cat_select"
-                                )
-                            
-                            if st.button("🎯 Generate Category Plot"):
-                                generate_category_plot(x_category, y_category)
-                        else:
-                            st.warning("Need at least 2 categories for visualization.")
-
-
-def generate_parameter_plot(x_param, y_param):
-    """Generate parameter vs parameter scatter plot"""
-    
-    st.markdown(f"### {x_param} vs {y_param}")
-    
-    # Collect data points
-    plot_data = []
-    
-    # Add forecast point (if available)
-    if 'forecast_results' in st.session_state:
-        x_hist_param = st.session_state.parameter_mappings.get(x_param)
-        y_hist_param = st.session_state.parameter_mappings.get(y_param)
-        
-        if x_hist_param != 'None' and y_hist_param != 'None':
-            x_forecast = st.session_state.forecast_results.get(x_hist_param)
-            y_forecast = st.session_state.forecast_results.get(y_hist_param)
-            
-            if x_forecast and y_forecast:
-                # Use last forecast value
-                x_val = x_forecast['forecast_values'][-1]
-                y_val = y_forecast['forecast_values'][-1]
+                st.markdown("### 📊 Absolute Values by Scenario")
                 
-                plot_data.append({
-                    'Scenario': 'Forecast (Historical)',
-                    'x': x_val,
-                    'y': y_val,
-                    'type': 'forecast'
-                })
+                for scenario_name, params in st.session_state.absolute_values.items():
+                    with st.expander(f"**{scenario_name}** ({len(params)} parameters)", expanded=False):
+                        abs_data = []
+                        for param, info in params.items():
+                            abs_data.append({
+                                'Parameter': param,
+                                'Category': info['category'],
+                                'Original': f"{info['direction']} {info['original_value']:.1f} {info['unit']}",
+                                'Baseline': f"{info['baseline']:.2f}",
+                                'Absolute Value': f"{info['absolute_value']:.2f}"
+                            })
+                        
+                        df_abs = pd.DataFrame(abs_data)
+                        st.dataframe(df_abs, use_container_width=True, hide_index=True)
+                
+                # === STEP 4: TRAJECTORY VISUALIZATION ===
+                st.markdown("---")
+                st.subheader("📊 Step 4: Trajectory Visualizations")
+                st.caption("Visualize scenario trajectories in parameter space")
+                
+                display_trajectory_visualizations()
+
+
+def display_trajectory_visualizations():
+    """Display trajectory visualizations with customization"""
     
-    # Add scenario points
-    for scenario_name, params in st.session_state.absolute_values.items():
+    if not st.session_state.absolute_values:
+        st.info("Convert scenarios to absolute values first")
+        return
+    
+    # Customization options
+    st.markdown("### 🎨 Visualization Customization")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        x_axis_scale = st.selectbox("X-axis scale:", ["linear", "log"], key="x_scale")
+        y_axis_scale = st.selectbox("Y-axis scale:", ["linear", "log"], key="y_scale")
+    
+    with col2:
+        st.markdown("**Scenario Colors:**")
+        scenario_colors = {}
+        for scenario_name in st.session_state.absolute_values.keys():
+            color = st.color_picker(
+                f"{scenario_name[:15]}...",
+                value="#1f77b4",
+                key=f"color_{scenario_name}"
+            )
+            scenario_colors[scenario_name] = color
+    
+    with col3:
+        box_opacity = st.slider("Box opacity:", 0.1, 1.0, 0.3, 0.1, key="box_opacity")
+        show_forecast_points = st.checkbox("Show forecast points", value=True, key="show_forecast")
+    
+    st.markdown("---")
+    
+    # Select parameters to visualize
+    all_params = set()
+    for scenario_params in st.session_state.absolute_values.values():
+        all_params.update(scenario_params.keys())
+    
+    all_params = sorted(list(all_params))
+    
+    if len(all_params) < 2:
+        st.warning("Need at least 2 parameters for visualization")
+        return
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        x_param = st.selectbox("X-axis parameter:", all_params, key="x_param")
+    
+    with col2:
+        y_params_options = [p for p in all_params if p != x_param]
+        y_param = st.selectbox("Y-axis parameter:", y_params_options, key="y_param")
+    
+    # Create plot
+    fig = create_trajectory_plot(
+        x_param, y_param, scenario_colors, 
+        x_axis_scale, y_axis_scale,
+        box_opacity, show_forecast_points
+    )
+    
+    if fig:
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Export options
+        st.markdown("---")
+        with st.expander("💾 Export Figure", expanded=False):
+            if EXPORT_AVAILABLE:
+                quick_export_buttons(
+                    fig,
+                    filename_prefix=f"trajectory_{x_param}_vs_{y_param}",
+                    show_formats=['png', 'pdf', 'html']
+                )
+            else:
+                # Fallback export
+                import io
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    try:
+                        img_bytes = fig.to_image(format="png", width=1200, height=800)
+                        st.download_button(
+                            label="📥 PNG",
+                            data=img_bytes,
+                            file_name=f"trajectory_{x_param}_vs_{y_param}.png",
+                            mime="image/png"
+                        )
+                    except:
+                        st.caption("⚠️ Install kaleido for PNG export")
+                
+                with col2:
+                    try:
+                        pdf_bytes = fig.to_image(format="pdf", width=1200, height=800)
+                        st.download_button(
+                            label="📥 PDF",
+                            data=pdf_bytes,
+                            file_name=f"trajectory_{x_param}_vs_{y_param}.pdf",
+                            mime="application/pdf"
+                        )
+                    except:
+                        st.caption("⚠️ Install kaleido for PDF export")
+                
+                with col3:
+                    html_buffer = io.StringIO()
+                    fig.write_html(html_buffer)
+                    st.download_button(
+                        label="📥 HTML",
+                        data=html_buffer.getvalue(),
+                        file_name=f"trajectory_{x_param}_vs_{y_param}.html",
+                        mime="text/html"
+                    )
+
+
+def create_trajectory_plot(x_param: str, y_param: str, scenario_colors: dict,
+                          x_scale: str, y_scale: str, box_opacity: float,
+                          show_forecast: bool) -> go.Figure:
+    """Create trajectory plot with boxes for scenarios and points for forecasts"""
+    
+    fig = go.Figure()
+    
+    # Get absolute values
+    absolute_vals = st.session_state.absolute_values
+    
+    # Get baseline references for forecast points
+    baseline_refs = st.session_state.baseline_references
+    
+    # Plot each scenario as a box
+    for scenario_name, params in absolute_vals.items():
         if x_param in params and y_param in params:
-            plot_data.append({
-                'Scenario': scenario_name,
-                'x': params[x_param]['absolute_value'],
-                'y': params[y_param]['absolute_value'],
-                'type': 'scenario'
-            })
-    
-    if plot_data:
-        df_plot = pd.DataFrame(plot_data)
-        
-        # Create plot
-        fig = px.scatter(
-            df_plot,
-            x='x',
-            y='y',
-            color='Scenario',
-            symbol='type',
-            title=f"Trajectory Space: {x_param} vs {y_param}",
-            labels={'x': x_param, 'y': y_param},
-            height=600
-        )
-        
-        fig.update_traces(marker=dict(size=15, line=dict(width=2, color='white')))
-        fig.update_layout(
-            hovermode='closest',
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Calculate distances
-        st.markdown("### 📏 Distance from Forecast")
-        
-        if any(d['type'] == 'forecast' for d in plot_data):
-            forecast_point = next(d for d in plot_data if d['type'] == 'forecast')
+            x_val = params[x_param]['absolute_value']
+            y_val = params[y_param]['absolute_value']
             
-            distances = []
-            for d in plot_data:
-                if d['type'] == 'scenario':
-                    dist = np.sqrt((d['x'] - forecast_point['x'])**2 + (d['y'] - forecast_point['y'])**2)
-                    distances.append({
-                        'Scenario': d['Scenario'],
-                        'Distance': dist
-                    })
+            # Calculate box size (±10% uncertainty)
+            x_size = abs(x_val * 0.1)
+            y_size = abs(y_val * 0.1)
             
-            df_dist = pd.DataFrame(distances).sort_values('Distance')
-            st.dataframe(df_dist, use_container_width=True, hide_index=True)
-    else:
-        st.warning("No data available for selected parameters.")
-
-
-def generate_category_plot(x_category, y_category):
-    """Generate category vs category scatter plot"""
+            color = scenario_colors.get(scenario_name, '#1f77b4')
+            
+            # Add box (rectangle)
+            fig.add_shape(
+                type="rect",
+                x0=x_val - x_size,
+                x1=x_val + x_size,
+                y0=y_val - y_size,
+                y1=y_val + y_size,
+                fillcolor=color,
+                opacity=box_opacity,
+                line=dict(color=color, width=2),
+                name=scenario_name
+            )
+            
+            # Add center point
+            fig.add_trace(go.Scatter(
+                x=[x_val],
+                y=[y_val],
+                mode='markers+text',
+                marker=dict(size=10, color=color, symbol='square'),
+                text=[scenario_name],
+                textposition="top center",
+                name=scenario_name,
+                showlegend=True
+            ))
     
-    st.markdown(f"### {x_category} vs {y_category}")
+    # Plot forecast points if available
+    if show_forecast:
+        # Get forecast data for x_param and y_param
+        x_source = get_data_source_for_parameter(x_param)
+        y_source = get_data_source_for_parameter(y_param)
+        
+        if (x_source['source'] == 'forecasted' and 
+            y_source['source'] == 'forecasted'):
+            
+            x_data = x_source['data']
+            y_data = y_source['data']
+            
+            # Merge on timestamp
+            merged = pd.merge(x_data, y_data, on='timestamp', suffixes=('_x', '_y'))
+            
+            fig.add_trace(go.Scatter(
+                x=merged['value_x'],
+                y=merged['value_y'],
+                mode='markers',
+                marker=dict(size=6, color='black', symbol='circle'),
+                name='Forecast Points',
+                showlegend=True,
+                opacity=0.6
+            ))
     
-    # Aggregate parameters by category for each scenario
-    plot_data = []
+    # Layout
+    fig.update_layout(
+        title=f"Trajectory Space: {x_param} vs {y_param}",
+        xaxis_title=x_param,
+        yaxis_title=y_param,
+        xaxis_type=x_scale,
+        yaxis_type=y_scale,
+        height=600,
+        template='plotly_white',
+        hovermode='closest'
+    )
     
-    for scenario_name, params in st.session_state.absolute_values.items():
-        # Aggregate for x_category
-        x_val = aggregate_category_value(
-            {p: info['absolute_value'] for p, info in params.items()},
-            x_category
-        )
-        
-        # Aggregate for y_category
-        y_val = aggregate_category_value(
-            {p: info['absolute_value'] for p, info in params.items()},
-            y_category
-        )
-        
-        plot_data.append({
-            'Scenario': scenario_name,
-            'x': x_val,
-            'y': y_val
-        })
-    
-    if plot_data:
-        df_plot = pd.DataFrame(plot_data)
-        
-        # Create plot
-        fig = px.scatter(
-            df_plot,
-            x='x',
-            y='y',
-            text='Scenario',
-            title=f"Category Space: {x_category} vs {y_category}",
-            labels={'x': f'{x_category} (normalized)', 'y': f'{y_category} (normalized)'},
-            height=600
-        )
-        
-        fig.update_traces(
-            marker=dict(size=20, line=dict(width=2, color='white')),
-            textposition='top center'
-        )
-        
-        fig.update_layout(
-            hovermode='closest',
-            showlegend=False
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        st.info("""
-        **Note:** Category values are normalized to 0-100 scale using min-max normalization 
-        of constituent parameters based on historical ranges.
-        """)
-    else:
-        st.warning("No data available for selected categories.")
+    return fig
 
 
 if __name__ == "__main__":
