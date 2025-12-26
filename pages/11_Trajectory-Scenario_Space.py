@@ -619,28 +619,52 @@ def main():
                     # Dropdown for mapping to historical parameter
                     current_mapping = st.session_state.parameter_mappings.get(param_name, 'None')
                     
-                    # Create options with clear sections
+                    # Create options with symbols and clear labeling
                     options = ['None']
                     
-                    # Add forecasted params first (highest priority)
+                    # Priority 1: Forecasted parameters (highest priority for baseline)
                     if historical_params['forecast_params']:
-                        options.append('─── Forecasted Parameters ───')
-                        options.extend(historical_params['forecast_params'])
+                        options.append('─── 🔮 Forecasted (Future Projections) ───')
+                        for param in historical_params['forecast_params']:
+                            options.append(f"🔮 {param}")
                     
-                    # Add reduction results (PCA, factors, etc.)
-                    if historical_params['reduction_params']:
-                        options.append('─── Reduced Components (Page 5) ───')
-                        options.extend(historical_params['reduction_params'])
-                    
-                    # Add other params (lowest priority)
+                    # Priority 2: Cleaned/raw historical data
                     if historical_params['other_params']:
-                        options.append('─── Other Historical Parameters ───')
-                        options.extend(historical_params['other_params'])
+                        options.append('─── 📊 Historical Data (Raw/Cleaned) ───')
+                        for param in historical_params['other_params']:
+                            options.append(f"📊 {param}")
+                    
+                    # Priority 3: Dimensionality reduction components
+                    if historical_params['reduction_params']:
+                        options.append('─── 🔬 Reduced Components (PCA/ICA/Factor) ───')
+                        for param in historical_params['reduction_params']:
+                            # Extract component type and add symbol
+                            if 'Principal Component' in param:
+                                options.append(f"🔬 {param.replace(' (Principal Component)', '')} [PCA]")
+                            elif 'Latent Factor' in param:
+                                options.append(f"🔬 {param.replace(' (Latent Factor)', '')} [Factor]")
+                            elif 'Independent Component' in param:
+                                options.append(f"🔬 {param.replace(' (Independent Component)', '')} [ICA]")
+                            elif 'Filtered' in param:
+                                options.append(f"🔬 {param.replace(' (Filtered)', '')} [Filtered]")
+                            else:
+                                options.append(f"🔬 {param}")
                     
                     # Find current selection
                     default_idx = 0
                     if current_mapping in options:
                         default_idx = options.index(current_mapping)
+                    else:
+                        # Try to find without symbol
+                        for i, opt in enumerate(options):
+                            if opt.startswith('🔮 ') or opt.startswith('📊 ') or opt.startswith('🔬 '):
+                                # Extract name without symbol
+                                clean_opt = opt.split(' ', 1)[1] if ' ' in opt else opt
+                                # Remove [PCA], [ICA], etc. tags
+                                clean_opt = clean_opt.split(' [')[0] if ' [' in clean_opt else clean_opt
+                                if clean_opt == current_mapping:
+                                    default_idx = i
+                                    break
                     
                     selected = st.selectbox(
                         "Select historical parameter:",
@@ -650,9 +674,16 @@ def main():
                         label_visibility="collapsed"
                     )
                     
-                    # Store mapping (don't store separators)
+                    # Store mapping (remove symbols and tags for storage)
                     if not selected.startswith('───'):
-                        st.session_state.parameter_mappings[param_name] = selected
+                        # Remove symbol prefix (🔮, 📊, 🔬)
+                        if selected.startswith('🔮 ') or selected.startswith('📊 ') or selected.startswith('🔬 '):
+                            clean_selected = selected.split(' ', 1)[1]
+                            # Remove tags like [PCA], [ICA], [Factor]
+                            clean_selected = clean_selected.split(' [')[0] if ' [' in clean_selected else clean_selected
+                            st.session_state.parameter_mappings[param_name] = clean_selected
+                        else:
+                            st.session_state.parameter_mappings[param_name] = selected
                     else:
                         # User selected a separator - keep previous mapping
                         pass
@@ -745,201 +776,171 @@ def main():
     else:
         st.success("🎉 **Perfect Compatibility!** All scenario parameters are mapped to historical data.")
     
-    # Show historical parameters summary at bottom
-    st.markdown("---")
-    st.markdown("### 📊 Historical Data Overview")
-    
-    # Single column layout for summary
-    st.metric(
-        "Total Historical Parameters Available",
-        len(all_historical),
-        help="Includes original data, forecasts, and dimensionality reduction results"
-    )
-    
-    # Expandable sections for each type
-    if historical_params['forecast_params']:
-        with st.expander(f"✅ **Forecasted Parameters** ({len(historical_params['forecast_params'])})", expanded=False):
-            for param in historical_params['forecast_params']:
-                # Check if mapped
-                is_mapped = param in st.session_state.parameter_mappings.values()
-                if is_mapped:
-                    st.markdown(f"✅ `{param}` *(mapped)*")
-                else:
-                    st.markdown(f"- `{param}`")
-    
-    if historical_params['reduction_params']:
-        with st.expander(f"🔬 **Reduced Components (from Page 5)** ({len(historical_params['reduction_params'])})", expanded=False):
-            st.info("💡 **Tip:** Principal components and factors can be excellent matches for high-level scenario parameters")
-            
-            for param in historical_params['reduction_params']:
-                # Check if mapped
-                is_mapped = param in st.session_state.parameter_mappings.values()
-                if is_mapped:
-                    st.markdown(f"✅ `{param}` *(mapped)*")
-                else:
-                    st.markdown(f"- `{param}`")
-            
-            # Show reduction method info if available
-            if 'reduction_results' in st.session_state:
-                st.markdown("**Available Reduction Methods:**")
-                if 'pca' in st.session_state.reduction_results:
-                    pca = st.session_state.reduction_results['pca']
-                    st.caption(f"• PCA: {pca['n_components']} components, {pca['cumulative_variance'][-1]*100:.1f}% variance")
-                if 'factor_analysis' in st.session_state.reduction_results:
-                    fa = st.session_state.reduction_results['factor_analysis']
-                    st.caption(f"• Factor Analysis: {fa['n_factors']} factors")
-                if 'ica' in st.session_state.reduction_results:
-                    ica = st.session_state.reduction_results['ica']
-                    st.caption(f"• ICA: {ica['n_components']} independent components")
-    
-    if historical_params['other_params']:
-        with st.expander(f"📈 **Other Historical Parameters** ({len(historical_params['other_params'])})", expanded=False):
-            for param in historical_params['other_params']:
-                # Check if mapped
-                is_mapped = param in st.session_state.parameter_mappings.values()
-                if is_mapped:
-                    st.markdown(f"✅ `{param}` *(mapped)*")
-                else:
-                    st.markdown(f"- `{param}`")
-    
     # === STEP 2: BASELINE EXTRACTION ===
-        if compatibility['score'] > 0:
+    if compatibility['score'] > 0:
+        st.markdown("---")
+        st.subheader("📍 Step 2: Extract Baseline Values")
+        st.caption("Define baseline reference for percentage-based scenario parameters")
+        
+        st.info("""
+        💡 **Baseline Year Selection:**
+        - Choose a reference year for calculating percentage changes
+        - Typically: last available historical year OR a specific policy year
+        - Should be BEFORE the scenario horizon years (not the same year)
+        - Example: If scenarios are for 2040, baseline might be 2020 or 2025
+        """)
+        
+        # Get scenario horizon years for reference (but don't use as default)
+        scenario_years = []
+        if 'detected_scenarios' in st.session_state:
+            for scenario in st.session_state.detected_scenarios:
+                horizon = scenario.get('horizon')
+                if horizon and isinstance(horizon, (int, float)):
+                    scenario_years.append(int(horizon))
+        
+        # Show scenario years for reference
+        if scenario_years:
+            min_scenario_year = min(scenario_years)
+            max_scenario_year = max(scenario_years)
+            st.caption(f"📅 Your scenario years range: {min_scenario_year} - {max_scenario_year}")
+            
+            # Suggest baseline 10 years before earliest scenario
+            suggested_baseline = min_scenario_year - 10
+        else:
+            # Default: current year
+            suggested_baseline = datetime.now().year
+        
+        # Single column for baseline year selection
+        baseline_year = st.number_input(
+            "Baseline Reference Year:",
+            min_value=2000,
+            max_value=2100,
+            value=suggested_baseline,
+            step=1,
+            help="Choose a year BEFORE your scenario horizons to serve as baseline for percentage calculations"
+        )
+        
+        # Warning if baseline is same as or after scenarios
+        if scenario_years and baseline_year >= min(scenario_years):
+            st.warning(f"""
+            ⚠️ **Warning:** Baseline year ({baseline_year}) is at or after your earliest scenario year ({min(scenario_years)}).
+            
+            **Scientific Issue:** Baseline should be BEFORE the scenario period to measure change.
+            
+            **Recommendation:** Use {min(scenario_years) - 10} or earlier as baseline.
+            """)
+        
+        use_forecast_baseline = st.checkbox(
+            "Use forecast values if year beyond historical data",
+            value=True,
+            help="If baseline year is in the future, use forecasted values instead of last historical"
+        )
+        
+        if st.button("🔍 Extract Baselines", type="primary"):
+            with st.spinner("Extracting baseline values..."):
+                # Extract baseline for each mapped parameter
+                baseline_results = {}
+                
+                for scenario_param, historical_param in st.session_state.parameter_mappings.items():
+                    if historical_param != 'None':
+                        baseline = extract_baseline_value(
+                            historical_param,
+                            reference_year=baseline_year,
+                            use_forecast=use_forecast_baseline
+                        )
+                        
+                        baseline_results[scenario_param] = {
+                            'historical_param': historical_param,
+                            'value': baseline['value'],
+                            'year': baseline['year'],
+                            'source': baseline['source']
+                        }
+                
+                st.session_state.baseline_references = baseline_results
+            
+            st.success(f"✅ Extracted {len(baseline_results)} baseline values!")
+        
+        # Display baseline results if available
+        if st.session_state.baseline_references:
+            st.markdown("### 📊 Baseline Values")
+            
+            # Create DataFrame for display
+            baseline_data = []
+            for scenario_param, baseline_info in st.session_state.baseline_references.items():
+                # Handle None values safely
+                value_str = f"{baseline_info['value']:.2f}" if baseline_info['value'] is not None else "N/A"
+                year_str = str(baseline_info['year']) if baseline_info['year'] is not None else "N/A"
+                
+                baseline_data.append({
+                    'Scenario Parameter': scenario_param,
+                    'Historical Parameter': baseline_info['historical_param'],
+                    'Baseline Value': value_str,
+                    'Year': year_str,
+                    'Source': baseline_info['source']
+                })
+            
+            df_baselines = pd.DataFrame(baseline_data)
+            
+            st.dataframe(
+                df_baselines,
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            # === STEP 3: CONVERT TO ABSOLUTE VALUES ===
             st.markdown("---")
-            st.subheader("📍 Step 2: Extract Baseline Values")
-            st.caption("Define baseline reference for percentage-based scenario parameters")
+            st.subheader("🔢 Step 3: Convert Scenarios to Absolute Values")
+            st.caption("Transform percentage-based changes to absolute values using extracted baselines")
             
-            # Get scenario horizon years
-            scenario_years = []
-            if 'detected_scenarios' in st.session_state:
-                for scenario in st.session_state.detected_scenarios:
-                    horizon = scenario.get('horizon')
-                    if horizon and isinstance(horizon, (int, float)):
-                        scenario_years.append(int(horizon))
-            
-            # Determine default reference year
-            if scenario_years:
-                common_year = max(set(scenario_years), key=scenario_years.count)
-                st.info(f"💡 Most common scenario horizon year: **{common_year}**")
-            else:
-                common_year = datetime.now().year + 10
-            
-            # Let user choose baseline year
-            col_base1, col_base2 = st.columns([1, 3])
-            
-            with col_base1:
-                baseline_year = st.number_input(
-                    "Baseline Reference Year:",
-                    min_value=2000,
-                    max_value=2100,
-                    value=common_year,
-                    step=1,
-                    help="Year to use as baseline for percentage calculations"
-                )
-            
-            with col_base2:
-                use_forecast_baseline = st.checkbox(
-                    "Use forecast values if year beyond historical data",
-                    value=True,
-                    help="If baseline year is in the future, use forecasted values instead of last historical"
-                )
-            
-            if st.button("🔍 Extract Baselines", type="primary"):
-                with st.spinner("Extracting baseline values..."):
-                    # Extract baseline for each mapped parameter
-                    baseline_results = {}
+            if st.button("⚙️ Convert to Absolute Values", type="primary"):
+                with st.spinner("Converting scenario values..."):
+                    absolute_results = {}
                     
-                    for scenario_param, historical_param in st.session_state.parameter_mappings.items():
-                        if historical_param != 'None':
-                            baseline = extract_baseline_value(
-                                historical_param,
-                                reference_year=baseline_year,
-                                use_forecast=use_forecast_baseline
-                            )
-                            
-                            baseline_results[scenario_param] = {
-                                'historical_param': historical_param,
-                                'value': baseline['value'],
-                                'year': baseline['year'],
-                                'source': baseline['source']
-                            }
-                    
-                    st.session_state.baseline_references = baseline_results
-                
-                st.success(f"✅ Extracted {len(baseline_results)} baseline values!")
-            
-            # Display baseline results if available
-            if st.session_state.baseline_references:
-                st.markdown("### 📊 Baseline Values")
-                
-                # Create DataFrame for display
-                baseline_data = []
-                for scenario_param, baseline_info in st.session_state.baseline_references.items():
-                    baseline_data.append({
-                        'Scenario Parameter': scenario_param,
-                        'Historical Parameter': baseline_info['historical_param'],
-                        'Baseline Value': f"{baseline_info['value']:.2f}",
-                        'Year': baseline_info['year'],
-                        'Source': baseline_info['source']
-                    })
-                
-                df_baselines = pd.DataFrame(baseline_data)
-                
-                st.dataframe(
-                    df_baselines,
-                    use_container_width=True,
-                    hide_index=True
-                )
-                
-                # === STEP 3: CONVERT TO ABSOLUTE VALUES ===
-                st.markdown("---")
-                st.subheader("🔢 Step 3: Convert Scenarios to Absolute Values")
-                st.caption("Transform percentage-based changes to absolute values using extracted baselines")
-                
-                if st.button("⚙️ Convert to Absolute Values", type="primary"):
-                    with st.spinner("Converting scenario values..."):
-                        absolute_results = {}
+                    # Process each scenario
+                    for scenario in st.session_state.detected_scenarios:
+                        scenario_name = scenario['title']
+                        absolute_results[scenario_name] = {}
                         
-                        # Process each scenario
-                        for scenario in st.session_state.detected_scenarios:
-                            scenario_name = scenario['title']
-                            absolute_results[scenario_name] = {}
+                        for item in scenario['items']:
+                            param_name = item.get('parameter_canonical', item.get('parameter', ''))
                             
-                            for item in scenario['items']:
-                                param_name = item.get('parameter_canonical', item.get('parameter', ''))
+                            # Check if we have baseline
+                            if param_name in st.session_state.baseline_references:
+                                baseline_info = st.session_state.baseline_references[param_name]
+                                baseline_value = baseline_info['value']
                                 
-                                # Check if we have baseline
-                                if param_name in st.session_state.baseline_references:
-                                    baseline_info = st.session_state.baseline_references[param_name]
-                                    baseline_value = baseline_info['value']
-                                    
-                                    # Convert to absolute
-                                    scenario_value = item.get('value', 0)
-                                    direction = item.get('direction', 'target')
-                                    unit = item.get('unit', '')
-                                    
-                                    absolute_value = convert_scenario_to_absolute(
-                                        param_name,
-                                        scenario_value,
-                                        direction,
-                                        unit,
-                                        baseline_value
-                                    )
-                                    
-                                    absolute_results[scenario_name][param_name] = {
-                                        'absolute_value': absolute_value,
-                                        'original_value': scenario_value,
-                                        'direction': direction,
-                                        'unit': unit,
-                                        'baseline': baseline_value,
-                                        'category': item.get('category', 'Other')
-                                    }
-                        
-                        st.session_state.absolute_values = absolute_results
+                                # Skip if baseline is None
+                                if baseline_value is None:
+                                    continue
+                                
+                                # Convert to absolute
+                                scenario_value = item.get('value', 0)
+                                direction = item.get('direction', 'target')
+                                unit = item.get('unit', '')
+                                
+                                absolute_value = convert_scenario_to_absolute(
+                                    param_name,
+                                    scenario_value,
+                                    direction,
+                                    unit,
+                                    baseline_value
+                                )
+                                
+                                absolute_results[scenario_name][param_name] = {
+                                    'absolute_value': absolute_value,
+                                    'original_value': scenario_value,
+                                    'direction': direction,
+                                    'unit': unit,
+                                    'baseline': baseline_value,
+                                    'category': item.get('category', 'Other')
+                                }
                     
-                    st.success(f"✅ Converted {len(absolute_results)} scenarios to absolute values!")
+                    st.session_state.absolute_values = absolute_results
                 
-                # Display absolute values if available
-                if st.session_state.absolute_values:
+                st.success(f"✅ Converted {len(absolute_results)} scenarios to absolute values!")
+            
+            # Display absolute values if available
+            if st.session_state.absolute_values:
                     st.markdown("### 📊 Absolute Values by Scenario")
                     
                     for scenario_name, params in st.session_state.absolute_values.items():
