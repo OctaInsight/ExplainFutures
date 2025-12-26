@@ -45,6 +45,19 @@ config = get_config()
 # Render shared sidebar
 render_app_sidebar()
 
+# === IMMEDIATE LOADING INDICATOR ===
+# Show this BEFORE checking if models are loaded, so user sees feedback instantly
+if 'nlp_models_loaded' not in st.session_state:
+    # Create placeholder that appears immediately
+    loading_placeholder = st.empty()
+    
+    with loading_placeholder.container():
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.markdown("### 🤖 Initializing NLP Module")
+            st.info("⏳ **Please wait** - Preparing language models...")
+            st.caption("First-time setup in progress...")
+
 # === NLP MODEL LOADING WITH PROGRESS INDICATOR ===
 @st.cache_resource(show_spinner=False)
 def load_nlp_models():
@@ -82,7 +95,11 @@ def load_nlp_models():
 if 'nlp_models_loaded' not in st.session_state:
     # First-time loading - show progress
     
-    # Create a centered container for the loading message
+    # Clear the immediate loading indicator
+    if 'loading_placeholder' in locals():
+        loading_placeholder.empty()
+    
+    # Create a centered container for the detailed loading progress
     col1, col2, col3 = st.columns([1, 2, 1])
     
     with col2:
