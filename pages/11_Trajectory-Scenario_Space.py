@@ -54,21 +54,23 @@ def initialize_trajectory_state():
 
 def get_historical_parameters():
     """
-    Get all parameters from historical data
+    Get all parameters from historical data including Page 5 reduction results
     
     Returns:
     --------
-    dict with two lists:
+    dict with three lists:
         - forecast_params: Parameters used in forecasting
         - other_params: Parameters not used in forecasting
+        - reduction_params: Parameters from dimensionality reduction (PCA, factors, etc.)
     """
     
     forecast_params = []
     other_params = []
+    reduction_params = []
     
     # Check if data is loaded
     if 'df_long' not in st.session_state or st.session_state.df_long is None:
-        return {'forecast_params': [], 'other_params': []}
+        return {'forecast_params': [], 'other_params': [], 'reduction_params': []}
     
     df = st.session_state.df_long
     all_variables = df['variable'].unique().tolist()
@@ -86,9 +88,42 @@ def get_historical_parameters():
         # No forecasts - all are "other"
         other_params = all_variables
     
+    # Add dimensionality reduction results from Page 5
+    if 'reduction_results' in st.session_state and st.session_state.reduction_results:
+        
+        # PCA components
+        if 'pca' in st.session_state.reduction_results:
+            pca_results = st.session_state.reduction_results['pca']
+            n_components = pca_results.get('n_components', 0)
+            for i in range(n_components):
+                reduction_params.append(f"PC{i+1} (Principal Component)")
+        
+        # Factor Analysis
+        if 'factor_analysis' in st.session_state.reduction_results:
+            fa_results = st.session_state.reduction_results['factor_analysis']
+            n_factors = fa_results.get('n_factors', 0)
+            for i in range(n_factors):
+                reduction_params.append(f"Factor{i+1} (Latent Factor)")
+        
+        # ICA components
+        if 'ica' in st.session_state.reduction_results:
+            ica_results = st.session_state.reduction_results['ica']
+            n_components = ica_results.get('n_components', 0)
+            for i in range(n_components):
+                reduction_params.append(f"IC{i+1} (Independent Component)")
+        
+        # Filtered features from correlation analysis
+        if 'correlation' in st.session_state.reduction_results:
+            corr_results = st.session_state.reduction_results['correlation']
+            selected_features = corr_results.get('selected', [])
+            for feat in selected_features:
+                if feat not in forecast_params and feat not in other_params:
+                    reduction_params.append(f"{feat} (Filtered)")
+    
     return {
         'forecast_params': sorted(forecast_params),
-        'other_params': sorted(other_params)
+        'other_params': sorted(other_params),
+        'reduction_params': sorted(reduction_params)
     }
 
 
@@ -530,8 +565,10 @@ def main():
         
         return
     
-    # All historical parameters for dropdown
-    all_historical = historical_params['forecast_params'] + historical_params['other_params']
+    # All historical parameters for dropdown (including reduction results)
+    all_historical = (historical_params['forecast_params'] + 
+                     historical_params['other_params'] + 
+                     historical_params['reduction_params'])
     
     # Display mapping interface as a table
     st.markdown(f"**{len(scenario_params)} scenario parameters** ready for mapping")
@@ -551,18 +588,15 @@ def main():
         with st.expander(f"**{category}** ({len(params_in_category)} parameters)", expanded=True):
             
             # Create table header
-            col_header1, col_header2, col_header3, col_header4 = st.columns([3, 3, 3, 1])
+            col_header1, col_header2, col_header3 = st.columns([3, 4, 1])
             
             with col_header1:
                 st.markdown("**Scenario Parameter**")
             
             with col_header2:
-                st.markdown("**Historical Parameter**")
+                st.markdown("**Historical Parameter / Component**")
             
             with col_header3:
-                st.markdown("**Scenarios Using This**")
-            
-            with col_header4:
                 st.markdown("**Status**")
             
             st.markdown("---")
@@ -571,7 +605,7 @@ def main():
             for param in params_in_category:
                 param_name = param['name']
                 
-                col1, col2, col3, col4 = st.columns([3, 3, 3, 1])
+                col1, col2, col3 = st.columns([3, 4, 1])
                 
                 with col1:
                     # Scenario parameter name
@@ -585,17 +619,22 @@ def main():
                     # Dropdown for mapping to historical parameter
                     current_mapping = st.session_state.parameter_mappings.get(param_name, 'None')
                     
-                    # Create options: None + forecasted params (priority) + other params
+                    # Create options with clear sections
                     options = ['None']
                     
-                    # Add forecasted params first (they're more likely to be useful)
+                    # Add forecasted params first (highest priority)
                     if historical_params['forecast_params']:
-                        options.append('--- Forecasted Parameters ---')
+                        options.append('─── Forecasted Parameters ───')
                         options.extend(historical_params['forecast_params'])
                     
-                    # Add other params
+                    # Add reduction results (PCA, factors, etc.)
+                    if historical_params['reduction_params']:
+                        options.append('─── Reduced Components (Page 5) ───')
+                        options.extend(historical_params['reduction_params'])
+                    
+                    # Add other params (lowest priority)
                     if historical_params['other_params']:
-                        options.append('--- Other Parameters ---')
+                        options.append('─── Other Historical Parameters ───')
                         options.extend(historical_params['other_params'])
                     
                     # Find current selection
@@ -612,32 +651,15 @@ def main():
                     )
                     
                     # Store mapping (don't store separators)
-                    if not selected.startswith('---'):
+                    if not selected.startswith('───'):
                         st.session_state.parameter_mappings[param_name] = selected
                     else:
                         # User selected a separator - keep previous mapping
                         pass
                 
                 with col3:
-                    # Show which scenarios use this parameter
-                    scenario_list = []
-                    for scenario_info in param['scenarios']:
-                        scenario_name = scenario_info['scenario']
-                        value = scenario_info.get('value')
-                        direction = scenario_info.get('direction', '')
-                        
-                        if value is not None:
-                            scenario_list.append(f"{scenario_name} ({direction} {value})")
-                        else:
-                            scenario_list.append(f"{scenario_name} ({direction})")
-                    
-                    # Display as bullet points
-                    for s in scenario_list:
-                        st.caption(f"• {s}")
-                
-                with col4:
                     # Status indicator
-                    if selected != 'None' and not selected.startswith('---'):
+                    if selected != 'None' and not selected.startswith('───'):
                         st.success("✓")
                     else:
                         st.warning("⚠️")
@@ -727,41 +749,58 @@ def main():
     st.markdown("---")
     st.markdown("### 📊 Historical Data Overview")
     
-    col_hist_summary1, col_hist_summary2 = st.columns(2)
+    # Single column layout for summary
+    st.metric(
+        "Total Historical Parameters Available",
+        len(all_historical),
+        help="Includes original data, forecasts, and dimensionality reduction results"
+    )
     
-    with col_hist_summary1:
-        st.metric(
-            "Forecasted Parameters",
-            len(historical_params['forecast_params']),
-            help="Parameters with available forecasts"
-        )
-        
-        if historical_params['forecast_params']:
-            with st.expander("View forecasted parameters", expanded=False):
-                for param in historical_params['forecast_params']:
-                    # Check if mapped
-                    is_mapped = param in st.session_state.parameter_mappings.values()
-                    if is_mapped:
-                        st.markdown(f"✅ `{param}`")
-                    else:
-                        st.markdown(f"- `{param}`")
+    # Expandable sections for each type
+    if historical_params['forecast_params']:
+        with st.expander(f"✅ **Forecasted Parameters** ({len(historical_params['forecast_params'])})", expanded=False):
+            for param in historical_params['forecast_params']:
+                # Check if mapped
+                is_mapped = param in st.session_state.parameter_mappings.values()
+                if is_mapped:
+                    st.markdown(f"✅ `{param}` *(mapped)*")
+                else:
+                    st.markdown(f"- `{param}`")
     
-    with col_hist_summary2:
-        st.metric(
-            "Other Historical Parameters",
-            len(historical_params['other_params']),
-            help="Parameters available but not forecasted"
-        )
-        
-        if historical_params['other_params']:
-            with st.expander("View other parameters", expanded=False):
-                for param in historical_params['other_params']:
-                    # Check if mapped
-                    is_mapped = param in st.session_state.parameter_mappings.values()
-                    if is_mapped:
-                        st.markdown(f"✅ `{param}`")
-                    else:
-                        st.markdown(f"- `{param}`")
+    if historical_params['reduction_params']:
+        with st.expander(f"🔬 **Reduced Components (from Page 5)** ({len(historical_params['reduction_params'])})", expanded=False):
+            st.info("💡 **Tip:** Principal components and factors can be excellent matches for high-level scenario parameters")
+            
+            for param in historical_params['reduction_params']:
+                # Check if mapped
+                is_mapped = param in st.session_state.parameter_mappings.values()
+                if is_mapped:
+                    st.markdown(f"✅ `{param}` *(mapped)*")
+                else:
+                    st.markdown(f"- `{param}`")
+            
+            # Show reduction method info if available
+            if 'reduction_results' in st.session_state:
+                st.markdown("**Available Reduction Methods:**")
+                if 'pca' in st.session_state.reduction_results:
+                    pca = st.session_state.reduction_results['pca']
+                    st.caption(f"• PCA: {pca['n_components']} components, {pca['cumulative_variance'][-1]*100:.1f}% variance")
+                if 'factor_analysis' in st.session_state.reduction_results:
+                    fa = st.session_state.reduction_results['factor_analysis']
+                    st.caption(f"• Factor Analysis: {fa['n_factors']} factors")
+                if 'ica' in st.session_state.reduction_results:
+                    ica = st.session_state.reduction_results['ica']
+                    st.caption(f"• ICA: {ica['n_components']} independent components")
+    
+    if historical_params['other_params']:
+        with st.expander(f"📈 **Other Historical Parameters** ({len(historical_params['other_params'])})", expanded=False):
+            for param in historical_params['other_params']:
+                # Check if mapped
+                is_mapped = param in st.session_state.parameter_mappings.values()
+                if is_mapped:
+                    st.markdown(f"✅ `{param}` *(mapped)*")
+                else:
+                    st.markdown(f"- `{param}`")
     
     # === STEP 2: BASELINE EXTRACTION ===
         if compatibility['score'] > 0:
