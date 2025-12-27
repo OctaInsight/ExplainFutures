@@ -576,9 +576,12 @@ def main():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             if st.button("✅ Return to Trajectory Analysis", type="primary", use_container_width=True):
-                # Clear the helper state
+                # CRITICAL: Clear ALL caches and force complete rebuild
+                st.session_state.master_parameter_df = None
                 st.session_state.pop('page12_forecasts_completed', None)
-                st.session_state.pop('show_model_details', None)
+                
+                # Force Page 11 to rebuild immediately
+                st.session_state.force_master_rebuild = True
                 
                 # Navigate to Page 11
                 st.switch_page("pages/11_Trajectory-Scenario_Space.py")
