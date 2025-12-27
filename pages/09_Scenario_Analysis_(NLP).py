@@ -202,20 +202,18 @@ def display_editable_comparison_table():
     - Category column (editable) - rename categories or reassign parameters
     - Parameters grouped by category
     - All editing in table
-    - Clean UI without clutter
-    - Auto-saves to session_state for Page 10 access
+    - AUTO-SAVES on every change (no Save button needed)
+    - Data automatically synced to Page 10
     """
     
     st.markdown("### 📊 Edit All Parameters")
-    st.caption("✏️ Click any cell to edit • Data is automatically available for Page 10 • Click Save to update after editing")
+    st.caption("✏️ All changes save automatically • Data syncs to Page 10 in real-time")
     
     scenarios = st.session_state.detected_scenarios
     
-    # === AUTO-SAVE DATA FOR PAGE 10 (on first display) ===
-    # This ensures Page 10 always has the latest scenario data
-    if 'scenario_parameters' not in st.session_state or st.session_state.get('force_parameter_update', False):
-        st.session_state.scenario_parameters = scenarios
-        st.session_state.force_parameter_update = False
+    # === ALWAYS AUTO-SAVE DATA FOR PAGE 10 ===
+    # Update on every render to ensure Page 10 has latest data
+    st.session_state.scenario_parameters = scenarios
     
     # Collect all unique parameters with their metadata
     all_params_data = {}  # {param_name: {category, sources_by_scenario, items_by_scenario}}
@@ -335,7 +333,16 @@ def display_editable_comparison_table():
             width="small"
         )
     
-    st.caption("💡 Edit Category column to rename categories or reassign parameters • All columns are editable")
+    st.caption("💡 Edit Category column to rename categories or reassign parameters • All columns are editable • Changes save automatically")
+    
+    # Define callback function for auto-saving
+    def auto_save_table_changes():
+        """Auto-save callback - runs whenever table is edited"""
+        if 'one_table_editor' in st.session_state:
+            edited_df = st.session_state.one_table_editor
+            save_table_to_scenarios(edited_df, st.session_state.detected_scenarios)
+            # Update for Page 10
+            st.session_state.scenario_parameters = st.session_state.detected_scenarios
     
     edited_df = st.data_editor(
         display_df,
@@ -343,8 +350,12 @@ def display_editable_comparison_table():
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
-        key="one_table_editor"
+        key="one_table_editor",
+        on_change=auto_save_table_changes  # AUTO-SAVE on every edit
     )
+    
+    # Info message
+    st.success("✅ All changes are automatically saved and synced to Page 10")
     
     # Download parameter table
     st.markdown("**📥 Download Parameter Table**")
@@ -371,27 +382,6 @@ def display_editable_comparison_table():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
-    
-    # Action buttons
-    col1, col2, col3 = st.columns([2, 2, 1])
-    
-    with col1:
-        if st.button("💾 Save All Changes", type="primary", use_container_width=True):
-            save_table_to_scenarios(edited_df, scenarios)
-            # Update scenario_parameters for Page 10
-            st.session_state.scenario_parameters = st.session_state.detected_scenarios
-            st.success("✅ All changes saved! Data updated for all pages including Page 10.")
-            st.rerun()
-    
-    with col2:
-        if st.button("🔄 Reset Table", use_container_width=True):
-            st.info("Table will reset on next page load")
-            st.rerun()
-    
-    with col3:
-        if st.button("❌ Close", use_container_width=True):
-            st.session_state.show_comparison_table = False
-            st.rerun()
 
 
 def categorize_parameter(param_name: str) -> str:
@@ -1194,7 +1184,14 @@ Renewable energy reaches 40% by 2040.""",
                 st.session_state.detected_scenarios = scenarios_with_params
                 st.session_state.scenarios_processed = True
                 
-                st.success("🎉 Analysis complete! Click button below to review scenarios.")
+                # AUTO-SHOW TABLE (no button needed)
+                st.session_state.show_comparison_table = True
+                st.session_state.parameters_reviewed = True
+                
+                # AUTO-SAVE for Page 10 immediately
+                st.session_state.scenario_parameters = scenarios_with_params
+                
+                st.success("🎉 Analysis complete! Review and edit parameters below.")
                 st.rerun()
     
     # === STEP 2: REVIEW DETECTED SCENARIOS ===
@@ -1206,96 +1203,28 @@ Renewable energy reaches 40% by 2040.""",
         
         # === SCENARIO SUMMARY TABLE ===
         st.markdown("**Detected Scenarios:**")
-        st.caption("✏️ Edit scenario names and projected years below, then click Confirm")
+        st.caption("✏️ Scenario names and years (auto-saved)")
         
-        # Use form to batch all edits together (prevents reruns on each keystroke)
-        with st.form(key="scenario_info_form"):
-            # Store edited values temporarily
-            scenario_edits = []
+        # Simple display of scenario info (no form needed - already confirmed by NLP)
+        for idx, scenario in enumerate(st.session_state.detected_scenarios):
+            col1, col2, col3 = st.columns([3, 2, 1])
             
-            for idx, scenario in enumerate(st.session_state.detected_scenarios):
-                st.markdown(f"**Scenario {idx + 1}:**")
-                
-                col1, col2, col3 = st.columns([3, 2, 1])
-                
-                with col1:
-                    new_title = st.text_input(
-                        "Scenario Name",
-                        value=scenario.get('title', f'Scenario {idx+1}'),
-                        key=f"scenario_name_{idx}",
-                        label_visibility="collapsed",
-                        placeholder="Enter scenario name"
-                    )
-                
-                with col2:
-                    # Get horizon value from NLP extraction
-                    horizon_value = scenario.get('horizon')
-                    
-                    # Display the extracted year or allow user to enter
-                    if horizon_value is not None and isinstance(horizon_value, (int, float)):
-                        year_value = int(horizon_value)
-                        year_help = f"Extracted year: {year_value}"
-                    else:
-                        # No year extracted - show current year + 10 as placeholder
-                        from datetime import datetime
-                        year_value = datetime.now().year + 10
-                        year_help = "⚠️ Year not detected - please enter manually"
-                    
-                    new_year = st.number_input(
-                        "Projected Year",
-                        min_value=2020,
-                        max_value=2100,
-                        value=year_value,
-                        step=1,
-                        key=f"scenario_year_{idx}",
-                        label_visibility="collapsed",
-                        help=year_help
-                    )
-                
-                with col3:
-                    st.metric("Parameters", len(scenario.get('items', [])))
-                
-                # Store edits temporarily (not in session_state yet)
-                scenario_edits.append({
-                    'idx': idx,
-                    'title': new_title,
-                    'horizon': int(new_year)
-                })
-                
-                st.markdown("---")
+            with col1:
+                st.markdown(f"**{scenario.get('title', f'Scenario {idx+1}')}**")
             
-            # Show info inside form
-            total_params = sum(len(s['items']) for s in st.session_state.detected_scenarios)
-            st.info(f"✅ **{len(st.session_state.detected_scenarios)} scenario(s)** detected with **{total_params} total parameters**")
+            with col2:
+                horizon = scenario.get('horizon')
+                if horizon:
+                    st.caption(f"📅 Target: {horizon}")
+                else:
+                    st.caption("📅 No target year")
             
-            st.markdown("---")
-            
-            # Form submit button
-            col_btn1, col_btn2 = st.columns([2, 3])
-            
-            with col_btn1:
-                form_submitted = st.form_submit_button(
-                    "✅ Confirm & Edit Parameters",
-                    type="primary",
-                    use_container_width=True
-                )
-            
-            with col_btn2:
-                st.caption("Confirm scenario names and years, then edit parameter values")
+            with col3:
+                st.metric("Params", len(scenario.get('items', [])))
         
-        # === HANDLE FORM SUBMISSION ===
-        if form_submitted:
-            # Apply all edits at once
-            for edit in scenario_edits:
-                idx = edit['idx']
-                if idx < len(st.session_state.detected_scenarios):
-                    st.session_state.detected_scenarios[idx]['title'] = edit['title']
-                    st.session_state.detected_scenarios[idx]['horizon'] = edit['horizon']
-            
-            # Show comparison table
-            st.session_state.show_comparison_table = True
-            st.session_state.parameters_reviewed = True
-            st.rerun()
+        # Show info
+        total_params = sum(len(s['items']) for s in st.session_state.detected_scenarios)
+        st.info(f"✅ **{len(st.session_state.detected_scenarios)} scenario(s)** with **{total_params} total parameters**")
         
         # Re-analyze button (outside form)
         col_info1, col_info2 = st.columns([2, 1])
@@ -1317,10 +1246,7 @@ Renewable energy reaches 40% by 2040.""",
         if st.session_state.get('show_comparison_table', False):
             st.markdown("---")
             st.subheader("📊 Step 3: Edit Parameter Values")
-            st.caption("Review and edit all parameters in one table, grouped by category")
-            
-            # Info about data availability
-            st.info("💡 **Data Auto-Saved:** Parameter values are automatically available for Page 10 and other pages. Click '💾 Save All Changes' after editing to update.")
+            st.caption("All changes save automatically and sync to Page 10 in real-time")
             
             display_editable_comparison_table()
 
