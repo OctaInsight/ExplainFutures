@@ -211,6 +211,10 @@ def main():
             progress_bar.empty()
             
             st.success("✅ Training complete!")
+            
+            # Mark that models are trained
+            st.session_state.models_evaluated = True
+            
             st.rerun()
         
         # Don't continue until training is done
@@ -268,7 +272,7 @@ def main():
     
     # === INTERACTIVE MATRIX ===
     st.markdown("#### 🎯 Model Evaluation Matrix")
-    st.caption("Click cells to see details. Selected models highlighted in blue.")
+    st.caption("Click 'Select' button to choose model and view details. Selected models highlighted in blue.")
     
     # Build matrix data
     matrix_data = {}
@@ -295,10 +299,29 @@ def main():
                     'r2': test_metrics.get('r2', np.nan),
                     'mae': test_metrics.get('mae', np.nan),
                     'rmse': test_metrics.get('rmse', np.nan),
-                    'mape': test_metrics.get('mape', np.nan)
+                    'mape': test_metrics.get('mape', np.nan),
+                    'model_data': model_data
                 }
             else:
                 matrix_data[param][model_name] = None
+    
+    # === AUTO-SELECT BEST MODELS (before displaying matrix) ===
+    for param in params_to_forecast:
+        if param not in st.session_state.trajectory_selected_models:
+            if param in matrix_data:
+                # Find best model by health_index
+                best_model = None
+                best_health = -np.inf
+                
+                for model, metrics in matrix_data[param].items():
+                    if metrics:
+                        health = metrics.get('health_index', -np.inf)
+                        if health > best_health:
+                            best_health = health
+                            best_model = model
+                
+                if best_model:
+                    st.session_state.trajectory_selected_models[param] = best_model
     
     # Collect all metric values for color scaling
     all_metric_values = []
@@ -337,13 +360,13 @@ def main():
                 else:
                     metric_value = metrics.get(metric_display, np.nan)
                     
-                    # Check if selected
+                    # Check if selected (NOW THIS WORKS IMMEDIATELY)
                     is_selected = (param in st.session_state.trajectory_selected_models and 
                                  st.session_state.trajectory_selected_models[param] == model)
                     
                     # Get color
                     if is_selected:
-                        bg_color = '#4682B4'
+                        bg_color = '#4682B4'  # Blue for selected
                         text_color = 'white'
                     elif np.isnan(metric_value):
                         bg_color = '#C8C8C8'
@@ -380,37 +403,89 @@ def main():
                     
                     st.markdown(button_html, unsafe_allow_html=True)
                     
-                    # Selection button
+                    # Selection button - NOW SHOWS VISUALIZATION
                     if st.button(
-                        "Select",
+                        "Select" if not is_selected else "✓ Selected",
                         key=f"select_{param}_{model}",
+                        type="primary" if is_selected else "secondary",
                         use_container_width=True
                     ):
+                        # SELECT THIS MODEL
                         st.session_state.trajectory_selected_models[param] = model
+                        
+                        # SHOW DETAILS BELOW
+                        st.session_state.show_model_details = {
+                            'variable': param,
+                            'model': model,
+                            'metrics': metrics
+                        }
                         st.rerun()
     
     st.markdown("---")
     
-    # === AUTO-SELECT BEST IF NOT SELECTED ===
-    for param in params_to_forecast:
-        if param not in st.session_state.trajectory_selected_models:
-            if param in matrix_data:
-                # Find best model by health_index
-                best_model = None
-                best_health = -np.inf
-                
-                for model, metrics in matrix_data[param].items():
-                    if metrics:
-                        health = metrics.get('health_index', -np.inf)
-                        if health > best_health:
-                            best_health = health
-                            best_model = model
-                
-                if best_model:
-                    st.session_state.trajectory_selected_models[param] = best_model
+    # === SHOW MODEL VISUALIZATION (if clicked) ===
+    if 'show_model_details' in st.session_state and st.session_state.show_model_details:
+        details = st.session_state.show_model_details
+        variable = details['variable']
+        model = details['model']
+        metrics = details['metrics']
+        
+        st.markdown("---")
+        st.markdown(f"### 📊 {variable} - {model} Performance")
+        
+        col_close1, col_close2 = st.columns([5, 1])
+        with col_close2:
+            if st.button("✖ Close", key="close_viz"):
+                st.session_state.show_model_details = None
+                st.rerun()
+        
+        # Show metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Health Index", f"{int(metrics['health_index'])}/100")
+        with col2:
+            st.metric("R²", f"{metrics['r2']:.4f}")
+        with col3:
+            st.metric("MAE", f"{metrics['mae']:.4f}")
+        with col4:
+            st.metric("RMSE", f"{metrics['rmse']:.4f}")
+        
+        # Create visualization (same as Page 7)
+        try:
+            var_results = st.session_state.trained_models[variable]
+            split_data = var_results.get('train_test_split', {})
+            
+            train_values = split_data.get('train_values', np.array([]))
+            test_values = split_data.get('test_values', np.array([]))
+            train_timestamps = split_data.get('train_timestamps', pd.DatetimeIndex([]))
+            test_timestamps = split_data.get('test_timestamps', pd.DatetimeIndex([]))
+            split_index = split_data.get('split_index', 0)
+            
+            fig = create_model_comparison_plot(
+                variable_name=variable,
+                train_values=train_values,
+                test_values=test_values,
+                train_timestamps=train_timestamps,
+                test_timestamps=test_timestamps,
+                model_results=var_results,
+                selected_models=[model],
+                split_index=split_index
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Export buttons
+            if VISUALIZATION_AVAILABLE:
+                with st.expander("💾 Export Figure"):
+                    quick_export_buttons(fig, f"{variable}_{model}_trajectory_eval", ['png', 'pdf', 'html'])
+        
+        except Exception as e:
+            st.error(f"Error creating visualization: {str(e)}")
     
-    # === SHOW SELECTION SUMMARY ===
+    # === SELECTION SUMMARY ===
     if st.session_state.trajectory_selected_models:
+        st.markdown("---")
         st.markdown("### ✅ Selected Models Summary")
         
         summary_data = []
@@ -437,12 +512,32 @@ def main():
     # Check if all parameters have selected models
     missing_selections = [p for p in params_to_forecast if p not in st.session_state.trajectory_selected_models]
     
+    # Check if forecasts already completed
+    forecasts_completed = st.session_state.get('page12_forecasts_completed', False)
+    
     if missing_selections:
         st.warning(f"⚠️ {len(missing_selections)} parameter(s) need model selection")
         with st.expander("Show missing"):
             for param in missing_selections:
                 st.caption(f"• {param}")
+    elif forecasts_completed:
+        # FORECASTS ALREADY DONE
+        st.success("✅ **All forecasts have been generated successfully!**")
+        st.info("All forecast data has been saved and is available in Page 11")
+        
+        st.markdown("---")
+        
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("✅ Return to Trajectory Analysis", type="primary", use_container_width=True):
+                # Clear the helper state
+                st.session_state.pop('page12_forecasts_completed', None)
+                st.session_state.pop('show_model_details', None)
+                
+                # Navigate to Page 11
+                st.switch_page("pages/11_Trajectory-Scenario_Space.py")
     else:
+        # NOT YET FORECASTED - SHOW BUTTON
         st.info(f"Forecasting to: **{target_date.strftime('%Y-%m-%d')}**")
         
         if st.button("🔮 Generate Forecasts for All Parameters", type="primary", use_container_width=True):
@@ -560,31 +655,16 @@ def main():
             
             st.success("✅ All forecasts generated!")
             
-            # CRITICAL: Mark that forecasts are updated
-            st.session_state.trajectory_forecasts_updated = True
+            # CRITICAL: Mark forecasts as completed
+            st.session_state.page12_forecasts_completed = True
             
-            # CRITICAL: Force rebuild of master_parameter_df with new forecasts
-            st.session_state.master_parameter_df = None
+            # CRITICAL: Update all necessary session states
+            st.session_state.trajectory_forecasts_updated = True
+            st.session_state.master_parameter_df = None  # Force rebuild
+            st.session_state.projections_done = True  # Update workflow progress
             
             # Rerun to show return button
             st.rerun()
-    
-    # === RETURN BUTTON (show if forecasts completed) ===
-    if st.session_state.get('forecast_results'):
-        # Check if we have forecasts for the current parameters
-        forecasted_params = [p for p in params_to_forecast if p in st.session_state.forecast_results]
-        
-        if forecasted_params:
-            st.markdown("---")
-            st.success(f"✅ **{len(forecasted_params)}/{len(params_to_forecast)} parameter(s) forecasted!**")
-            
-            col1, col2, col3 = st.columns([1, 2, 1])
-            with col2:
-                if st.button("✅ Return to Trajectory Analysis", type="primary", use_container_width=True):
-                    # Force rebuild of master_parameter_df with new forecasts
-                    st.session_state.master_parameter_df = None
-                    # Navigate to Page 11
-                    st.switch_page("pages/11_Trajectory-Scenario_Space.py")
 
 
 if __name__ == "__main__":
