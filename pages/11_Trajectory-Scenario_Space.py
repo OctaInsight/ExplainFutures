@@ -565,25 +565,18 @@ def main():
     scenario_date = get_scenario_target_date()
     st.session_state.scenario_target_date = scenario_date
     
-    # === CRITICAL: REBUILD MASTER DF IMMEDIATELY IF RETURNING FROM PAGE 12 ===
-    if st.session_state.get('page12_forecasts_completed', False) or st.session_state.get('trajectory_forecasts_updated', False):
-        with st.spinner("🔄 Updating parameter database with new forecasts..."):
-            # Force complete rebuild
-            st.session_state.master_parameter_df = None
-            master_df = build_master_parameter_dataframe()
-            st.session_state.master_parameter_df = master_df
-            
-            # Clear flags
-            st.session_state.trajectory_forecasts_updated = False
-            
-            # Show success message
-            st.success("✅ Parameter database updated with new forecast data!")
+    # === FORCE REBUILD IF COMING FROM PAGE 12 ===
+    if st.session_state.get('force_master_rebuild', False):
+        st.info("🔄 Updating database with new forecast data...")
+        st.session_state.master_parameter_df = None
+        st.session_state.force_master_rebuild = False
     
     # === BUILD MASTER PARAMETER DATAFRAME ===
     if st.session_state.master_parameter_df is None:
         with st.spinner("Building master parameter database..."):
             master_df = build_master_parameter_dataframe()
             st.session_state.master_parameter_df = master_df
+            st.success("✅ Parameter database built with latest data!")
     else:
         master_df = st.session_state.master_parameter_df
     
@@ -792,28 +785,9 @@ def main():
             
             st.info("**Next Step:** Train models (if needed), evaluate, and forecast these parameters")
             
-            # Check if user just returned from Page 12
-            if st.session_state.get('page12_forecasts_completed', False):
-                st.warning("⚠️ **Just returned from Page 12 but some parameters still need forecasts.**")
-                st.info("💡 **Tip:** The page should have auto-refreshed. If you still see this message, click Refresh below.")
-                
-                col1, col2 = st.columns([1, 1])
-                
-                with col1:
-                    if st.button("🔄 Refresh & Recheck", type="primary", use_container_width=True):
-                        # Force complete rebuild and recheck
-                        st.session_state.master_parameter_df = None
-                        st.session_state.pop('page12_forecasts_completed', None)
-                        st.rerun()
-                
-                with col2:
-                    if st.button("🔮 Continue Forecasting", type="secondary", use_container_width=True):
-                        st.switch_page("pages/12_Forecasting_Helper.py")
-            else:
-                # Normal flow - show forecast button
-                if st.button("🔮 Train & Forecast Missing Parameters", type="primary", use_container_width=True):
-                    # Navigate to Page 12 Forecasting Helper
-                    st.switch_page("pages/12_Forecasting_Helper.py")
+            if st.button("🔮 Train & Forecast Missing Parameters", type="primary", use_container_width=True):
+                # Navigate to Page 12 Forecasting Helper
+                st.switch_page("pages/12_Forecasting_Helper.py")
             
             # Don't continue to baseline selection
             return
