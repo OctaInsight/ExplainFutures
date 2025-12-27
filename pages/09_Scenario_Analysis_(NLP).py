@@ -261,18 +261,18 @@ def display_editable_comparison_table():
         # Add value, direction, unit for each scenario
         for scenario in scenarios:
             scenario_id = scenario['id']
-            short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
+            scenario_title = scenario['title']  # FULL title, no truncation!
             
             if scenario_id in param_data['items_by_scenario']:
                 item = param_data['items_by_scenario'][scenario_id]
-                row[f"{short_title}_Value"] = item.get('value', 0.0) if item.get('value') is not None else 0.0
-                row[f"{short_title}_Direction"] = item.get('direction', 'target')
-                row[f"{short_title}_Unit"] = item.get('unit', '%')
+                row[f"{scenario_title}_Value"] = item.get('value', 0.0) if item.get('value') is not None else 0.0
+                row[f"{scenario_title}_Direction"] = item.get('direction', 'target')
+                row[f"{scenario_title}_Unit"] = item.get('unit', '%')
             else:
                 # Parameter doesn't exist in this scenario
-                row[f"{short_title}_Value"] = None
-                row[f"{short_title}_Direction"] = None
-                row[f"{short_title}_Unit"] = None
+                row[f"{scenario_title}_Value"] = None
+                row[f"{scenario_title}_Direction"] = None
+                row[f"{scenario_title}_Unit"] = None
         
         table_data.append(row)
     
@@ -283,8 +283,8 @@ def display_editable_comparison_table():
         # Empty table
         columns = ['Category', 'Parameter', '_sources']
         for scenario in scenarios:
-            short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
-            columns.extend([f"{short_title}_Value", f"{short_title}_Direction", f"{short_title}_Unit"])
+            scenario_title = scenario['title']  # FULL title!
+            columns.extend([f"{scenario_title}_Value", f"{scenario_title}_Direction", f"{scenario_title}_Unit"])
         df = pd.DataFrame(columns=columns)
     
     # Remove internal columns from display
@@ -308,41 +308,32 @@ def display_editable_comparison_table():
     
     # Add config for each scenario's columns
     for scenario in scenarios:
-        short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
+        scenario_title = scenario['title']  # FULL title!
         
-        column_config[f"{short_title}_Value"] = st.column_config.NumberColumn(
-            f"{short_title} (Value)",
-            help=f"Value for {scenario['title']}",
+        column_config[f"{scenario_title}_Value"] = st.column_config.NumberColumn(
+            f"{scenario_title} (Value)",
+            help=f"Value for {scenario_title}",
             min_value=0.0,
             max_value=1000000.0,
             format="%.2f",
             width="small"
         )
         
-        column_config[f"{short_title}_Direction"] = st.column_config.SelectboxColumn(
-            f"{short_title} (Dir)",
-            help=f"Direction for {scenario['title']}",
+        column_config[f"{scenario_title}_Direction"] = st.column_config.SelectboxColumn(
+            f"{scenario_title} (Dir)",
+            help=f"Direction for {scenario_title}",
             options=["increase", "decrease", "target", "stable", "double", "halve"],
             width="small"
         )
         
-        column_config[f"{short_title}_Unit"] = st.column_config.SelectboxColumn(
-            f"{short_title} (Unit)",
-            help=f"Unit for {scenario['title']}",
+        column_config[f"{scenario_title}_Unit"] = st.column_config.SelectboxColumn(
+            f"{scenario_title} (Unit)",
+            help=f"Unit for {scenario_title}",
             options=["", "%", "absolute", "billion", "million", "thousand", "MtCO2", "GtCO2", "GW", "MW", "TWh"],
             width="small"
         )
     
-    st.caption("💡 Edit Category column to rename categories or reassign parameters • All columns are editable • Changes save automatically")
-    
-    # Define callback function for auto-saving
-    def auto_save_table_changes():
-        """Auto-save callback - runs whenever table is edited"""
-        if 'one_table_editor' in st.session_state:
-            edited_df = st.session_state.one_table_editor
-            save_table_to_scenarios(edited_df, st.session_state.detected_scenarios)
-            # Update for Page 10
-            st.session_state.scenario_parameters = st.session_state.detected_scenarios
+    st.caption("💡 Edit Category column to rename categories or reassign parameters • All columns are editable")
     
     edited_df = st.data_editor(
         display_df,
@@ -350,12 +341,8 @@ def display_editable_comparison_table():
         num_rows="dynamic",
         use_container_width=True,
         hide_index=True,
-        key="one_table_editor",
-        on_change=auto_save_table_changes  # AUTO-SAVE on every edit
+        key="one_table_editor"
     )
-    
-    # Info message
-    st.success("✅ All changes are automatically saved and synced to Page 10")
     
     # Download parameter table
     st.markdown("**📥 Download Parameter Table**")
@@ -382,6 +369,15 @@ def display_editable_comparison_table():
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
+    
+    # Save button
+    st.markdown("---")
+    if st.button("💾 Save All Changes", type="primary", use_container_width=True):
+        save_table_to_scenarios(edited_df, scenarios)
+        # Update scenario_parameters for Page 10
+        st.session_state.scenario_parameters = st.session_state.detected_scenarios
+        st.success("✅ All changes saved! Data updated for Page 10.")
+        st.rerun()
 
 
 def categorize_parameter(param_name: str) -> str:
@@ -462,12 +458,12 @@ def save_table_to_scenarios(edited_df, scenarios):
         
         # Add this parameter to each scenario
         for scenario in scenarios:
-            short_title = scenario['title'][:20] if len(scenario['title']) > 20 else scenario['title']
+            scenario_title = scenario['title']  # FULL title!
             
             # Get value, direction, unit for this scenario
-            value_col = f"{short_title}_Value"
-            dir_col = f"{short_title}_Direction"
-            unit_col = f"{short_title}_Unit"
+            value_col = f"{scenario_title}_Value"
+            dir_col = f"{scenario_title}_Direction"
+            unit_col = f"{scenario_title}_Unit"
             
             value = row.get(value_col)
             direction = row.get(dir_col)
@@ -1132,6 +1128,7 @@ Renewable energy reaches 40% by 2040.""",
                         item = {
                             'parameter': row['parameter'],
                             'parameter_canonical': row['parameter_normalized'],
+                            'category': categorize_parameter(row['parameter_normalized']),  # AUTO-ASSIGN category!
                             'direction': row['direction'],
                             'value': row['value'],
                             'unit': row['unit'],
@@ -1234,24 +1231,25 @@ Renewable energy reaches 40% by 2040.""",
                     year_value = int(horizon_value)
                     year_help = f"Extracted year: {year_value}"
                 else:
-                    # No year extracted - show current year + 10 as placeholder
-                    year_value = datetime.now().year + 10
+                    # No year extracted - leave empty (use 2025 as minimum but don't set as default)
+                    year_value = 2025  # This is just the min_value, not default
                     year_help = "⚠️ Year not detected - please enter manually"
                 
                 new_year = st.number_input(
                     "Projected Year",
                     min_value=2020,
                     max_value=2100,
-                    value=year_value,
+                    value=year_value if horizon_value is not None else 2025,  # Only show extracted year
                     step=1,
                     key=f"scenario_year_{idx}",
                     label_visibility="collapsed",
-                    help=year_help
+                    help=year_help,
+                    placeholder="Enter year" if horizon_value is None else None
                 )
                 # Auto-save on change
                 if new_year != scenario.get('horizon'):
                     st.session_state.detected_scenarios[idx]['horizon'] = int(new_year)
-                    # Update scenario_parameters for Page 10
+                    # Update scenario_parameters for Page 10 (initial data)
                     st.session_state.scenario_parameters = st.session_state.detected_scenarios
             
             with col3:
