@@ -1,6 +1,5 @@
 """
-Page 12: Forecasting Helper (HIDDEN - Not in sidebar)
-Train, evaluate, and forecast parameters needed for trajectory analysis
+Page 12: Forecast Missing Parameters
 """
 
 import streamlit as st
@@ -569,22 +568,18 @@ def main():
     elif forecasts_completed:
         # FORECASTS ALREADY DONE
         st.success("✅ **All forecasts have been generated successfully!**")
-        st.info("All forecast data has been saved and is available in Page 11")
+        st.info("All forecast data has been saved. You can now proceed to Trajectory-Scenario Space visualization.")
         
         st.markdown("---")
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if st.button("✅ Return to Trajectory Analysis", type="primary", use_container_width=True):
-                # CRITICAL: Clear ALL caches and force complete rebuild
-                st.session_state.master_parameter_df = None
+            if st.button("🎯 Continue to Trajectory-Scenario Space →", type="primary", use_container_width=True):
+                # Clear completion flag
                 st.session_state.pop('page12_forecasts_completed', None)
                 
-                # Force Page 11 to rebuild immediately
-                st.session_state.force_master_rebuild = True
-                
-                # Navigate to Page 11
-                st.switch_page("pages/11_Trajectory-Scenario_Space.py")
+                # Navigate to Page 13
+                st.switch_page("pages/13_Trajectory-Scenario_Space.py")
     else:
         # NOT YET FORECASTED - SHOW BUTTON
         st.info(f"Forecasting to: **{target_date.strftime('%Y-%m-%d')}**")
