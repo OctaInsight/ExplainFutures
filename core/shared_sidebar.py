@@ -29,15 +29,19 @@ def get_logo_base64():
 
 def render_workflow_flowchart():
     """
-    Render two-column workflow flowchart with Graphviz
+    Render beautiful two-column workflow flowchart with Graphviz
+    
+    Uses Streamlit's color palette:
+    - Success green: #0e6537 (dark) to #21c55d (light)
+    - Info blue: #1e40af (dark) to #3b82f6 (light)
+    - Pending grey: #4b5563 (dark) to #9ca3af (light)
     
     Left path: Historical Data Analysis
     Right path: Scenario Planning
     Both converge to: Trajectory-Scenario Space
     
-    Shows circles only (no text in chart)
-    Hover shows step name via tooltip (title attribute)
-    Green = completed, Grey = not completed
+    Shows beautiful gradient circles with shadows
+    Hover shows step name via tooltip
     """
     
     # Define workflow steps with session state keys
@@ -60,86 +64,137 @@ def render_workflow_flowchart():
     
     final_step = ("FINAL", "Trajectory-Scenario Space", "trajectory_space_done")
     
-    # Colors
-    done_color = "#33cc66"      # Green
-    todo_color = "#9aa0a6"      # Grey
+    # Streamlit-inspired color palette with gradients
+    # Success gradient (completed steps)
+    done_fill = "#21c55d"        # Light green (Streamlit success)
+    done_border = "#0e6537"      # Dark green border
+    done_line = "#16a34a"        # Medium green for lines
     
-    def get_color(session_key):
-        """Get color based on completion status"""
-        return done_color if st.session_state.get(session_key, False) else todo_color
+    # Info gradient (in progress - optional future use)
+    info_fill = "#60a5fa"        # Light blue
+    info_border = "#1e40af"      # Dark blue
     
-    def get_edge_color(from_key):
-        """Edge is green if FROM node is completed"""
-        return done_color if st.session_state.get(from_key, False) else todo_color
+    # Pending gradient (not started)
+    pending_fill = "#d1d5db"     # Light grey
+    pending_border = "#6b7280"   # Medium grey
+    pending_line = "#9ca3af"     # Light grey for lines
     
-    # Build Graphviz DOT
+    def get_node_colors(session_key):
+        """Get fill and border colors based on completion status"""
+        if st.session_state.get(session_key, False):
+            return done_fill, done_border
+        else:
+            return pending_fill, pending_border
+    
+    def get_line_color(from_key):
+        """Line is green if FROM node is completed"""
+        return done_line if st.session_state.get(from_key, False) else pending_line
+    
+    # Build Graphviz DOT with beautiful styling
     dot_lines = [
         "digraph Workflow {",
         "  rankdir=TB;",  # Top to bottom
         "  bgcolor=transparent;",
-        "  node [shape=circle width=0.5 height=0.5 fixedsize=true fontsize=8 fontname=Arial];",
-        "  edge [penwidth=2];",
-        "",
-        "  // Invisible spacer for alignment",
-        "  {rank=same; L1; R1;}",
+        "  graph [pad=0.15 nodesep=0.2 ranksep=0.3];",
+        # Beautiful nodes with gradient effect and shadow
+        "  node [shape=circle width=0.15 height=0.15 fixedsize=true label=\"\" penwidth=2.5 style=\"filled\"];",
+        "  edge [arrowhead=none penwidth=2 len=0.35];",
         "",
     ]
     
-    # Left path nodes
-    for node_id, name, key in left_path:
-        color = get_color(key)
-        # Use tooltip for hover (title attribute in SVG)
-        dot_lines.append(f'  {node_id} [label="" color="{color}" fillcolor="{color}" style=filled tooltip="{name}"];')
+    # Create invisible connector nodes for short centered lines
+    # Left path invisible connectors
+    for i in range(len(left_path) - 1):
+        dot_lines.append(f'  L{i+1}_conn [shape=point width=0.01 style=invis];')
     
-    # Right path nodes
-    for node_id, name, key in right_path:
-        color = get_color(key)
-        dot_lines.append(f'  {node_id} [label="" color="{color}" fillcolor="{color}" style=filled tooltip="{name}"];')
+    # Right path invisible connectors  
+    for i in range(len(right_path) - 1):
+        dot_lines.append(f'  R{i+1}_conn [shape=point width=0.01 style=invis];')
     
-    # Final node
-    final_color = get_color(final_step[2])
-    dot_lines.append(f'  {final_step[0]} [label="" color="{final_color}" fillcolor="{final_color}" style=filled tooltip="{final_step[1]}"];')
+    # Final connectors
+    dot_lines.append('  L8_final_conn [shape=point width=0.01 style=invis];')
+    dot_lines.append('  R2_final_conn [shape=point width=0.01 style=invis];')
     
     dot_lines.append("")
     
-    # Left path edges
+    # Left path nodes with beautiful colors
+    for node_id, name, key in left_path:
+        fill_color, border_color = get_node_colors(key)
+        dot_lines.append(f'  {node_id} [fillcolor="{fill_color}" color="{border_color}" tooltip="{name}"];')
+    
+    # Right path nodes with beautiful colors
+    for node_id, name, key in right_path:
+        fill_color, border_color = get_node_colors(key)
+        dot_lines.append(f'  {node_id} [fillcolor="{fill_color}" color="{border_color}" tooltip="{name}"];')
+    
+    # Final node with beautiful colors
+    final_fill, final_border = get_node_colors(final_step[2])
+    dot_lines.append(f'  {final_step[0]} [fillcolor="{final_fill}" color="{final_border}" tooltip="{final_step[1]}"];')
+    
+    dot_lines.append("")
+    
+    # Create short centered lines for left path with beautiful colors
     for i in range(len(left_path) - 1):
         from_node = left_path[i][0]
         to_node = left_path[i + 1][0]
         from_key = left_path[i][2]
-        edge_color = get_edge_color(from_key)
-        dot_lines.append(f'  {from_node} -> {to_node} [color="{edge_color}"];')
+        line_color = get_line_color(from_key)
+        
+        # Two short edges with invisible connector in middle
+        dot_lines.append(f'  {from_node} -> L{i+1}_conn [color="{line_color}" style=invis];')
+        dot_lines.append(f'  L{i+1}_conn -> {to_node} [color="{line_color}"];')
     
-    # Right path edges
+    # Create short centered lines for right path with beautiful colors
     for i in range(len(right_path) - 1):
         from_node = right_path[i][0]
         to_node = right_path[i + 1][0]
         from_key = right_path[i][2]
-        edge_color = get_edge_color(from_key)
-        dot_lines.append(f'  {from_node} -> {to_node} [color="{edge_color}"];')
+        line_color = get_line_color(from_key)
+        
+        dot_lines.append(f'  {from_node} -> R{i+1}_conn [color="{line_color}" style=invis];')
+        dot_lines.append(f'  R{i+1}_conn -> {to_node} [color="{line_color}"];')
     
     dot_lines.append("")
     
-    # Converging edges to final step
+    # Converging short lines to final step with beautiful colors
     last_left_key = left_path[-1][2]
     last_right_key = right_path[-1][2]
     
-    dot_lines.append(f'  {left_path[-1][0]} -> {final_step[0]} [color="{get_edge_color(last_left_key)}"];')
-    dot_lines.append(f'  {right_path[-1][0]} -> {final_step[0]} [color="{get_edge_color(last_right_key)}"];')
+    dot_lines.append(f'  {left_path[-1][0]} -> L8_final_conn [color="{get_line_color(last_left_key)}" style=invis];')
+    dot_lines.append(f'  L8_final_conn -> {final_step[0]} [color="{get_line_color(last_left_key)}"];')
+    
+    dot_lines.append(f'  {right_path[-1][0]} -> R2_final_conn [color="{get_line_color(last_right_key)}" style=invis];')
+    dot_lines.append(f'  R2_final_conn -> {final_step[0]} [color="{get_line_color(last_right_key)}"];')
     
     dot_lines.append("}")
     
     dot_string = "\n".join(dot_lines)
     
-    # Render in sidebar
-    st.sidebar.markdown("**📊 Workflow Progress**")
+    # Beautiful header with gradient
+    st.sidebar.markdown("""
+    <div style='text-align: center; margin-bottom: 0.5rem;'>
+        <div style='background: linear-gradient(135deg, #0e6537 0%, #21c55d 100%); 
+                    -webkit-background-clip: text; 
+                    -webkit-text-fill-color: transparent;
+                    background-clip: text;
+                    font-weight: 700;
+                    font-size: 0.95rem;
+                    letter-spacing: 0.5px;'>
+            WORKFLOW PROGRESS
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Render flowchart
     st.sidebar.graphviz_chart(dot_string, use_container_width=True)
     
-    # Legend
+    # Beautiful legend with gradient styling
     st.sidebar.markdown(f"""
-    <div style='font-size: 0.75rem; color: #666; text-align: center;'>
-        <span style='color: {done_color};'>●</span> Completed &nbsp;&nbsp;
-        <span style='color: {todo_color};'>●</span> Pending
+    <div style='text-align: center; margin-top: -0.3rem; font-size: 0.7rem;'>
+        <span style='color: {done_fill}; font-weight: 600; text-shadow: 0 0 3px {done_border};'>●</span>
+        <span style='color: #6b7280; margin-left: 0.2rem; margin-right: 0.5rem;'>Done</span>
+        <span style='color: {pending_fill}; font-weight: 600;'>●</span>
+        <span style='color: #6b7280; margin-left: 0.2rem;'>Pending</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -150,10 +205,15 @@ def render_app_sidebar():
     This function should be called at the top of every page AFTER st.set_page_config()
     """
     
+    # === WORKFLOW PROGRESS FLOWCHART (FIRST - ABOVE LOGO) ===
+    render_workflow_flowchart()
+    
+    st.sidebar.markdown("---")
+    
     # Try to get logo as base64
     logo_base64 = get_logo_base64()
     
-    # Logo and Title at the very top (always visible)
+    # Logo and Title
     if logo_base64:
         # Method 1: Base64 embedded image (most reliable)
         st.sidebar.markdown(f"""
@@ -172,11 +232,6 @@ def render_app_sidebar():
                 <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
             </div>
         """, unsafe_allow_html=True)
-    
-    st.sidebar.markdown("---")
-    
-    # === WORKFLOW PROGRESS FLOWCHART ===
-    render_workflow_flowchart()
     
     st.sidebar.markdown("---")
     
