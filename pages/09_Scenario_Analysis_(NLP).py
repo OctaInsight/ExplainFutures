@@ -1226,31 +1226,54 @@ Renewable energy reaches 40% by 2040.""",
                 # Get horizon value from NLP extraction
                 horizon_value = scenario.get('horizon')
                 
-                # Display the extracted year or allow user to enter
+                # Use text input if no year detected (allows empty), number input if detected
                 if horizon_value is not None and isinstance(horizon_value, (int, float)):
+                    # Year was detected - use number input
                     year_value = int(horizon_value)
-                    year_help = f"Extracted year: {year_value}"
+                    
+                    new_year = st.number_input(
+                        "Scenario Target Date",
+                        min_value=2020,
+                        max_value=2100,
+                        value=year_value,
+                        step=1,
+                        key=f"scenario_year_{idx}",
+                        label_visibility="collapsed",
+                        help=f"Extracted year: {year_value}"
+                    )
+                    # Auto-save on change
+                    if new_year != scenario.get('horizon'):
+                        st.session_state.detected_scenarios[idx]['horizon'] = int(new_year)
+                        st.session_state.scenario_parameters = st.session_state.detected_scenarios
                 else:
-                    # No year extracted - leave empty (use 2025 as minimum but don't set as default)
-                    year_value = 2025  # This is just the min_value, not default
-                    year_help = "⚠️ Year not detected - please enter manually"
-                
-                new_year = st.number_input(
-                    "Projected Year",
-                    min_value=2020,
-                    max_value=2100,
-                    value=year_value if horizon_value is not None else 2025,  # Only show extracted year
-                    step=1,
-                    key=f"scenario_year_{idx}",
-                    label_visibility="collapsed",
-                    help=year_help,
-                    placeholder="Enter year" if horizon_value is None else None
-                )
-                # Auto-save on change
-                if new_year != scenario.get('horizon'):
-                    st.session_state.detected_scenarios[idx]['horizon'] = int(new_year)
-                    # Update scenario_parameters for Page 10 (initial data)
-                    st.session_state.scenario_parameters = st.session_state.detected_scenarios
+                    # Year NOT detected - use text input (can be empty)
+                    current_year_text = str(horizon_value) if horizon_value else ""
+                    
+                    new_year_text = st.text_input(
+                        "Scenario Target Date",
+                        value=current_year_text,
+                        key=f"scenario_year_{idx}",
+                        label_visibility="collapsed",
+                        placeholder="Enter year (e.g., 2040)",
+                        help="⚠️ Year not detected - please enter manually (or leave empty)"
+                    )
+                    
+                    # Validate and save if user enters a year
+                    if new_year_text.strip():
+                        try:
+                            new_year_int = int(new_year_text)
+                            if 2020 <= new_year_int <= 2100:
+                                if new_year_int != scenario.get('horizon'):
+                                    st.session_state.detected_scenarios[idx]['horizon'] = new_year_int
+                                    st.session_state.scenario_parameters = st.session_state.detected_scenarios
+                            else:
+                                st.error(f"Year must be between 2020 and 2100")
+                        except ValueError:
+                            st.error(f"Please enter a valid year (numbers only)")
+                    elif scenario.get('horizon') is not None:
+                        # User cleared the field - remove year
+                        st.session_state.detected_scenarios[idx]['horizon'] = None
+                        st.session_state.scenario_parameters = st.session_state.detected_scenarios
             
             with col3:
                 st.metric("Params", len(scenario.get('items', [])))
