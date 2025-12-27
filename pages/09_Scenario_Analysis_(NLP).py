@@ -1203,24 +1203,61 @@ Renewable energy reaches 40% by 2040.""",
         
         # === SCENARIO SUMMARY TABLE ===
         st.markdown("**Detected Scenarios:**")
-        st.caption("✏️ Scenario names and years (auto-saved)")
+        st.caption("✏️ Edit scenario names and projected years (changes save automatically)")
         
-        # Simple display of scenario info (no form needed - already confirmed by NLP)
+        # Editable scenario info with auto-save on change
         for idx, scenario in enumerate(st.session_state.detected_scenarios):
+            st.markdown(f"**Scenario {idx + 1}:**")
+            
             col1, col2, col3 = st.columns([3, 2, 1])
             
             with col1:
-                st.markdown(f"**{scenario.get('title', f'Scenario {idx+1}')}**")
+                new_title = st.text_input(
+                    "Scenario Name",
+                    value=scenario.get('title', f'Scenario {idx+1}'),
+                    key=f"scenario_name_{idx}",
+                    label_visibility="collapsed",
+                    placeholder="Enter scenario name"
+                )
+                # Auto-save on change
+                if new_title != scenario.get('title'):
+                    st.session_state.detected_scenarios[idx]['title'] = new_title
+                    # Update scenario_parameters for Page 10
+                    st.session_state.scenario_parameters = st.session_state.detected_scenarios
             
             with col2:
-                horizon = scenario.get('horizon')
-                if horizon:
-                    st.caption(f"📅 Target: {horizon}")
+                # Get horizon value from NLP extraction
+                horizon_value = scenario.get('horizon')
+                
+                # Display the extracted year or allow user to enter
+                if horizon_value is not None and isinstance(horizon_value, (int, float)):
+                    year_value = int(horizon_value)
+                    year_help = f"Extracted year: {year_value}"
                 else:
-                    st.caption("📅 No target year")
+                    # No year extracted - show current year + 10 as placeholder
+                    year_value = datetime.now().year + 10
+                    year_help = "⚠️ Year not detected - please enter manually"
+                
+                new_year = st.number_input(
+                    "Projected Year",
+                    min_value=2020,
+                    max_value=2100,
+                    value=year_value,
+                    step=1,
+                    key=f"scenario_year_{idx}",
+                    label_visibility="collapsed",
+                    help=year_help
+                )
+                # Auto-save on change
+                if new_year != scenario.get('horizon'):
+                    st.session_state.detected_scenarios[idx]['horizon'] = int(new_year)
+                    # Update scenario_parameters for Page 10
+                    st.session_state.scenario_parameters = st.session_state.detected_scenarios
             
             with col3:
                 st.metric("Params", len(scenario.get('items', [])))
+            
+            st.markdown("---")
         
         # Show info
         total_params = sum(len(s['items']) for s in st.session_state.detected_scenarios)
