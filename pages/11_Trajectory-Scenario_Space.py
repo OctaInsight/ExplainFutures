@@ -746,6 +746,13 @@ def main():
         st.subheader("✅ Step 1b: Validate Forecast Coverage")
         st.caption("Checking if all parameters have forecasts extending to scenario date...")
         
+        # REBUILD master_df if forecasts were updated in Page 12
+        if st.session_state.get('trajectory_forecasts_updated', False):
+            with st.spinner("Rebuilding parameter database with new forecasts..."):
+                master_df = build_master_parameter_dataframe()
+                st.session_state.master_parameter_df = master_df
+                st.session_state.trajectory_forecasts_updated = False  # Reset flag
+        
         coverage = check_forecast_coverage(
             st.session_state.parameter_mappings,
             master_df,
@@ -754,6 +761,12 @@ def main():
         
         if coverage['all_covered']:
             st.success(f"✅ All parameters have forecast data extending to {scenario_date.strftime('%Y-%m-%d')}!")
+            
+            # Clear the Page 12 completion flag since we're back and everything is good
+            if 'page12_forecasts_completed' in st.session_state:
+                st.session_state.pop('page12_forecasts_completed')
+            
+            # CONTINUE to baseline selection (don't return - let user proceed)
         else:
             st.error(f"❌ {len(coverage['missing_params'])} parameter(s) need forecasting to reach scenario date")
             
@@ -763,14 +776,14 @@ def main():
             
             st.markdown("---")
             
-            # Store parameters for Page 11b
+            # Store parameters for Page 12
             st.session_state.trajectory_forecast_params = coverage['missing_params']
             st.session_state.trajectory_forecast_target = scenario_date
             
             st.info("**Next Step:** Train models (if needed), evaluate, and forecast these parameters")
             
             if st.button("🔮 Train & Forecast Missing Parameters", type="primary", use_container_width=True):
-                # Navigate to helper page in main directory (not in sidebar)
+                # Navigate to Page 12 Forecasting Helper
                 st.switch_page("pages/12_Forecasting_Helper.py")
             
             # Don't continue to baseline selection
