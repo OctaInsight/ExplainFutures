@@ -1,5 +1,5 @@
 """
-Page 12: Trajectory Forecasting Helper (HIDDEN - Not in sidebar)
+Page 12: Forecasting Helper (HIDDEN - Not in sidebar)
 Train, evaluate, and forecast parameters needed for trajectory analysis
 """
 
@@ -17,14 +17,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# Render shared sidebar
-render_app_sidebar()
-
 # Add project root to path
-project_root = Path(__file__).parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.config import initialize_session_state
+from core.shared_sidebar import render_app_sidebar
 from core.models.data_preparation import get_series_data
 from core.models.model_trainer import train_all_models_for_variable
 
@@ -38,6 +36,9 @@ except ImportError:
 
 # Initialize
 initialize_session_state()
+
+# Render shared sidebar
+render_app_sidebar()
 
 # === PAGE TITLE ===
 st.title("🔮 Train & Forecast Missing Parameters")
@@ -101,170 +102,6 @@ def get_metric_color(value: float, metric: str, all_values: list) -> str:
         b = 0
     
     return f'rgb({r}, {g}, {b})'
-
-
-def display_cell_details(param: str, model: str, var_results: dict):
-    """
-    Display detailed information for a selected model (like Page 7)
-    
-    Parameters:
-    -----------
-    param : str
-        Parameter name
-    model : str
-        Model name
-    var_results : dict
-        Variable results from trained_models
-    """
-    st.markdown(f"### 📊 {param} - {model}")
-    
-    # Find model data
-    model_data = None
-    for tier_name in ['tier1_math', 'tier2_timeseries', 'tier3_ml']:
-        if model in var_results.get(tier_name, {}):
-            model_data = var_results[tier_name][model]
-            break
-    
-    if not model_data:
-        st.error("Model data not found")
-        return
-    
-    # Health Index
-    metrics_info = model_data.get('test_metrics', {})
-    health_index = calculate_health_index(metrics_info)
-    
-    if health_index >= 80:
-        health_color = "🟢"
-        health_label = "Excellent"
-    elif health_index >= 60:
-        health_color = "🟡"
-        health_label = "Good"
-    elif health_index >= 40:
-        health_color = "🟠"
-        health_label = "Fair"
-    else:
-        health_color = "🔴"
-        health_label = "Poor"
-    
-    st.markdown(f"## {health_color} Health Index: {health_index}/100 ({health_label})")
-    st.progress(health_index / 100)
-    
-    st.markdown("---")
-    
-    # Metrics display
-    col1, col2, col3, col4 = st.columns(4)
-    
-    test_metrics = model_data.get('test_metrics', {})
-    
-    with col1:
-        r2 = test_metrics.get('r2', 0)
-        st.metric("R² Score", f"{r2:.4f}")
-    
-    with col2:
-        mae = test_metrics.get('mae', 0)
-        st.metric("MAE", f"{mae:.4f}")
-    
-    with col3:
-        rmse = test_metrics.get('rmse', 0)
-        st.metric("RMSE", f"{rmse:.4f}")
-    
-    with col4:
-        mape = test_metrics.get('mape', np.nan)
-        if not np.isnan(mape):
-            st.metric("MAPE", f"{mape:.2f}%")
-        else:
-            st.metric("MAPE", "N/A")
-    
-    # Model equation
-    equation = model_data.get('equation', 'N/A')
-    if equation != 'N/A':
-        st.markdown("**Model Equation:**")
-        st.code(equation, language="text")
-    
-    st.markdown("---")
-    
-    # Train vs Test comparison
-    train_metrics = model_data.get('train_metrics', {})
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("**Training Set:**")
-        st.text(f"R²:   {train_metrics.get('r2', 0):.4f}")
-        st.text(f"MAE:  {train_metrics.get('mae', 0):.4f}")
-        st.text(f"RMSE: {train_metrics.get('rmse', 0):.4f}")
-    
-    with col2:
-        st.markdown("**Test Set:**")
-        st.text(f"R²:   {test_metrics.get('r2', 0):.4f}")
-        st.text(f"MAE:  {test_metrics.get('mae', 0):.4f}")
-        st.text(f"RMSE: {test_metrics.get('rmse', 0):.4f}")
-    
-    # Overfitting check
-    train_r2 = train_metrics.get('r2', 0)
-    test_r2 = test_metrics.get('r2', 0)
-    gap = train_r2 - test_r2
-    
-    if gap > 0.2:
-        st.warning(f"⚠️ Possible overfitting (Train R²: {train_r2:.3f}, Test R²: {test_r2:.3f})")
-    elif gap > 0.1:
-        st.info(f"💡 Moderate train-test gap (Train R²: {train_r2:.3f}, Test R²: {test_r2:.3f})")
-    else:
-        st.success(f"✅ Good generalization (Train R²: {train_r2:.3f}, Test R²: {test_r2:.3f})")
-    
-    st.markdown("---")
-    
-    # Visualization (if available)
-    if VISUALIZATION_AVAILABLE:
-        st.markdown("**Model Performance Visualization**")
-        
-        col_a, col_b = st.columns(2)
-        with col_a:
-            scatter_size = st.slider(
-                "Point Size",
-                min_value=1,
-                max_value=15,
-                value=6,
-                key=f"scatter_size_{param}_{model}"
-            )
-        with col_b:
-            scatter_color = st.color_picker(
-                "Point Color",
-                value="#000000",
-                key=f"scatter_color_{param}_{model}"
-            )
-        
-        try:
-            split_data = var_results.get('train_test_split', {})
-            
-            train_values = split_data.get('train_values', np.array([]))
-            test_values = split_data.get('test_values', np.array([]))
-            train_timestamps = split_data.get('train_timestamps', pd.DatetimeIndex([]))
-            test_timestamps = split_data.get('test_timestamps', pd.DatetimeIndex([]))
-            split_index = split_data.get('split_index', 0)
-            
-            fig = create_model_comparison_plot(
-                variable_name=param,
-                train_values=train_values,
-                test_values=test_values,
-                train_timestamps=train_timestamps,
-                test_timestamps=test_timestamps,
-                model_results=var_results,
-                selected_models=[model],
-                split_index=split_index
-            )
-            
-            fig.data[0].marker.size = scatter_size
-            fig.data[0].marker.color = scatter_color
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Export options
-            with st.expander("💾 Export Figure"):
-                quick_export_buttons(fig, f"{param}_{model}_trajectory", ['png', 'pdf', 'html'])
-        
-        except Exception as e:
-            st.error(f"Error creating visualization: {str(e)}")
 
 
 def main():
@@ -406,65 +243,6 @@ def main():
         st.error("❌ No models found. Please train models first.")
         return
     
-    # Build matrix data for auto-selection
-    matrix_data = {}
-    for param in params_to_forecast:
-        if param not in st.session_state.trained_models:
-            continue
-        
-        var_results = st.session_state.trained_models[param]
-        matrix_data[param] = {}
-        
-        for model_name in all_model_names:
-            model_data = None
-            for tier_name in ['tier1_math', 'tier2_timeseries', 'tier3_ml']:
-                if model_name in var_results.get(tier_name, {}):
-                    model_data = var_results[tier_name][model_name]
-                    break
-            
-            if model_data:
-                test_metrics = model_data.get('test_metrics', {})
-                health_index = calculate_health_index(test_metrics)
-                
-                matrix_data[param][model_name] = {
-                    'health_index': health_index,
-                    'r2': test_metrics.get('r2', np.nan),
-                    'mae': test_metrics.get('mae', np.nan),
-                    'rmse': test_metrics.get('rmse', np.nan),
-                    'mape': test_metrics.get('mape', np.nan)
-                }
-            else:
-                matrix_data[param][model_name] = None
-    
-    # === AUTO-SELECT BEST MODELS (OVERWRITES Page 7 selections) ===
-    if 'auto_selection_done_11b' not in st.session_state:
-        st.session_state.auto_selection_done_11b = True
-        
-        # OVERWRITE any existing selections from Page 7 for these parameters
-        for param in params_to_forecast:
-            if param in matrix_data:
-                # Find best model by health_index
-                best_model = None
-                best_health = -np.inf
-                
-                for model, metrics in matrix_data[param].items():
-                    if metrics:
-                        health = metrics.get('health_index', -np.inf)
-                        if health > best_health:
-                            best_health = health
-                            best_model = model
-                
-                if best_model:
-                    # OVERWRITE selection (even if it exists from Page 7)
-                    st.session_state.trajectory_selected_models[param] = best_model
-                    
-                    # Also update main forecast selections for consistency
-                    if 'selected_models_for_forecast' not in st.session_state:
-                        st.session_state.selected_models_for_forecast = {}
-                    st.session_state.selected_models_for_forecast[param] = best_model
-    
-    st.info(f"💡 **Best models auto-selected** (highlighted in blue) - Click any cell to change and view details")
-    
     # Metric selector
     col1, col2 = st.columns([2, 1])
     
@@ -490,7 +268,7 @@ def main():
     
     # === INTERACTIVE MATRIX ===
     st.markdown("#### 🎯 Model Evaluation Matrix")
-    st.caption("🔵 Blue = Selected | Click any cell to select and view details below")
+    st.caption("Click cells to see details. Selected models highlighted in blue.")
     
     # Build matrix data
     matrix_data = {}
@@ -602,52 +380,34 @@ def main():
                     
                     st.markdown(button_html, unsafe_allow_html=True)
                     
-                    # CLICK TO SELECT AND VIEW
+                    # Selection button
                     if st.button(
-                        "View",
+                        "Select",
                         key=f"select_{param}_{model}",
-                        help=f"Select {model} for {param} and view details",
                         use_container_width=True
                     ):
-                        # SELECT THIS MODEL
                         st.session_state.trajectory_selected_models[param] = model
-                        
-                        # Also update main selections for consistency
-                        if 'selected_models_for_forecast' not in st.session_state:
-                            st.session_state.selected_models_for_forecast = {}
-                        st.session_state.selected_models_for_forecast[param] = model
-                        
-                        # SHOW DETAILS
-                        st.session_state.selected_cell_11b = {
-                            'param': param,
-                            'model': model
-                        }
                         st.rerun()
     
     st.markdown("---")
     
-    st.markdown("---")
-    
-    # === CELL DETAILS (if clicked) ===
-    if 'selected_cell_11b' in st.session_state and st.session_state.selected_cell_11b:
-        cell_info = st.session_state.selected_cell_11b
-        
-        with st.container():
-            st.markdown("---")
-            
-            col1, col2 = st.columns([5, 1])
-            with col2:
-                if st.button("✖ Close Details", key="close_modal_11b"):
-                    st.session_state.selected_cell_11b = None
-                    st.rerun()
-            
-            # Display details using the function
-            param = cell_info['param']
-            model = cell_info['model']
-            
-            if param in st.session_state.trained_models:
-                var_results = st.session_state.trained_models[param]
-                display_cell_details(param, model, var_results)
+    # === AUTO-SELECT BEST IF NOT SELECTED ===
+    for param in params_to_forecast:
+        if param not in st.session_state.trajectory_selected_models:
+            if param in matrix_data:
+                # Find best model by health_index
+                best_model = None
+                best_health = -np.inf
+                
+                for model, metrics in matrix_data[param].items():
+                    if metrics:
+                        health = metrics.get('health_index', -np.inf)
+                        if health > best_health:
+                            best_health = health
+                            best_model = model
+                
+                if best_model:
+                    st.session_state.trajectory_selected_models[param] = best_model
     
     # === SHOW SELECTION SUMMARY ===
     if st.session_state.trajectory_selected_models:
@@ -801,24 +561,13 @@ def main():
         
         st.success("✅ All forecasts generated!")
         
-        # Mark that forecasts are updated
-        st.session_state.trajectory_forecasts_updated = True
-        
         st.markdown("---")
         
         # Return to Page 11
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            if st.button("✅ Return to Trajectory Analysis", type="primary", use_container_width=True):
-                # Force rebuild of master_parameter_df with new forecasts
-                st.session_state.master_parameter_df = None
-                
-                # Clear the one-time flags so if user comes back, it will re-evaluate
-                if 'auto_selection_done_11b' in st.session_state:
-                    del st.session_state.auto_selection_done_11b
-                
-                # Navigate back
-                st.switch_page("pages/11_Trajectory-Scenario_Space.py")
+        if st.button("✅ Return to Trajectory Analysis", type="primary", use_container_width=True):
+            # Force rebuild of master_parameter_df
+            st.session_state.master_parameter_df = None
+            st.switch_page("pages/11_Trajectory-Scenario_Space.py")
 
 
 if __name__ == "__main__":
