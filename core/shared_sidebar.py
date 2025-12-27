@@ -29,30 +29,86 @@ def get_logo_base64():
 
 def render_workflow_flowchart():
     """
-    Ultra-minimal workflow indicator - tiny dots only
-    Extremely compact, beautiful, professional
+    Ultra-minimal workflow indicator - tiny dots for ALL steps
+    Left path: 8 steps (historical data)
+    Right path: 2 steps (scenarios)
+    Final: 1 step (trajectory)
+    All with 6px dots and 1px lines
     """
     
-    # Check completion status
-    left_done = any([
-        st.session_state.get("data_loaded", False),
-        st.session_state.get("data_cleaned", False),
-        st.session_state.get("models_trained", False),
-        st.session_state.get("projections_done", False)
-    ])
+    # Define all steps with session state keys
+    left_steps = [
+        ("data_loaded", "Upload & Data Diagnostics"),
+        ("data_cleaned", "Data Cleaning & Preprocessing"),
+        ("data_explored", "Exploration & Visualizations"),
+        ("relations_analyzed", "Variable Relationships"),
+        ("dim_reduction_done", "Dimensionality Reduction"),
+        ("models_trained", "Time-Based Models & ML Training"),
+        ("models_evaluated", "Model Evaluation & Selection"),
+        ("projections_done", "Future Projections"),
+    ]
     
-    right_done = any([
-        st.session_state.get("scenarios_analyzed", False),
-        st.session_state.get("scenario_matrix_done", False)
-    ])
+    right_steps = [
+        ("scenarios_analyzed", "Scenario Analysis (NLP)"),
+        ("scenario_matrix_done", "Scenario Matrix"),
+    ]
     
-    final_done = st.session_state.get("trajectory_space_done", False)
+    final_step = ("trajectory_space_done", "Trajectory-Scenario Space")
     
     # Colors
-    done = "#21c55d"
-    pending = "#d1d5db"
+    done_fill = "#21c55d"
+    done_border = "#0e6537"
+    pending_fill = "#d1d5db"
+    pending_border = "#6b7280"
     
-    # Pure CSS/HTML implementation - no Graphviz bloat
+    def get_dot_html(key, tooltip):
+        """Generate HTML for a single dot"""
+        is_done = st.session_state.get(key, False)
+        fill = done_fill if is_done else pending_fill
+        border = done_border if is_done else pending_border
+        
+        return f"""
+        <div style='width: 6px; height: 6px; border-radius: 50%; 
+                   background: {fill};
+                   border: 1.5px solid {border};'
+             title='{tooltip}'></div>
+        """
+    
+    def get_line_html(prev_key):
+        """Generate HTML for a connecting line"""
+        is_done = st.session_state.get(prev_key, False)
+        color = done_fill if is_done else pending_fill
+        
+        return f"""
+        <div style='width: 1px; height: 6px; background: {color};'></div>
+        """
+    
+    # Build left column HTML
+    left_html = ""
+    for i, (key, tooltip) in enumerate(left_steps):
+        if i > 0:
+            # Add connecting line (color from previous step)
+            left_html += get_line_html(left_steps[i-1][0])
+        left_html += get_dot_html(key, tooltip)
+    
+    # Add line from last left step to final
+    left_html += get_line_html(left_steps[-1][0])
+    
+    # Build right column HTML
+    right_html = ""
+    for i, (key, tooltip) in enumerate(right_steps):
+        if i > 0:
+            # Add connecting line (color from previous step)
+            right_html += get_line_html(right_steps[i-1][0])
+        right_html += get_dot_html(key, tooltip)
+    
+    # Add line from last right step to final
+    right_html += get_line_html(right_steps[-1][0])
+    
+    # Final step dot
+    final_html = get_dot_html(final_step[0], final_step[1])
+    
+    # Assemble complete flowchart
     html = f"""
     <div style='text-align: center; padding: 0.3rem 0; margin: 0;'>
         <div style='font-size: 0.65rem; font-weight: 600; 
@@ -61,29 +117,20 @@ def render_workflow_flowchart():
                     margin-bottom: 0.25rem; letter-spacing: 0.5px;'>
             WORKFLOW
         </div>
-        <div style='display: flex; justify-content: center; gap: 0.8rem; margin: 0.2rem 0;'>
-            <div style='display: flex; flex-direction: column; align-items: center; gap: 0.15rem;'>
-                <div style='width: 6px; height: 6px; border-radius: 50%; 
-                           background: {done if left_done else pending};
-                           border: 1.5px solid {"#0e6537" if left_done else "#6b7280"};'></div>
-                <div style='width: 1px; height: 8px; background: {done if left_done else pending};'></div>
-                <div style='width: 6px; height: 6px; border-radius: 50%; 
-                           background: {done if final_done else pending};
-                           border: 1.5px solid {"#0e6537" if final_done else "#6b7280"};'></div>
+        <div style='display: flex; justify-content: center; gap: 1rem; margin: 0.2rem 0;'>
+            <div style='display: flex; flex-direction: column; align-items: center; gap: 0;'>
+                {left_html}
             </div>
-            <div style='display: flex; flex-direction: column; align-items: center; gap: 0.15rem;'>
-                <div style='width: 6px; height: 6px; border-radius: 50%; 
-                           background: {done if right_done else pending};
-                           border: 1.5px solid {"#0e6537" if right_done else "#6b7280"};'></div>
-                <div style='width: 1px; height: 8px; background: {done if right_done else pending};'></div>
-                <div style='width: 6px; height: 6px; border-radius: 50%; 
-                           background: {done if final_done else pending};
-                           border: 1.5px solid {"#0e6537" if final_done else "#6b7280"};'></div>
+            <div style='display: flex; flex-direction: column; align-items: center; gap: 0;'>
+                {right_html}
             </div>
         </div>
+        <div style='display: flex; justify-content: center; margin-top: 0;'>
+            {final_html}
+        </div>
         <div style='font-size: 0.55rem; color: #6b7280; margin-top: 0.15rem;'>
-            <span style='color: {done};'>●</span> Done 
-            <span style='color: {pending}; margin-left: 0.3rem;'>●</span> Pending
+            <span style='color: {done_fill};'>●</span> Done 
+            <span style='color: {pending_fill}; margin-left: 0.3rem;'>●</span> Pending
         </div>
     </div>
     """
@@ -237,4 +284,4 @@ def render_app_sidebar():
         version = '1.0.0'
     
     st.sidebar.caption(f"ExplainFutures v{version}")
-    st.sidebar.caption("© 2025 Octa Insight")
+    st.sidebar.caption("© 2024 Octa Insight")
