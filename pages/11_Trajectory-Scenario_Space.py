@@ -565,10 +565,27 @@ def main():
     scenario_date = get_scenario_target_date()
     st.session_state.scenario_target_date = scenario_date
     
+    # === CRITICAL: REBUILD MASTER DF IMMEDIATELY IF RETURNING FROM PAGE 12 ===
+    if st.session_state.get('page12_forecasts_completed', False) or st.session_state.get('trajectory_forecasts_updated', False):
+        with st.spinner("🔄 Updating parameter database with new forecasts..."):
+            # Force complete rebuild
+            st.session_state.master_parameter_df = None
+            master_df = build_master_parameter_dataframe()
+            st.session_state.master_parameter_df = master_df
+            
+            # Clear flags
+            st.session_state.trajectory_forecasts_updated = False
+            
+            # Show success message
+            st.success("✅ Parameter database updated with new forecast data!")
+    
     # === BUILD MASTER PARAMETER DATAFRAME ===
-    with st.spinner("Building master parameter database..."):
-        master_df = build_master_parameter_dataframe()
-        st.session_state.master_parameter_df = master_df
+    if st.session_state.master_parameter_df is None:
+        with st.spinner("Building master parameter database..."):
+            master_df = build_master_parameter_dataframe()
+            st.session_state.master_parameter_df = master_df
+    else:
+        master_df = st.session_state.master_parameter_df
     
     if master_df is None or len(master_df) == 0:
         st.warning("⚠️ No historical data available!")
@@ -746,13 +763,6 @@ def main():
         st.subheader("✅ Step 1b: Validate Forecast Coverage")
         st.caption("Checking if all parameters have forecasts extending to scenario date...")
         
-        # REBUILD master_df if forecasts were updated in Page 12
-        if st.session_state.get('trajectory_forecasts_updated', False):
-            with st.spinner("Rebuilding parameter database with new forecasts..."):
-                master_df = build_master_parameter_dataframe()
-                st.session_state.master_parameter_df = master_df
-                st.session_state.trajectory_forecasts_updated = False  # Reset flag
-        
         coverage = check_forecast_coverage(
             st.session_state.parameter_mappings,
             master_df,
@@ -784,20 +794,20 @@ def main():
             
             # Check if user just returned from Page 12
             if st.session_state.get('page12_forecasts_completed', False):
-                st.warning("⚠️ **Just returned from forecasting?** Click below to revalidate with updated data:")
+                st.warning("⚠️ **Just returned from Page 12 but some parameters still need forecasts.**")
+                st.info("💡 **Tip:** The page should have auto-refreshed. If you still see this message, click Refresh below.")
                 
                 col1, col2 = st.columns([1, 1])
                 
                 with col1:
-                    if st.button("🔄 Revalidate Forecast Coverage", type="primary", use_container_width=True):
-                        # Force complete rebuild
+                    if st.button("🔄 Refresh & Recheck", type="primary", use_container_width=True):
+                        # Force complete rebuild and recheck
                         st.session_state.master_parameter_df = None
-                        st.session_state.trajectory_forecasts_updated = True
                         st.session_state.pop('page12_forecasts_completed', None)
                         st.rerun()
                 
                 with col2:
-                    if st.button("🔮 Go Back to Forecasting", type="secondary", use_container_width=True):
+                    if st.button("🔮 Continue Forecasting", type="secondary", use_container_width=True):
                         st.switch_page("pages/12_Forecasting_Helper.py")
             else:
                 # Normal flow - show forecast button
