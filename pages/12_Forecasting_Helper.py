@@ -1,5 +1,5 @@
 """
-Page 11b: Trajectory Forecasting Helper (HIDDEN - Not in sidebar)
+Page 12: Trajectory Forecasting Helper (HIDDEN - Not in sidebar)
 Train, evaluate, and forecast parameters needed for trajectory analysis
 """
 
