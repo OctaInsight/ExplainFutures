@@ -767,7 +767,7 @@ def main():
             
             if st.button("🔮 Train & Forecast Missing Parameters", type="primary", use_container_width=True):
                 # Navigate to hidden forecasting helper page
-                st.switch_page("pages/11b_Trajectory_Forecasting_Helper.py")
+                st.switch_page("hidden_pages/11b:_Trajectory_Forecasting_Helper.py")
             
             # Don't continue to baseline selection
             return
