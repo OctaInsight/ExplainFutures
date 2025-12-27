@@ -879,14 +879,15 @@ def extract_title_method_1_header(text: str) -> str:
 def extract_title_method_2_scenario_pattern(text: str) -> str:
     """Extract title from 'Scenario X: Title' pattern"""
     patterns = [
-        r'Scenario\s*\d*\s*[-:]\s*([^\n(]+)',
-        r'Scenario\s*[A-Z]?\s*[-:]\s*([^\n(]+)',
+        r'Scenario\s*\d*\s*[—–\-:]\s*([^\n(]+)',  # Support em-dash (—), en-dash (–), hyphen (-), colon (:)
+        r'Scenario\s*[A-Z]?\s*[—–\-:]\s*([^\n(]+)',
     ]
     
     for pattern in patterns:
         match = re.search(pattern, text[:200], re.IGNORECASE)
         if match:
             title = match.group(1).strip()
+            # Remove year in parentheses or standalone
             title = re.sub(r'\s*\(?\s*(?:by\s+)?(?:in\s+)?\d{4}\s*\)?', '', title)
             return title.strip()
     
@@ -909,7 +910,7 @@ def extract_title_method_3_spacy_ner(text: str) -> str:
             title = title_chunk.text.strip()
             
             # Clean
-            title = re.sub(r'^Scenario\s*\d*\s*[-:]\s*', '', title, flags=re.IGNORECASE)
+            title = re.sub(r'^Scenario\s*\d*\s*[—–\-:]\s*', '', title, flags=re.IGNORECASE)
             title = re.sub(r'\s*\(?\s*(?:by\s+)?(?:in\s+)?\d{4}\s*\)?', '', title)
             
             return title.strip()
@@ -927,7 +928,7 @@ def extract_title_method_4_capital_words(text: str) -> str:
     clean = re.sub(r'\s*\(?\s*(?:by\s+)?(?:in\s+)?\d{4}\s*\)?', '', first_line)
     
     # Remove scenario prefix
-    clean = re.sub(r'^Scenario\s*\d*\s*[-:]\s*', '', clean, flags=re.IGNORECASE)
+    clean = re.sub(r'^Scenario\s*\d*\s*[—–\-:]\s*', '', clean, flags=re.IGNORECASE)
     
     # Extract capitalized words
     words = clean.split()
