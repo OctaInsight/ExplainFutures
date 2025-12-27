@@ -442,132 +442,149 @@ def main():
         with st.expander("Show missing"):
             for param in missing_selections:
                 st.caption(f"• {param}")
-        return
-    
-    st.info(f"Forecasting to: **{target_date.strftime('%Y-%m-%d')}**")
-    
-    if st.button("🔮 Generate Forecasts for All Parameters", type="primary", use_container_width=True):
+    else:
+        st.info(f"Forecasting to: **{target_date.strftime('%Y-%m-%d')}**")
         
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        
-        for idx, param in enumerate(params_to_forecast):
-            status_text.text(f"Forecasting: {param}...")
+        if st.button("🔮 Generate Forecasts for All Parameters", type="primary", use_container_width=True):
             
-            try:
-                model_name = st.session_state.trajectory_selected_models.get(param)
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            for idx, param in enumerate(params_to_forecast):
+                status_text.text(f"Forecasting: {param}...")
                 
-                if not model_name:
-                    st.error(f"✗ No model selected for {param}")
-                    continue
-                
-                # Get model data
-                var_results = st.session_state.trained_models[param]
-                
-                model_data = None
-                model_type = None
-                
-                for tier_name in ['tier1_math', 'tier2_timeseries', 'tier3_ml']:
-                    if model_name in var_results.get(tier_name, {}):
-                        model_data = var_results[tier_name][model_name]
-                        model_type = tier_name
-                        break
-                
-                if not model_data:
-                    st.error(f"✗ Model not found for {param}")
-                    continue
-                
-                # Get split data
-                split_data = var_results.get('train_test_split', {})
-                
-                train_timestamps = split_data.get('train_timestamps', pd.DatetimeIndex([]))
-                test_timestamps = split_data.get('test_timestamps', pd.DatetimeIndex([]))
-                
-                if len(train_timestamps) == 0:
-                    st.error(f"✗ No timestamp data for {param}")
-                    continue
-                
-                last_date = test_timestamps[-1] if len(test_timestamps) > 0 else train_timestamps[-1]
-                
-                # Generate timestamps
-                freq = pd.infer_freq(train_timestamps)
-                if freq is None:
-                    median_diff = pd.Series(train_timestamps[1:] - train_timestamps[:-1]).median()
-                    future_timestamps = pd.date_range(
-                        start=last_date + median_diff,
-                        end=target_date,
-                        freq=median_diff
-                    )
-                else:
-                    future_timestamps = pd.date_range(
-                        start=last_date,
-                        end=target_date,
-                        freq=freq
-                    )[1:]
-                
-                forecast_steps = len(future_timestamps)
-                
-                # Generate forecast
-                if model_type == 'tier2_timeseries':
-                    model = model_data['model']
-                    forecast_values = model.forecast(steps=forecast_steps)
+                try:
+                    model_name = st.session_state.trajectory_selected_models.get(param)
                     
-                elif model_type == 'tier1_math':
-                    start_time = train_timestamps[0]
-                    time_since_start = (future_timestamps - start_time).total_seconds().values / 86400
+                    if not model_name:
+                        st.error(f"✗ No model selected for {param}")
+                        continue
                     
-                    if 'poly_transformer' in model_data:
-                        X_future = model_data['poly_transformer'].transform(time_since_start.reshape(-1, 1))
-                        forecast_values = model_data['model'].predict(X_future)
+                    # Get model data
+                    var_results = st.session_state.trained_models[param]
+                    
+                    model_data = None
+                    model_type = None
+                    
+                    for tier_name in ['tier1_math', 'tier2_timeseries', 'tier3_ml']:
+                        if model_name in var_results.get(tier_name, {}):
+                            model_data = var_results[tier_name][model_name]
+                            model_type = tier_name
+                            break
+                    
+                    if not model_data:
+                        st.error(f"✗ Model not found for {param}")
+                        continue
+                    
+                    # Get split data
+                    split_data = var_results.get('train_test_split', {})
+                    
+                    train_timestamps = split_data.get('train_timestamps', pd.DatetimeIndex([]))
+                    test_timestamps = split_data.get('test_timestamps', pd.DatetimeIndex([]))
+                    
+                    if len(train_timestamps) == 0:
+                        st.error(f"✗ No timestamp data for {param}")
+                        continue
+                    
+                    last_date = test_timestamps[-1] if len(test_timestamps) > 0 else train_timestamps[-1]
+                    
+                    # Generate timestamps
+                    freq = pd.infer_freq(train_timestamps)
+                    if freq is None:
+                        median_diff = pd.Series(train_timestamps[1:] - train_timestamps[:-1]).median()
+                        future_timestamps = pd.date_range(
+                            start=last_date + median_diff,
+                            end=target_date,
+                            freq=median_diff
+                        )
                     else:
-                        X_future = time_since_start.reshape(-1, 1)
-                        forecast_values = model_data['model'].predict(X_future)
+                        future_timestamps = pd.date_range(
+                            start=last_date,
+                            end=target_date,
+                            freq=freq
+                        )[1:]
+                    
+                    forecast_steps = len(future_timestamps)
+                    
+                    # Generate forecast
+                    if model_type == 'tier2_timeseries':
+                        model = model_data['model']
+                        forecast_values = model.forecast(steps=forecast_steps)
+                        
+                    elif model_type == 'tier1_math':
+                        start_time = train_timestamps[0]
+                        time_since_start = (future_timestamps - start_time).total_seconds().values / 86400
+                        
+                        if 'poly_transformer' in model_data:
+                            X_future = model_data['poly_transformer'].transform(time_since_start.reshape(-1, 1))
+                            forecast_values = model_data['model'].predict(X_future)
+                        else:
+                            X_future = time_since_start.reshape(-1, 1)
+                            forecast_values = model_data['model'].predict(X_future)
+                    
+                    elif model_type == 'tier3_ml':
+                        last_value = split_data.get('test_values', [split_data.get('train_values', [0])[-1]])[-1]
+                        forecast_values = np.full(forecast_steps, last_value)
+                    
+                    else:
+                        st.error(f"✗ Unknown model type for {param}")
+                        continue
+                    
+                    # Store forecast
+                    if 'forecast_results' not in st.session_state:
+                        st.session_state.forecast_results = {}
+                    
+                    st.session_state.forecast_results[param] = {
+                        'forecast_values': np.array(forecast_values),
+                        'forecast_timestamps': future_timestamps,
+                        'model_type': model_type,
+                        'model_name': model_name,
+                        'target_date': target_date,
+                        'method': 'direct',
+                        'iterations': 1,
+                        'confidence_scores': np.ones(len(forecast_values))
+                    }
+                    
+                    st.success(f"✓ Forecasted {param} ({len(forecast_values)} steps)")
                 
-                elif model_type == 'tier3_ml':
-                    last_value = split_data.get('test_values', [split_data.get('train_values', [0])[-1]])[-1]
-                    forecast_values = np.full(forecast_steps, last_value)
+                except Exception as e:
+                    st.error(f"✗ Error forecasting {param}: {str(e)}")
+                    import traceback
+                    with st.expander("Show error details"):
+                        st.code(traceback.format_exc())
                 
-                else:
-                    st.error(f"✗ Unknown model type for {param}")
-                    continue
-                
-                # Store forecast
-                if 'forecast_results' not in st.session_state:
-                    st.session_state.forecast_results = {}
-                
-                st.session_state.forecast_results[param] = {
-                    'forecast_values': np.array(forecast_values),
-                    'forecast_timestamps': future_timestamps,
-                    'model_type': model_type,
-                    'model_name': model_name,
-                    'target_date': target_date,
-                    'method': 'direct',
-                    'iterations': 1,
-                    'confidence_scores': np.ones(len(forecast_values))
-                }
-                
-                st.success(f"✓ Forecasted {param} ({len(forecast_values)} steps)")
+                progress_bar.progress((idx + 1) / len(params_to_forecast))
             
-            except Exception as e:
-                st.error(f"✗ Error forecasting {param}: {str(e)}")
-                import traceback
-                with st.expander("Show error details"):
-                    st.code(traceback.format_exc())
+            status_text.empty()
+            progress_bar.empty()
             
-            progress_bar.progress((idx + 1) / len(params_to_forecast))
-        
-        status_text.empty()
-        progress_bar.empty()
-        
-        st.success("✅ All forecasts generated!")
-        
-        st.markdown("---")
-        
-        # Return to Page 11
-        if st.button("✅ Return to Trajectory Analysis", type="primary", use_container_width=True):
-            # Force rebuild of master_parameter_df
+            st.success("✅ All forecasts generated!")
+            
+            # CRITICAL: Mark that forecasts are updated
+            st.session_state.trajectory_forecasts_updated = True
+            
+            # CRITICAL: Force rebuild of master_parameter_df with new forecasts
             st.session_state.master_parameter_df = None
-            st.switch_page("pages/11_Trajectory-Scenario_Space.py")
+            
+            # Rerun to show return button
+            st.rerun()
+    
+    # === RETURN BUTTON (show if forecasts completed) ===
+    if st.session_state.get('forecast_results'):
+        # Check if we have forecasts for the current parameters
+        forecasted_params = [p for p in params_to_forecast if p in st.session_state.forecast_results]
+        
+        if forecasted_params:
+            st.markdown("---")
+            st.success(f"✅ **{len(forecasted_params)}/{len(params_to_forecast)} parameter(s) forecasted!**")
+            
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                if st.button("✅ Return to Trajectory Analysis", type="primary", use_container_width=True):
+                    # Force rebuild of master_parameter_df with new forecasts
+                    st.session_state.master_parameter_df = None
+                    # Navigate to Page 11
+                    st.switch_page("pages/11_Trajectory-Scenario_Space.py")
 
 
 if __name__ == "__main__":
