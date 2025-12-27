@@ -451,6 +451,38 @@ def main():
         with col4:
             st.metric("RMSE", f"{metrics['rmse']:.4f}")
         
+        st.markdown("---")
+        
+        # Customization controls
+        st.markdown("**Customize Visualization:**")
+        
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            actual_color = st.color_picker(
+                "Actual Data Color",
+                value="#1f77b4",
+                key=f"actual_color_{variable}_{model}",
+                help="Choose color for actual data points"
+            )
+        with col_b:
+            point_size = st.slider(
+                "Point Size",
+                min_value=3,
+                max_value=15,
+                value=6,
+                key=f"point_size_{variable}_{model}",
+                help="Adjust size of data points"
+            )
+        with col_c:
+            line_width = st.slider(
+                "Line Width",
+                min_value=1,
+                max_value=5,
+                value=2,
+                key=f"line_width_{variable}_{model}",
+                help="Adjust width of model prediction line"
+            )
+        
         # Create visualization (same as Page 7)
         try:
             var_results = st.session_state.trained_models[variable]
@@ -473,6 +505,17 @@ def main():
                 split_index=split_index
             )
             
+            # Apply customizations to actual data points
+            # The first trace is usually the actual data (train + test combined)
+            if len(fig.data) > 0:
+                fig.data[0].marker.size = point_size
+                fig.data[0].marker.color = actual_color
+            
+            # Apply line width to model predictions (usually trace 1+)
+            for i in range(1, len(fig.data)):
+                if hasattr(fig.data[i], 'line'):
+                    fig.data[i].line.width = line_width
+            
             st.plotly_chart(fig, use_container_width=True)
             
             # Export buttons
@@ -482,6 +525,9 @@ def main():
         
         except Exception as e:
             st.error(f"Error creating visualization: {str(e)}")
+            import traceback
+            with st.expander("Show error details"):
+                st.code(traceback.format_exc())
     
     # === SELECTION SUMMARY ===
     if st.session_state.trajectory_selected_models:
