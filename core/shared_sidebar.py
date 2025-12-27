@@ -29,145 +29,66 @@ def get_logo_base64():
 
 def render_workflow_flowchart():
     """
-    Render ultra-compact workflow flowchart matching logo box height
-    
-    Strategy: Show only KEY milestones (not all 11 steps)
-    - Left: 4 main steps (Data → Clean → Model → Project)
-    - Right: 2 steps (Scenarios → Matrix)
-    - Final: 1 step (Trajectory)
-    
-    Total height ~3-4cm on 14" screen (same as logo box)
-    All elements scale with sidebar width
+    Ultra-minimal workflow indicator - tiny dots only
+    Extremely compact, beautiful, professional
     """
     
-    # SIMPLIFIED workflow - only key milestones for compact display
-    # Format: (node_id, display_name, session_keys_to_check)
-    left_path = [
-        ("L1", "Data Upload", ["data_loaded"]),
-        ("L2", "Data Processing", ["data_cleaned", "data_explored"]),
-        ("L3", "Modeling", ["models_trained", "models_evaluated"]),
-        ("L4", "Forecasting", ["projections_done"]),
-    ]
+    # Check completion status
+    left_done = any([
+        st.session_state.get("data_loaded", False),
+        st.session_state.get("data_cleaned", False),
+        st.session_state.get("models_trained", False),
+        st.session_state.get("projections_done", False)
+    ])
     
-    right_path = [
-        ("R1", "Scenarios", ["scenarios_analyzed"]),
-        ("R2", "Matrix", ["scenario_matrix_done"]),
-    ]
+    right_done = any([
+        st.session_state.get("scenarios_analyzed", False),
+        st.session_state.get("scenario_matrix_done", False)
+    ])
     
-    final_step = ("F", "Trajectory Space", ["trajectory_space_done"])
+    final_done = st.session_state.get("trajectory_space_done", False)
     
-    # Streamlit color palette
-    done_fill = "#21c55d"
-    done_border = "#0e6537"
-    done_line = "#16a34a"
+    # Colors
+    done = "#21c55d"
+    pending = "#d1d5db"
     
-    pending_fill = "#d1d5db"
-    pending_border = "#6b7280"
-    pending_line = "#9ca3af"
-    
-    def is_step_complete(session_keys):
-        """Check if ANY of the session keys are True"""
-        return any(st.session_state.get(key, False) for key in session_keys)
-    
-    def get_node_colors(session_keys):
-        """Get fill and border colors based on completion"""
-        if is_step_complete(session_keys):
-            return done_fill, done_border
-        else:
-            return pending_fill, pending_border
-    
-    def get_line_color(session_keys):
-        """Line color based on source completion"""
-        return done_line if is_step_complete(session_keys) else pending_line
-    
-    # ULTRA-COMPACT Graphviz DOT
-    dot_lines = [
-        "digraph W {",
-        "  rankdir=TB;",
-        "  bgcolor=transparent;",
-        # EXTREME compression settings
-        "  graph [pad=\"0.02\" margin=\"0\" nodesep=\"0.06\" ranksep=\"0.08\" dpi=\"72\"];",
-        # TINY nodes - barely visible but still distinguishable
-        "  node [shape=circle width=0.06 height=0.06 fixedsize=true label=\"\" penwidth=1.5 style=\"filled\" margin=0];",
-        # THIN short lines
-        "  edge [arrowhead=none penwidth=1 len=0.1 minlen=1];",
-        "",
-    ]
-    
-    # Invisible connector nodes
-    for i in range(len(left_path) - 1):
-        dot_lines.append(f'  L{i+1}c [shape=point width=0.01 style=invis];')
-    
-    for i in range(len(right_path) - 1):
-        dot_lines.append(f'  R{i+1}c [shape=point width=0.01 style=invis];')
-    
-    dot_lines.append('  L4c [shape=point width=0.01 style=invis];')
-    dot_lines.append('  R2c [shape=point width=0.01 style=invis];')
-    dot_lines.append("")
-    
-    # Left path nodes
-    for node_id, name, keys in left_path:
-        fill, border = get_node_colors(keys)
-        dot_lines.append(f'  {node_id} [fillcolor="{fill}" color="{border}" tooltip="{name}"];')
-    
-    # Right path nodes
-    for node_id, name, keys in right_path:
-        fill, border = get_node_colors(keys)
-        dot_lines.append(f'  {node_id} [fillcolor="{fill}" color="{border}" tooltip="{name}"];')
-    
-    # Final node
-    final_fill, final_border = get_node_colors(final_step[2])
-    dot_lines.append(f'  {final_step[0]} [fillcolor="{final_fill}" color="{final_border}" tooltip="{final_step[1]}"];')
-    dot_lines.append("")
-    
-    # Left path connections
-    for i in range(len(left_path) - 1):
-        line_color = get_line_color(left_path[i][2])
-        dot_lines.append(f'  {left_path[i][0]} -> L{i+1}c [color="{line_color}" style=invis];')
-        dot_lines.append(f'  L{i+1}c -> {left_path[i+1][0]} [color="{line_color}"];')
-    
-    # Right path connections
-    for i in range(len(right_path) - 1):
-        line_color = get_line_color(right_path[i][2])
-        dot_lines.append(f'  {right_path[i][0]} -> R{i+1}c [color="{line_color}" style=invis];')
-        dot_lines.append(f'  R{i+1}c -> {right_path[i+1][0]} [color="{line_color}"];')
-    
-    # Converging to final
-    dot_lines.append(f'  L4 -> L4c [color="{get_line_color(left_path[-1][2])}" style=invis];')
-    dot_lines.append(f'  L4c -> F [color="{get_line_color(left_path[-1][2])}"];')
-    dot_lines.append(f'  R2 -> R2c [color="{get_line_color(right_path[-1][2])}" style=invis];')
-    dot_lines.append(f'  R2c -> F [color="{get_line_color(right_path[-1][2])}"];')
-    
-    dot_lines.append("}")
-    dot_string = "\n".join(dot_lines)
-    
-    # Ultra-compact header
-    st.sidebar.markdown("""
-    <div style='text-align: center; margin-bottom: 0.15rem;'>
-        <div style='background: linear-gradient(135deg, #0e6537 0%, #21c55d 100%); 
-                    -webkit-background-clip: text; 
-                    -webkit-text-fill-color: transparent;
-                    background-clip: text;
-                    font-weight: 700;
-                    font-size: 0.7rem;
-                    letter-spacing: 0.3px;'>
+    # Pure CSS/HTML implementation - no Graphviz bloat
+    html = f"""
+    <div style='text-align: center; padding: 0.3rem 0; margin: 0;'>
+        <div style='font-size: 0.65rem; font-weight: 600; 
+                    background: linear-gradient(135deg, #0e6537 0%, #21c55d 100%);
+                    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+                    margin-bottom: 0.25rem; letter-spacing: 0.5px;'>
             WORKFLOW
         </div>
+        <div style='display: flex; justify-content: center; gap: 0.8rem; margin: 0.2rem 0;'>
+            <div style='display: flex; flex-direction: column; align-items: center; gap: 0.15rem;'>
+                <div style='width: 6px; height: 6px; border-radius: 50%; 
+                           background: {done if left_done else pending};
+                           border: 1.5px solid {"#0e6537" if left_done else "#6b7280"};'></div>
+                <div style='width: 1px; height: 8px; background: {done if left_done else pending};'></div>
+                <div style='width: 6px; height: 6px; border-radius: 50%; 
+                           background: {done if final_done else pending};
+                           border: 1.5px solid {"#0e6537" if final_done else "#6b7280"};'></div>
+            </div>
+            <div style='display: flex; flex-direction: column; align-items: center; gap: 0.15rem;'>
+                <div style='width: 6px; height: 6px; border-radius: 50%; 
+                           background: {done if right_done else pending};
+                           border: 1.5px solid {"#0e6537" if right_done else "#6b7280"};'></div>
+                <div style='width: 1px; height: 8px; background: {done if right_done else pending};'></div>
+                <div style='width: 6px; height: 6px; border-radius: 50%; 
+                           background: {done if final_done else pending};
+                           border: 1.5px solid {"#0e6537" if final_done else "#6b7280"};'></div>
+            </div>
+        </div>
+        <div style='font-size: 0.55rem; color: #6b7280; margin-top: 0.15rem;'>
+            <span style='color: {done};'>●</span> Done 
+            <span style='color: {pending}; margin-left: 0.3rem;'>●</span> Pending
+        </div>
     </div>
-    """, unsafe_allow_html=True)
+    """
     
-    # Render flowchart
-    st.sidebar.graphviz_chart(dot_string, use_container_width=True)
-    
-    # Ultra-compact legend
-    st.sidebar.markdown(f"""
-    <div style='text-align: center; margin-top: -0.4rem; margin-bottom: 0.2rem; font-size: 0.6rem;'>
-        <span style='color: {done_fill}; font-weight: 600;'>●</span>
-        <span style='color: #6b7280; margin-left: 0.1rem; margin-right: 0.3rem;'>Done</span>
-        <span style='color: {pending_fill};'>●</span>
-        <span style='color: #6b7280; margin-left: 0.1rem;'>Pending</span>
-    </div>
-    """, unsafe_allow_html=True)
+    st.sidebar.markdown(html, unsafe_allow_html=True)
 
 
 def render_app_sidebar():
@@ -316,4 +237,4 @@ def render_app_sidebar():
         version = '1.0.0'
     
     st.sidebar.caption(f"ExplainFutures v{version}")
-    st.sidebar.caption("© 2024 Octa Insight")
+    st.sidebar.caption("© 2025 Octa Insight")
