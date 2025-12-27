@@ -1,6 +1,5 @@
 """
-Page 11: Trajectory-Scenario Space
-Map historical parameters to scenario parameters with forecast validation
+Page 11: Map historical parameters to scenario parameters with forecast validation
 """
 
 import streamlit as st
@@ -14,8 +13,8 @@ import plotly.express as px
 
 # Page configuration
 st.set_page_config(
-    page_title="Trajectory-Scenario Space",
-    page_icon="🎯",
+    page_title="Parameter Mapping & Validation",
+    page_icon="🔗",
     layout="wide"
 )
 
@@ -38,8 +37,8 @@ initialize_session_state()
 render_app_sidebar()
 
 # === PAGE TITLE ===
-st.title("🎯 Trajectory-Scenario Space Analysis")
-st.markdown("*Bridge historical data with scenario planning through parameter mapping and compatibility analysis*")
+st.title("🔗 Parameter Mapping & Forecast Validation")
+st.markdown("*Map scenario parameters to historical data and validate forecast coverage*")
 st.markdown("---")
 
 
@@ -765,11 +764,19 @@ def main():
         if coverage['all_covered']:
             st.success(f"✅ All parameters have forecast data extending to {scenario_date.strftime('%Y-%m-%d')}!")
             
-            # Clear the Page 12 completion flag since we're back and everything is good
-            if 'page12_forecasts_completed' in st.session_state:
-                st.session_state.pop('page12_forecasts_completed')
+            st.markdown("---")
             
-            # CONTINUE to baseline selection (don't return - let user proceed)
+            st.info("🎯 **Ready to proceed!** All parameters are mapped and forecasted.")
+            
+            # Button to continue to Page 13: Trajectory-Scenario Space
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                if st.button("🎯 Continue to Trajectory-Scenario Space →", type="primary", use_container_width=True):
+                    # Mark this step as complete
+                    st.session_state.parameter_mapping_complete = True
+                    
+                    # Navigate to Page 13
+                    st.switch_page("pages/13_Trajectory-Scenario_Space.py")
         else:
             st.error(f"❌ {len(coverage['missing_params'])} parameter(s) need forecasting to reach scenario date")
             
@@ -785,61 +792,9 @@ def main():
             
             st.info("**Next Step:** Train models (if needed), evaluate, and forecast these parameters")
             
-            if st.button("🔮 Train & Forecast Missing Parameters", type="primary", use_container_width=True):
+            if st.button("🔮 Train & Forecast Missing Parameters →", type="primary", use_container_width=True):
                 # Navigate to Page 12 Forecasting Helper
                 st.switch_page("pages/12_Forecasting_Helper.py")
-            
-            # Don't continue to baseline selection
-            return
-    
-    # === STEP 2: BASELINE SELECTION ===
-    if compatibility['score'] > 0:
-        st.markdown("---")
-        st.subheader("📍 Step 2: Select Baseline Date")
-        st.caption("Choose the reference date for calculating percentage changes")
-        
-        time_range = get_data_time_range(master_df)
-        
-        if time_range['min_date'] is None:
-            st.error("❌ No time range data available")
-            return
-        
-        st.info(f"""
-        📅 **Data Time Range:**
-        - Original data: {time_range['min_date'].strftime('%Y-%m-%d')} to {time_range['max_date'].strftime('%Y-%m-%d')}
-        {'- Forecast starts: ' + time_range['forecast_start'].strftime('%Y-%m-%d') if time_range['forecast_start'] else '- No forecasts available'}
-        {f"- Scenario target: {scenario_date.strftime('%Y-%m-%d')}" if scenario_date else ''}
-        """)
-        
-        baseline_min = time_range['min_date']
-        
-        if time_range['forecast_start']:
-            baseline_max = time_range['forecast_start']
-        else:
-            baseline_max = time_range['max_date']
-        
-        st.success(f"✅ Baseline must be between {baseline_min.strftime('%Y-%m-%d')} and {baseline_max.strftime('%Y-%m-%d')}")
-        
-        baseline_date = st.date_input(
-            "Enter Baseline Date:",
-            value=baseline_max.date(),
-            min_value=baseline_min.date(),
-            max_value=baseline_max.date(),
-            help=f"Enter date between {baseline_min.strftime('%Y-%m-%d')} and {baseline_max.strftime('%Y-%m-%d')}"
-        )
-        
-        baseline_date = pd.Timestamp(baseline_date)
-        
-        st.caption(f"Selected baseline: **{baseline_date.strftime('%Y-%m-%d')}**")
-        
-        st.markdown("---")
-        
-        if st.button("✅ Confirm Baseline Date", type="primary", use_container_width=True):
-            st.session_state.confirmed_baseline_date = baseline_date
-            st.success(f"✅ Baseline date confirmed: {baseline_date.strftime('%Y-%m-%d')}")
-            st.rerun()
-        
-        # [TRUNCATED - Rest continues with baseline extraction, absolute conversion, visualization]
 
 
 if __name__ == "__main__":
