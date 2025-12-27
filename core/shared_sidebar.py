@@ -26,6 +26,124 @@ def get_logo_base64():
         except:
             return None
 
+
+def render_workflow_flowchart():
+    """
+    Render two-column workflow flowchart with Graphviz
+    
+    Left path: Historical Data Analysis
+    Right path: Scenario Planning
+    Both converge to: Trajectory-Scenario Space
+    
+    Shows circles only (no text in chart)
+    Hover shows step name via tooltip (title attribute)
+    Green = completed, Grey = not completed
+    """
+    
+    # Define workflow steps with session state keys
+    # Format: (node_id, display_name, session_key)
+    left_path = [
+        ("L1", "Upload & Data Diagnostics", "data_loaded"),
+        ("L2", "Data Cleaning & Preprocessing", "data_cleaned"),
+        ("L3", "Exploration & Visualizations", "data_explored"),
+        ("L4", "Variable Relationships", "relations_analyzed"),
+        ("L5", "Dimensionality Reduction", "dim_reduction_done"),
+        ("L6", "Time-Based Models & ML Training", "models_trained"),
+        ("L7", "Model Evaluation & Selection", "models_evaluated"),
+        ("L8", "Future Projections", "projections_done"),
+    ]
+    
+    right_path = [
+        ("R1", "Scenario Analysis (NLP)", "scenarios_analyzed"),
+        ("R2", "Scenario Matrix", "scenario_matrix_done"),
+    ]
+    
+    final_step = ("FINAL", "Trajectory-Scenario Space", "trajectory_space_done")
+    
+    # Colors
+    done_color = "#33cc66"      # Green
+    todo_color = "#9aa0a6"      # Grey
+    
+    def get_color(session_key):
+        """Get color based on completion status"""
+        return done_color if st.session_state.get(session_key, False) else todo_color
+    
+    def get_edge_color(from_key):
+        """Edge is green if FROM node is completed"""
+        return done_color if st.session_state.get(from_key, False) else todo_color
+    
+    # Build Graphviz DOT
+    dot_lines = [
+        "digraph Workflow {",
+        "  rankdir=TB;",  # Top to bottom
+        "  bgcolor=transparent;",
+        "  node [shape=circle width=0.5 height=0.5 fixedsize=true fontsize=8 fontname=Arial];",
+        "  edge [penwidth=2];",
+        "",
+        "  // Invisible spacer for alignment",
+        "  {rank=same; L1; R1;}",
+        "",
+    ]
+    
+    # Left path nodes
+    for node_id, name, key in left_path:
+        color = get_color(key)
+        # Use tooltip for hover (title attribute in SVG)
+        dot_lines.append(f'  {node_id} [label="" color="{color}" fillcolor="{color}" style=filled tooltip="{name}"];')
+    
+    # Right path nodes
+    for node_id, name, key in right_path:
+        color = get_color(key)
+        dot_lines.append(f'  {node_id} [label="" color="{color}" fillcolor="{color}" style=filled tooltip="{name}"];')
+    
+    # Final node
+    final_color = get_color(final_step[2])
+    dot_lines.append(f'  {final_step[0]} [label="" color="{final_color}" fillcolor="{final_color}" style=filled tooltip="{final_step[1]}"];')
+    
+    dot_lines.append("")
+    
+    # Left path edges
+    for i in range(len(left_path) - 1):
+        from_node = left_path[i][0]
+        to_node = left_path[i + 1][0]
+        from_key = left_path[i][2]
+        edge_color = get_edge_color(from_key)
+        dot_lines.append(f'  {from_node} -> {to_node} [color="{edge_color}"];')
+    
+    # Right path edges
+    for i in range(len(right_path) - 1):
+        from_node = right_path[i][0]
+        to_node = right_path[i + 1][0]
+        from_key = right_path[i][2]
+        edge_color = get_edge_color(from_key)
+        dot_lines.append(f'  {from_node} -> {to_node} [color="{edge_color}"];')
+    
+    dot_lines.append("")
+    
+    # Converging edges to final step
+    last_left_key = left_path[-1][2]
+    last_right_key = right_path[-1][2]
+    
+    dot_lines.append(f'  {left_path[-1][0]} -> {final_step[0]} [color="{get_edge_color(last_left_key)}"];')
+    dot_lines.append(f'  {right_path[-1][0]} -> {final_step[0]} [color="{get_edge_color(last_right_key)}"];')
+    
+    dot_lines.append("}")
+    
+    dot_string = "\n".join(dot_lines)
+    
+    # Render in sidebar
+    st.sidebar.markdown("**📊 Workflow Progress**")
+    st.sidebar.graphviz_chart(dot_string, use_container_width=True)
+    
+    # Legend
+    st.sidebar.markdown(f"""
+    <div style='font-size: 0.75rem; color: #666; text-align: center;'>
+        <span style='color: {done_color};'>●</span> Completed &nbsp;&nbsp;
+        <span style='color: {todo_color};'>●</span> Pending
+    </div>
+    """, unsafe_allow_html=True)
+
+
 def render_app_sidebar():
     """
     Render the application sidebar with logo, status, and info
@@ -54,6 +172,11 @@ def render_app_sidebar():
                 <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
             </div>
         """, unsafe_allow_html=True)
+    
+    st.sidebar.markdown("---")
+    
+    # === WORKFLOW PROGRESS FLOWCHART ===
+    render_workflow_flowchart()
     
     st.sidebar.markdown("---")
     
