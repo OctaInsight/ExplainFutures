@@ -1,6 +1,6 @@
 """
 Page 7: Model Evaluation & Selection
-Interactive matrix for evaluating and selecting best models
+Interactive matrix with auto-selection and click-to-change pattern
 """
 
 import streamlit as st
@@ -11,11 +11,11 @@ from pathlib import Path
 from datetime import datetime
 import plotly.graph_objects as go
 
-# Page configuration - MUST be first Streamlit command
+# Page configuration
 st.set_page_config(
     page_title="Model Evaluation & Selection",
     page_icon="🔮",
-    layout="wide"  # CRITICAL: Use full page width
+    layout="wide"
 )
 
 # Add project root to path
@@ -35,7 +35,6 @@ from core.models.data_preparation import get_series_data
 initialize_session_state()
 config = get_config()
 
-
 # Render shared sidebar
 render_app_sidebar()
 
@@ -53,26 +52,12 @@ def initialize_selection_state():
 
 
 def calculate_health_index(metrics: dict) -> float:
-    """
-    Calculate health index (0-100) from R², MAE, RMSE, MAPE
-    
-    Parameters:
-    -----------
-    metrics : dict
-        Dictionary with 'r2', 'mae', 'rmse', 'mape'
-        
-    Returns:
-    --------
-    health_index : float
-        Score from 0-100 (100 = best)
-    """
-    # Extract metrics
+    """Calculate health index (0-100) from R², MAE, RMSE, MAPE"""
     r2 = metrics.get('r2', 0)
     mae = metrics.get('mae', np.inf)
     rmse = metrics.get('rmse', np.inf)
     mape = metrics.get('mape', np.inf)
     
-    # Handle NaN/inf
     if np.isnan(r2) or np.isinf(r2):
         r2 = 0
     if np.isnan(mae) or np.isinf(mae):
@@ -82,53 +67,21 @@ def calculate_health_index(metrics: dict) -> float:
     if np.isnan(mape) or np.isinf(mape):
         mape = 100
     
-    # R² contribution (0-1 → 0-40 points)
-    # Higher R² is better
     r2_score = max(0, min(r2, 1)) * 40
-    
-    # MAE contribution (0-20 points)
-    # Lower MAE is better - use inverse scaling
-    # Assume MAE < 10 is excellent, MAE > 50 is poor
     mae_score = max(0, 20 * (1 - min(mae / 50, 1)))
-    
-    # RMSE contribution (0-20 points)
-    # Lower RMSE is better
-    # Assume RMSE < 10 is excellent, RMSE > 50 is poor
     rmse_score = max(0, 20 * (1 - min(rmse / 50, 1)))
-    
-    # MAPE contribution (0-20 points)
-    # Lower MAPE is better
-    # Assume MAPE < 10% is excellent, MAPE > 50% is poor
     mape_score = max(0, 20 * (1 - min(mape / 50, 1)))
     
-    # Total health index
     health_index = r2_score + mae_score + rmse_score + mape_score
     
     return round(health_index, 2)
 
 
 def get_metric_color(value: float, metric: str, all_values: list) -> str:
-    """
-    Get color for metric value (gradient from red to green)
-    
-    Parameters:
-    -----------
-    value : float
-        Metric value
-    metric : str
-        Metric name ('r2', 'mae', 'rmse', 'mape')
-    all_values : list
-        All values for this metric (for scaling)
-        
-    Returns:
-    --------
-    color : str
-        RGB color string
-    """
+    """Get color for metric value (gradient from red to green)"""
     if len(all_values) == 0 or np.isnan(value):
-        return 'rgb(200, 200, 200)'  # Gray for missing
+        return 'rgb(200, 200, 200)'
     
-    # Filter out NaN
     clean_values = [v for v in all_values if not np.isnan(v)]
     if len(clean_values) == 0:
         return 'rgb(200, 200, 200)'
@@ -136,25 +89,19 @@ def get_metric_color(value: float, metric: str, all_values: list) -> str:
     min_val = min(clean_values)
     max_val = max(clean_values)
     
-    # Normalize value to 0-1
     if max_val == min_val:
         normalized = 0.5
     else:
         if metric in ['r2', 'health_index']:
-            # Higher is better
             normalized = (value - min_val) / (max_val - min_val)
         else:
-            # Lower is better (mae, rmse, mape)
             normalized = 1 - (value - min_val) / (max_val - min_val)
     
-    # Create gradient from red (0) to yellow (0.5) to green (1)
     if normalized < 0.5:
-        # Red to Yellow
         r = 255
         g = int(255 * (normalized * 2))
         b = 0
     else:
-        # Yellow to Green
         r = int(255 * (1 - (normalized - 0.5) * 2))
         g = 255
         b = 0
@@ -163,21 +110,12 @@ def get_metric_color(value: float, metric: str, all_values: list) -> str:
 
 
 def create_evaluation_matrix():
-    """
-    Create interactive evaluation matrix DataFrame
-    
-    Returns:
-    --------
-    matrix_data : dict
-        Dictionary with matrix info for rendering
-    """
+    """Create interactive evaluation matrix DataFrame"""
     if not st.session_state.get('trained_models'):
         return None
     
-    # Get all variables and models
     variables = list(st.session_state.trained_models.keys())
     
-    # Get all unique model names across all variables
     all_model_names = set()
     for var_results in st.session_state.trained_models.values():
         all_model_names.update(var_results.get('tier1_math', {}).keys())
@@ -186,20 +124,17 @@ def create_evaluation_matrix():
     
     all_model_names = sorted(list(all_model_names))
     
-    # Create matrix data
     matrix_data = {
         'variables': variables,
         'models': all_model_names,
-        'metrics': {}  # Store metrics for each variable-model pair
+        'metrics': {}
     }
     
-    # Populate metrics
     for var_name in variables:
         var_results = st.session_state.trained_models[var_name]
         matrix_data['metrics'][var_name] = {}
         
         for model_name in all_model_names:
-            # Find model in tiers
             model_data = None
             for tier_name in ['tier1_math', 'tier2_timeseries', 'tier3_ml']:
                 if model_name in var_results.get(tier_name, {}):
@@ -208,8 +143,6 @@ def create_evaluation_matrix():
             
             if model_data:
                 test_metrics = model_data.get('test_metrics', {})
-                
-                # Calculate health index
                 health_index = calculate_health_index(test_metrics)
                 
                 matrix_data['metrics'][var_name][model_name] = {
@@ -228,27 +161,12 @@ def create_evaluation_matrix():
 
 
 def display_cell_details(variable: str, model: str, model_data: dict):
-    """
-    Display detailed information for a selected cell
-    
-    Parameters:
-    -----------
-    variable : str
-        Variable name
-    model : str
-        Model name
-    model_data : dict
-        Model data with metrics and predictions
-    """
+    """Display detailed information for a selected cell"""
     st.markdown(f"### 📊 {variable} - {model}")
     
-    # Health Index (big display)
     metrics_info = model_data.get('test_metrics', {})
     health_index = calculate_health_index(metrics_info)
     
-    col_health = st.columns(1)[0]
-    
-    # Color code health index
     if health_index >= 80:
         health_color = "🟢"
         health_label = "Excellent"
@@ -267,7 +185,6 @@ def display_cell_details(variable: str, model: str, model_data: dict):
     
     st.markdown("---")
     
-    # Metrics display
     col1, col2, col3, col4 = st.columns(4)
     
     test_metrics = model_data.get('test_metrics', {})
@@ -291,7 +208,6 @@ def display_cell_details(variable: str, model: str, model_data: dict):
         else:
             st.metric("MAPE", "N/A")
     
-    # Model equation
     equation = model_data.get('equation', 'N/A')
     if equation != 'N/A':
         st.markdown("**Model Equation:**")
@@ -299,7 +215,6 @@ def display_cell_details(variable: str, model: str, model_data: dict):
     
     st.markdown("---")
     
-    # Train vs Test comparison
     train_metrics = model_data.get('train_metrics', {})
     
     col1, col2 = st.columns(2)
@@ -316,7 +231,6 @@ def display_cell_details(variable: str, model: str, model_data: dict):
         st.text(f"MAE:  {test_metrics.get('mae', 0):.4f}")
         st.text(f"RMSE: {test_metrics.get('rmse', 0):.4f}")
     
-    # Overfitting check
     train_r2 = train_metrics.get('r2', 0)
     test_r2 = test_metrics.get('r2', 0)
     gap = train_r2 - test_r2
@@ -330,10 +244,8 @@ def display_cell_details(variable: str, model: str, model_data: dict):
     
     st.markdown("---")
     
-    # Visualization
     st.markdown("**Model Performance Visualization**")
     
-    # Customization options
     col_a, col_b = st.columns(2)
     with col_a:
         scatter_size = st.slider(
@@ -351,7 +263,6 @@ def display_cell_details(variable: str, model: str, model_data: dict):
         )
     
     try:
-        # Get variable results
         var_results = st.session_state.trained_models[variable]
         split_data = var_results.get('train_test_split', {})
         
@@ -361,7 +272,6 @@ def display_cell_details(variable: str, model: str, model_data: dict):
         test_timestamps = split_data.get('test_timestamps', pd.DatetimeIndex([]))
         split_index = split_data.get('split_index', 0)
         
-        # Create plot
         fig = create_model_comparison_plot(
             variable_name=variable,
             train_values=train_values,
@@ -373,13 +283,11 @@ def display_cell_details(variable: str, model: str, model_data: dict):
             split_index=split_index
         )
         
-        # Apply customizations
         fig.data[0].marker.size = scatter_size
         fig.data[0].marker.color = scatter_color
         
         st.plotly_chart(fig, use_container_width=True)
         
-        # Export
         with st.expander("💾 Export Figure"):
             quick_export_buttons(fig, f"{variable}_{model}_evaluation", ['png', 'pdf', 'html'])
     
@@ -390,10 +298,8 @@ def display_cell_details(variable: str, model: str, model_data: dict):
 def main():
     """Main page function"""
     
-    # Initialize state
     initialize_selection_state()
     
-    # Check if models are trained
     if not st.session_state.get('training_complete', False):
         st.warning("⚠️ No models trained yet!")
         st.info("👈 Please go to **Time-Based Models & ML Training** to train models first")
@@ -406,7 +312,6 @@ def main():
         st.error("❌ No model results found!")
         return
     
-    # Get matrix data
     matrix_data = create_evaluation_matrix()
     
     if matrix_data is None:
@@ -416,31 +321,48 @@ def main():
     variables = matrix_data['variables']
     models = matrix_data['models']
     
-    st.success(f"✅ Ready to evaluate {len(variables)} variables with {len(models)} model types")
+    # === AUTO-SELECT BEST MODELS (only once) ===
+    if 'auto_selection_done_page7' not in st.session_state:
+        st.session_state.auto_selection_done_page7 = True
+        
+        for variable in variables:
+            if variable not in st.session_state.selected_models_for_forecast:
+                # Find best model by health index
+                best_model = None
+                best_health = -np.inf
+                
+                for model in models:
+                    metrics = matrix_data['metrics'][variable].get(model)
+                    if metrics:
+                        health = metrics.get('health_index', -np.inf)
+                        if health > best_health:
+                            best_health = health
+                            best_model = model
+                
+                if best_model:
+                    st.session_state.selected_models_for_forecast[variable] = best_model
     
-    # === INFORMATION PANEL ===
+    st.success(f"✅ Ready to evaluate {len(variables)} variables with {len(models)} model types")
+    st.info(f"💡 **Best models auto-selected** (highlighted in blue) - Click any cell to change selection and view details")
+    
     with st.expander("ℹ️ How to Use This Page", expanded=False):
         st.markdown("""
         ### Model Evaluation Matrix
         
+        **NEW Workflow:**
+        1. 🎯 **Best models auto-selected** on page load (blue cells)
+        2. ✅ **Click any cell** to:
+           - Change the selection for that variable
+           - View detailed metrics and visualizations below
+        3. 📊 Review selected models in summary table
+        4. 🔮 Proceed to forecasting when ready
+        
         **Color Coding:**
-        - 🟢 **Green:** Best performing models
-        - 🟡 **Yellow:** Average performance
-        - 🔴 **Red:** Poor performance
-        - 🔵 **Blue:** Selected for forecasting
-        - ⚪ **Gray:** Model not available
-        
-        **How to Select Models:**
-        1. Review the color-coded matrix below
-        2. Click on a cell to see detailed metrics
-        3. Click "Select for Forecasting" to choose this model
-        4. Selected cells turn blue
-        5. Review your selections in the summary
-        6. Proceed to forecasting when ready
-        
-        **Metrics Used:**
-        - **R²:** Variance explained (higher is better)
-        - Green cells = high R² relative to other models
+        - 🟢 Green: Best performing (high score)
+        - 🟡 Yellow: Average performance
+        - 🔴 Red: Poor performance
+        - 🔵 Blue: Currently selected for forecasting
+        - ⚪ Gray: Model not available
         """)
     
     st.markdown("---")
@@ -461,7 +383,7 @@ def main():
                 'rmse': 'RMSE (Root Mean Squared Error)',
                 'mape': 'MAPE (Mean Absolute % Error)'
             }[x],
-            index=0,  # Default to health_index
+            index=0,
             key='metric_selector'
         )
     
@@ -474,7 +396,6 @@ def main():
         st.metric("Variables", len(variables))
         st.metric("Model Types", len(models))
     
-    # Get current metric (use session state to persist after Apply button)
     if 'current_metric' not in st.session_state:
         st.session_state.current_metric = 'health_index'
     
@@ -482,9 +403,8 @@ def main():
     
     # === INTERACTIVE MATRIX ===
     st.markdown("#### Interactive Evaluation Matrix")
-    st.caption("Click on any cell to see details and select model")
+    st.caption("🔵 Blue = Selected | Click any cell to select and view details")
     
-    # Create grid using columns
     # Header row
     header_cols = st.columns([2] + [1] * len(models))
     header_cols[0].markdown("**Variable**")
@@ -497,22 +417,17 @@ def main():
     for var_idx, variable in enumerate(variables):
         cols = st.columns([2] + [1] * len(models))
         
-        # Variable name
         cols[0].markdown(f"**{variable}**")
         
-        # Model cells
         for model_idx, model in enumerate(models):
             with cols[model_idx + 1]:
                 metrics = matrix_data['metrics'][variable].get(model)
                 
                 if metrics is None:
-                    # Model not available
                     st.markdown("⚪")
                 else:
-                    # Get metric value for coloring
                     metric_value = metrics.get(current_metric, np.nan)
                     
-                    # Get all values for this metric to scale colors
                     all_metric_values = []
                     for v in variables:
                         for m in models:
@@ -522,34 +437,28 @@ def main():
                                 if not np.isnan(val):
                                     all_metric_values.append(val)
                     
-                    # Check if selected
                     is_selected = (variable in st.session_state.selected_models_for_forecast and 
                                  st.session_state.selected_models_for_forecast[variable] == model)
                     
-                    # Get color
                     if is_selected:
-                        # Blue for selected - use markdown with colored background
-                        bg_color = '#4682B4'  # Steel blue
+                        bg_color = '#4682B4'
                         text_color = 'white'
                     elif np.isnan(metric_value):
-                        bg_color = '#C8C8C8'  # Gray
+                        bg_color = '#C8C8C8'
                         text_color = 'black'
                     else:
                         color_rgb = get_metric_color(metric_value, current_metric, all_metric_values)
                         bg_color = color_rgb.replace('rgb', '').replace('(', '').replace(')', '')
                         rgb_parts = [int(x.strip()) for x in bg_color.split(',')]
                         bg_color = f'#{rgb_parts[0]:02x}{rgb_parts[1]:02x}{rgb_parts[2]:02x}'
-                        # Use white text on dark backgrounds
                         brightness = (rgb_parts[0] * 299 + rgb_parts[1] * 587 + rgb_parts[2] * 114) / 1000
                         text_color = 'white' if brightness < 128 else 'black'
                     
-                    # Format button label based on metric
                     if current_metric == 'health_index':
                         button_label = f"{int(metric_value)}" if not np.isnan(metric_value) else "N/A"
                     else:
                         button_label = f"{metric_value:.3f}" if not np.isnan(metric_value) else "N/A"
                     
-                    # Create colored button using HTML/CSS
                     button_html = f"""
                     <div style="
                         background-color: {bg_color};
@@ -568,14 +477,17 @@ def main():
                     
                     st.markdown(button_html, unsafe_allow_html=True)
                     
-                    # Add invisible button for click detection
+                    # CLICK TO SELECT AND VIEW
                     if st.button(
-                        "Select",
+                        "View",
                         key=f"cell_{variable}_{model}",
-                        help=f"Click to view details for {variable} - {model}",
+                        help=f"Select {model} for {variable} and view details",
                         use_container_width=True
                     ):
-                        # Store selection for modal
+                        # SELECT THIS MODEL
+                        st.session_state.selected_models_for_forecast[variable] = model
+                        
+                        # SHOW DETAILS
                         st.session_state.selected_cell = {
                             'variable': variable,
                             'model': model,
@@ -585,51 +497,24 @@ def main():
     
     st.markdown("---")
     
-    # === CELL DETAILS MODAL ===
+    # === CELL DETAILS (if clicked) ===
     if 'selected_cell' in st.session_state and st.session_state.selected_cell:
         cell_info = st.session_state.selected_cell
         
         with st.container():
             st.markdown("---")
             
-            # Close button
             col1, col2 = st.columns([5, 1])
             with col2:
                 if st.button("✖ Close", key="close_modal"):
                     st.session_state.selected_cell = None
                     st.rerun()
             
-            # Display details
             display_cell_details(
                 cell_info['variable'],
                 cell_info['model'],
                 cell_info['metrics']['model_data']
             )
-            
-            # Selection button
-            st.markdown("---")
-            
-            variable = cell_info['variable']
-            model = cell_info['model']
-            
-            is_already_selected = (variable in st.session_state.selected_models_for_forecast and 
-                                  st.session_state.selected_models_for_forecast[variable] == model)
-            
-            col1, col2, col3 = st.columns([1, 2, 1])
-            
-            with col2:
-                if is_already_selected:
-                    st.success(f"✅ Currently selected for {variable}")
-                    if st.button("🔄 Unselect This Model", type="secondary", use_container_width=True):
-                        del st.session_state.selected_models_for_forecast[variable]
-                        st.session_state.selected_cell = None
-                        st.rerun()
-                else:
-                    if st.button("✅ Select for Forecasting", type="primary", use_container_width=True):
-                        st.session_state.selected_models_for_forecast[variable] = model
-                        st.success(f"Selected {model} for {variable}!")
-                        st.session_state.selected_cell = None
-                        st.rerun()
     
     # === SELECTION SUMMARY ===
     if st.session_state.selected_models_for_forecast:
@@ -638,7 +523,6 @@ def main():
         
         summary_data = []
         for variable, model in st.session_state.selected_models_for_forecast.items():
-            # Get metrics
             metrics = matrix_data['metrics'][variable].get(model)
             if metrics:
                 test_metrics = metrics['model_data'].get('test_metrics', {})
@@ -655,7 +539,6 @@ def main():
         summary_df = pd.DataFrame(summary_data)
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
         
-        # Export summary
         with st.expander("💾 Export Selection Summary"):
             csv = summary_df.to_csv(index=False)
             st.download_button(
@@ -665,7 +548,6 @@ def main():
                 mime="text/csv"
             )
         
-        # Check if all variables have selections
         if len(st.session_state.selected_models_for_forecast) >= len(variables):
             st.session_state.model_selection_complete = True
             
