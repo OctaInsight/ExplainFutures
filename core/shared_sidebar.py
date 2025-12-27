@@ -31,7 +31,7 @@ def render_workflow_flowchart():
     """
     Ultra-minimal workflow indicator - tiny dots for ALL steps
     Left path: 8 steps (historical data)
-    Right path: 2 steps (scenarios)
+    Right path: 2 steps (scenarios) - connected by ONE long line
     Final: 1 step (trajectory)
     All with 6px dots and 1px lines
     """
@@ -61,79 +61,64 @@ def render_workflow_flowchart():
     pending_fill = "#d1d5db"
     pending_border = "#6b7280"
     
-    def get_dot_html(key, tooltip):
-        """Generate HTML for a single dot"""
+    def get_dot_style(key):
+        """Get style for a dot based on completion"""
         is_done = st.session_state.get(key, False)
         fill = done_fill if is_done else pending_fill
         border = done_border if is_done else pending_border
-        
-        return f"""
-        <div style='width: 6px; height: 6px; border-radius: 50%; 
-                   background: {fill};
-                   border: 1.5px solid {border};'
-             title='{tooltip}'></div>
-        """
+        return fill, border
     
-    def get_line_html(prev_key):
-        """Generate HTML for a connecting line"""
-        is_done = st.session_state.get(prev_key, False)
-        color = done_fill if is_done else pending_fill
-        
-        return f"""
-        <div style='width: 1px; height: 6px; background: {color};'></div>
-        """
+    def get_line_color(key):
+        """Get line color based on completion"""
+        is_done = st.session_state.get(key, False)
+        return done_fill if is_done else pending_fill
     
-    # Build left column HTML
-    left_html = ""
+    # Build left column (8 dots with short lines)
+    left_html_parts = []
     for i, (key, tooltip) in enumerate(left_steps):
+        fill, border = get_dot_style(key)
+        
         if i > 0:
-            # Add connecting line (color from previous step)
-            left_html += get_line_html(left_steps[i-1][0])
-        left_html += get_dot_html(key, tooltip)
+            # Add connecting line
+            line_color = get_line_color(left_steps[i-1][0])
+            left_html_parts.append(f'<div style="width: 1px; height: 6px; background: {line_color};"></div>')
+        
+        # Add dot
+        left_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill}; border: 1.5px solid {border};" title="{tooltip}"></div>')
     
-    # Add line from last left step to final
-    left_html += get_line_html(left_steps[-1][0])
+    # Final line from left to final step
+    left_line_color = get_line_color(left_steps[-1][0])
+    left_html_parts.append(f'<div style="width: 1px; height: 6px; background: {left_line_color};"></div>')
     
-    # Build right column HTML
-    right_html = ""
-    for i, (key, tooltip) in enumerate(right_steps):
-        if i > 0:
-            # Add connecting line (color from previous step)
-            right_html += get_line_html(right_steps[i-1][0])
-        right_html += get_dot_html(key, tooltip)
+    left_html = ''.join(left_html_parts)
     
-    # Add line from last right step to final
-    right_html += get_line_html(right_steps[-1][0])
+    # Build right column (2 dots with ONE long line between them)
+    right_html_parts = []
     
-    # Final step dot
-    final_html = get_dot_html(final_step[0], final_step[1])
+    # First dot (top)
+    fill1, border1 = get_dot_style(right_steps[0][0])
+    right_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill1}; border: 1.5px solid {border1};" title="{right_steps[0][1]}"></div>')
     
-    # Assemble complete flowchart
-    html = f"""
-    <div style='text-align: center; padding: 0.3rem 0; margin: 0;'>
-        <div style='font-size: 0.65rem; font-weight: 600; 
-                    background: linear-gradient(135deg, #0e6537 0%, #21c55d 100%);
-                    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-                    margin-bottom: 0.25rem; letter-spacing: 0.5px;'>
-            WORKFLOW
-        </div>
-        <div style='display: flex; justify-content: center; gap: 1rem; margin: 0.2rem 0;'>
-            <div style='display: flex; flex-direction: column; align-items: center; gap: 0;'>
-                {left_html}
-            </div>
-            <div style='display: flex; flex-direction: column; align-items: center; gap: 0;'>
-                {right_html}
-            </div>
-        </div>
-        <div style='display: flex; justify-content: center; margin-top: 0;'>
-            {final_html}
-        </div>
-        <div style='font-size: 0.55rem; color: #6b7280; margin-top: 0.15rem;'>
-            <span style='color: {done_fill};'>●</span> Done 
-            <span style='color: {pending_fill}; margin-left: 0.3rem;'>●</span> Pending
-        </div>
-    </div>
-    """
+    # ONE long line connecting the two dots (spans most of the height)
+    line_color_right = get_line_color(right_steps[0][0])
+    right_html_parts.append(f'<div style="width: 1px; height: 48px; background: {line_color_right};"></div>')
+    
+    # Second dot (middle-bottom)
+    fill2, border2 = get_dot_style(right_steps[1][0])
+    right_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill2}; border: 1.5px solid {border2};" title="{right_steps[1][1]}"></div>')
+    
+    # Line from second dot to final step (to match left column height)
+    line_color_right2 = get_line_color(right_steps[1][0])
+    right_html_parts.append(f'<div style="width: 1px; height: 48px; background: {line_color_right2};"></div>')
+    
+    right_html = ''.join(right_html_parts)
+    
+    # Final step
+    final_fill, final_border = get_dot_style(final_step[0])
+    final_html = f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {final_fill}; border: 1.5px solid {final_border};" title="{final_step[1]}"></div>'
+    
+    # Assemble complete flowchart - NO line breaks or extra whitespace
+    html = f'<div style="text-align: center; padding: 0.3rem 0; margin: 0;"><div style="font-size: 0.65rem; font-weight: 600; background: linear-gradient(135deg, #0e6537 0%, #21c55d 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 0.25rem; letter-spacing: 0.5px;">WORKFLOW</div><div style="display: flex; justify-content: center; gap: 1rem; margin: 0.2rem 0;"><div style="display: flex; flex-direction: column; align-items: center; gap: 0;">{left_html}</div><div style="display: flex; flex-direction: column; align-items: center; gap: 0;">{right_html}</div></div><div style="display: flex; justify-content: center; margin-top: 0;">{final_html}</div><div style="font-size: 0.55rem; color: #6b7280; margin-top: 0.15rem;"><span style="color: {done_fill};">●</span> Done <span style="color: {pending_fill}; margin-left: 0.3rem;">●</span> Pending</div></div>'
     
     st.sidebar.markdown(html, unsafe_allow_html=True)
 
