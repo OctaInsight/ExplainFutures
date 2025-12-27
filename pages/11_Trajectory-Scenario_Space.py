@@ -782,9 +782,28 @@ def main():
             
             st.info("**Next Step:** Train models (if needed), evaluate, and forecast these parameters")
             
-            if st.button("🔮 Train & Forecast Missing Parameters", type="primary", use_container_width=True):
-                # Navigate to Page 12 Forecasting Helper
-                st.switch_page("pages/12_Forecasting_Helper.py")
+            # Check if user just returned from Page 12
+            if st.session_state.get('page12_forecasts_completed', False):
+                st.warning("⚠️ **Just returned from forecasting?** Click below to revalidate with updated data:")
+                
+                col1, col2 = st.columns([1, 1])
+                
+                with col1:
+                    if st.button("🔄 Revalidate Forecast Coverage", type="primary", use_container_width=True):
+                        # Force complete rebuild
+                        st.session_state.master_parameter_df = None
+                        st.session_state.trajectory_forecasts_updated = True
+                        st.session_state.pop('page12_forecasts_completed', None)
+                        st.rerun()
+                
+                with col2:
+                    if st.button("🔮 Go Back to Forecasting", type="secondary", use_container_width=True):
+                        st.switch_page("pages/12_Forecasting_Helper.py")
+            else:
+                # Normal flow - show forecast button
+                if st.button("🔮 Train & Forecast Missing Parameters", type="primary", use_container_width=True):
+                    # Navigate to Page 12 Forecasting Helper
+                    st.switch_page("pages/12_Forecasting_Helper.py")
             
             # Don't continue to baseline selection
             return
