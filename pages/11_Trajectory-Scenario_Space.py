@@ -609,36 +609,9 @@ def main():
     st.subheader("🔗 Step 1: Map Scenario Parameters to Historical Data")
     st.caption("Match each scenario parameter to its equivalent in historical data")
     
-    compatibility = calculate_compatibility(scenario_params, master_df, 
-                                           st.session_state.parameter_mappings)
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    score_pct = compatibility['score'] * 100
-    
-    if score_pct >= 80:
-        score_color = "🟢"
-        score_label = "Excellent"
-    elif score_pct >= 60:
-        score_color = "🟡"
-        score_label = "Good"
-    elif score_pct >= 40:
-        score_color = "🟠"
-        score_label = "Fair"
-    else:
-        score_color = "🔴"
-        score_label = "Poor"
-    
-    col1.metric("Compatibility", f"{score_pct:.0f}%", score_label)
-    col2.metric("Mapped Parameters", f"{compatibility['mapped']}/{compatibility['total']}")
-    col3.metric("Coverage", f"{compatibility['mapped']}/{compatibility['total']}")
-    col4.metric("Unmapped", len(compatibility['unmapped']))
-    
-    st.markdown(f"### {score_color} Compatibility: {score_label}")
-    
     st.markdown("---")
     
-    # Display mapping table
+    # Display mapping table FIRST (so selectboxes update session_state)
     st.markdown("### 📋 Parameter Mapping Table")
     
     params_by_category = {}
@@ -729,6 +702,37 @@ def main():
                 
                 st.markdown("")
     
+    st.markdown("---")
+    
+    # NOW calculate compatibility AFTER all selectboxes have been displayed and updated
+    compatibility = calculate_compatibility(scenario_params, master_df, 
+                                           st.session_state.parameter_mappings)
+    
+    # Display compatibility metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    score_pct = compatibility['score'] * 100
+    
+    if score_pct >= 80:
+        score_color = "🟢"
+        score_label = "Excellent"
+    elif score_pct >= 60:
+        score_color = "🟡"
+        score_label = "Good"
+    elif score_pct >= 40:
+        score_color = "🟠"
+        score_label = "Fair"
+    else:
+        score_color = "🔴"
+        score_label = "Poor"
+    
+    col1.metric("Compatibility", f"{score_pct:.0f}%", score_label)
+    col2.metric("Mapped Parameters", f"{compatibility['mapped']}/{compatibility['total']}")
+    col3.metric("Coverage", f"{compatibility['mapped']}/{compatibility['total']}")
+    col4.metric("Unmapped", len(compatibility['unmapped']))
+    
+    st.markdown(f"### {score_color} Compatibility: {score_label}")
+    
     if compatibility['unmapped']:
         st.markdown("---")
         st.warning(f"⚠️ **{len(compatibility['unmapped'])} Unmapped Parameters**")
@@ -766,8 +770,8 @@ def main():
             st.info("**Next Step:** Train models (if needed), evaluate, and forecast these parameters")
             
             if st.button("🔮 Train & Forecast Missing Parameters", type="primary", use_container_width=True):
-                # Navigate to hidden forecasting helper page (underscore prefix hides from sidebar)
-                st.switch_page("11b_Trajectory_Forecasting_Helper_hidden_page.py")
+                # Navigate to helper page in main directory (not in sidebar)
+                st.switch_page("11b_Trajectory_Forecasting_Helper.py")
             
             # Don't continue to baseline selection
             return
