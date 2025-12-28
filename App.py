@@ -26,6 +26,8 @@ except ImportError as e:
 # Initialize session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
+if 'show_password_reset' not in st.session_state:
+    st.session_state.show_password_reset = False
 
 def login_user(username: str, password: str):
     """Authenticate user and initialize session"""
@@ -146,7 +148,57 @@ with col_left:
                         st.error("❌ Invalid credentials. Please try again.")
         
         if forgot_button:
-            st.info("📧 Password reset: Please contact support at sales@octainsight.com")
+            st.session_state.show_password_reset = True
+            st.rerun()
+    
+    # Password reset dialog (outside the login form)
+    if st.session_state.get('show_password_reset', False):
+        st.markdown("---")
+        st.markdown("#### 🔑 Reset Password")
+        
+        with st.form("password_reset_form"):
+            reset_email = st.text_input(
+                "Enter your email address",
+                placeholder="your.email@example.com",
+                help="We'll send password reset instructions to this email"
+            )
+            
+            col_reset1, col_reset2 = st.columns(2)
+            
+            with col_reset1:
+                reset_button = st.form_submit_button(
+                    "Send Reset Link",
+                    type="primary",
+                    use_container_width=True
+                )
+            
+            with col_reset2:
+                cancel_button = st.form_submit_button(
+                    "Cancel",
+                    use_container_width=True
+                )
+            
+            if reset_button:
+                if not reset_email:
+                    st.error("⚠️ Please enter your email address")
+                elif not DB_AVAILABLE:
+                    st.error("Database connection not available")
+                else:
+                    with st.spinner("Processing request..."):
+                        db = get_db_manager()
+                        result = db.request_password_reset(reset_email)
+                        
+                        if result['success']:
+                            st.success(f"✅ {result['message']}")
+                            time.sleep(2)
+                            st.session_state.show_password_reset = False
+                            st.rerun()
+                        else:
+                            st.warning(f"⚠️ {result['message']}")
+            
+            if cancel_button:
+                st.session_state.show_password_reset = False
+                st.rerun()
 
     # Demo button (outside the form)
     if st.button("🚀 Launch Demo Session", type="secondary", use_container_width=True):
