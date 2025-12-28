@@ -89,3 +89,15 @@ transformers
 sentencepiece
 langdetect
 
+
+# Supabase client
+supabase==2.3.0
+
+# Password hashing
+bcrypt==4.1.2
+
+# Already should have:
+# streamlit>=1.30.0
+# pandas>=2.0.0
+# numpy>=1.24.0
+
