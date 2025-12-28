@@ -5,11 +5,12 @@ Landing page with login, demo access, and subscription information
 
 import streamlit as st
 import time
+from pathlib import Path
 
 # Page config FIRST
 st.set_page_config(
     page_title="ExplainFutures - Scenario Analysis Platform",
-    page_icon= Path("assets/logo_small.png"),
+    page_icon=str(Path("assets/logo_small.png")),  # Convert Path to string
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -147,8 +148,8 @@ with col_left:
         if forgot_button:
             st.info("📧 Password reset: Please contact support at sales@octainsight.com")
 
-    
-if st.button("🚀 Launch Demo Session", type="secondary", use_container_width=True):
+    # Demo button (outside the form)
+    if st.button("🚀 Launch Demo Session", type="secondary", use_container_width=True):
         with st.spinner("Starting demo session..."):
             if login_user("demo", "demo123"):
                 st.success("✅ Demo session started!")
@@ -157,12 +158,8 @@ if st.button("🚀 Launch Demo Session", type="secondary", use_container_width=T
                 st.rerun()
             else:
                 st.error("❌ Demo session failed to start. Please try again or contact support.")
- 
-    
-    
 
 with col_right:
-
     st.markdown("#### What is ExplainFutures?")
     st.markdown("""
     **ExplainFutures** helps you:
@@ -190,7 +187,6 @@ with col_right:
     - 🔒 Read-only data (cannot upload files)
     - 🔄 Changes reset on logout
     """)
-    
 
 st.markdown("---")
 
