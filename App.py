@@ -15,6 +15,10 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Initialize
+initialize_session_state()
+render_app_sidebar()
+
 # Import database manager
 try:
     from core.database.supabase_manager import get_db_manager
