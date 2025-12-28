@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 # Page configuration
 st.set_page_config(
     page_title="Model Evaluation & Selection",
-    page_icon="🔮",
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
