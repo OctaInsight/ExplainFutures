@@ -13,7 +13,7 @@ import sys
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
     page_title="Comments & Feedback",
-    page_icon="💬",
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
