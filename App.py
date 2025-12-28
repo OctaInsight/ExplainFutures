@@ -1,421 +1,45 @@
 """
-Page 1: User Dashboard (Updated)
-Project selection and management with multi-user support
+App.py Template - Fix for Your Root File
+
+INSTRUCTIONS:
+1. If your App.py is in the ROOT (same level as pages/ folder):
+   - Use "pages/00_Login.py" (with "pages/" prefix)
+   
+2. If your App.py is INSIDE pages/ folder:
+   - Use "00_Login.py" (no "pages/" prefix)
 """
 
 import streamlit as st
-from datetime import datetime
 import time
 
-# Page configuration
 st.set_page_config(
-    page_title="Dashboard - ExplainFutures",
-    page_icon="🏠",
+    page_title="ExplainFutures",
+    page_icon="🚀",
     layout="wide"
 )
 
-# Import database manager
-try:
-    from core.database.supabase_manager import get_db_manager
-    from core.shared_sidebar import render_app_sidebar
-    DB_AVAILABLE = True
-except ImportError as e:
-    DB_AVAILABLE = False
-    st.error(f"⚠️ Import error: {str(e)}")
-
-
 def check_authentication():
-    """Check if user is authenticated, redirect to login if not"""
+    """Check authentication - use correct path based on where App.py is located"""
     if not st.session_state.get('authenticated', False):
         st.warning("⚠️ Please log in to continue")
         time.sleep(1)
+        
+        # ✅ If App.py is in ROOT folder:
         st.switch_page("pages/00_Login.py")
+        
+        # ✅ If App.py is in pages/ folder:
+        # st.switch_page("00_Login.py")
+        
         st.stop()
 
+check_authentication()
 
-def show_demo_timer():
-    """Show countdown timer for demo users"""
-    if st.session_state.get('is_demo') and st.session_state.get('demo_expires_at'):
-        expires_at = datetime.fromisoformat(st.session_state.demo_expires_at.replace('Z', '+00:00'))
-        remaining = (expires_at - datetime.now()).total_seconds()
-        
-        if remaining > 0:
-            minutes = int(remaining // 60)
-            seconds = int(remaining % 60)
-            
-            st.sidebar.warning(f"🎭 Demo expires in: {minutes:02d}:{seconds:02d}")
-        else:
-            st.sidebar.error("🎭 Demo session expired!")
-            if st.sidebar.button("Start New Demo"):
-                logout_user()
+# Redirect authenticated users to dashboard
+st.info("Redirecting to dashboard...")
+time.sleep(1)
 
+# ✅ If App.py is in ROOT:
+st.switch_page("pages/01_Home.py")
 
-def logout_user():
-    """Logout and cleanup"""
-    db = get_db_manager()
-    
-    # Cleanup demo session if needed
-    if st.session_state.get('is_demo') and st.session_state.get('demo_session_id'):
-        try:
-            db.end_demo_session(st.session_state.demo_session_id)
-            st.success("🎭 Demo session cleaned up!")
-        except Exception as e:
-            st.error(f"Cleanup error: {str(e)}")
-    
-    # Clear session state
-    for key in list(st.session_state.keys()):
-        del st.session_state[key]
-    
-    st.success("✅ Logged out successfully")
-    time.sleep(1)
-    st.switch_page("pages/00_Login.py")
-
-
-def create_new_project():
-    """Show create project dialog"""
-    st.subheader("📁 Create New Project")
-    
-    with st.form("create_project_form"):
-        project_name = st.text_input(
-            "Project Name*",
-            placeholder="e.g., Climate Scenarios 2050",
-            help="Give your project a descriptive name"
-        )
-        
-        description = st.text_area(
-            "Description",
-            placeholder="Brief description of your project goals...",
-            height=100
-        )
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            baseline_year = st.number_input(
-                "Baseline Year",
-                min_value=1900,
-                max_value=2030,
-                value=2020,
-                help="Reference year for historical data"
-            )
-        
-        with col2:
-            target_year = st.number_input(
-                "Target Year",
-                min_value=2025,
-                max_value=2100,
-                value=2050,
-                help="Future year for scenario analysis"
-            )
-        
-        submitted = st.form_submit_button("Create Project", type="primary", use_container_width=True)
-        
-        if submitted:
-            if not project_name:
-                st.error("⚠️ Project name is required")
-                return
-            
-            db = get_db_manager()
-            
-            # Check limits
-            limits = db.check_user_limits(st.session_state.user_id)
-            
-            if not limits['can_create_project']:
-                st.error("❌ You've reached your project limit. Please upgrade or delete old projects.")
-                return
-            
-            # Create project
-            try:
-                project = db.create_project(
-                    owner_id=st.session_state.user_id,
-                    project_name=project_name,
-                    description=description,
-                    baseline_year=baseline_year,
-                    scenario_target_year=target_year
-                )
-                
-                if project:
-                    st.success(f"✅ Project created: {project['project_code']}")
-                    st.session_state.current_project_id = project['project_id']
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to create project")
-                    
-            except Exception as e:
-                st.error(f"Error creating project: {str(e)}")
-
-
-def show_user_stats(db):
-    """Show user statistics and limits"""
-    user = db.admin_client.table('users').select('*').eq('user_id', st.session_state.user_id).execute()
-    
-    if user.data:
-        user_data = user.data[0]
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                "Projects",
-                f"{user_data.get('current_project_count', 0)} / {user_data.get('max_projects', 3)}",
-                help="Number of active projects"
-            )
-        
-        with col2:
-            st.metric(
-                "Storage",
-                f"{user_data.get('current_storage_mb', 0):.1f} / {user_data.get('max_storage_mb', 1000)} MB",
-                help="Storage space used"
-            )
-        
-        with col3:
-            st.metric(
-                "Uploads This Month",
-                f"{user_data.get('uploads_this_month', 0)} / {user_data.get('max_uploads_per_month', 50)}",
-                help="Files uploaded this month"
-            )
-        
-        with col4:
-            tier = user_data.get('subscription_tier', 'free').upper()
-            st.metric(
-                "Subscription",
-                tier,
-                help="Current subscription tier"
-            )
-
-
-def show_projects_list(db):
-    """Show user's projects"""
-    st.subheader("📂 My Projects")
-    
-    # Get projects
-    projects = db.get_user_projects(
-        user_id=st.session_state.user_id,
-        include_collaborations=True
-    )
-    
-    if not projects:
-        st.info("🎯 No projects yet. Create your first project to get started!")
-        return
-    
-    # Filter options
-    col_filter1, col_filter2, col_filter3 = st.columns(3)
-    
-    with col_filter1:
-        filter_status = st.selectbox(
-            "Status",
-            options=["All", "Active", "Archived"],
-            index=0
-        )
-    
-    with col_filter2:
-        sort_by = st.selectbox(
-            "Sort by",
-            options=["Last Accessed", "Created Date", "Name", "Progress"],
-            index=0
-        )
-    
-    with col_filter3:
-        view_mode = st.radio(
-            "View",
-            options=["Grid", "List"],
-            index=0,
-            horizontal=True
-        )
-    
-    # Filter projects
-    filtered_projects = projects
-    
-    if filter_status == "Active":
-        filtered_projects = [p for p in projects if p['status'] == 'active']
-    elif filter_status == "Archived":
-        filtered_projects = [p for p in projects if p['status'] == 'archived']
-    
-    # Sort projects
-    if sort_by == "Last Accessed":
-        filtered_projects.sort(key=lambda x: x.get('last_accessed', ''), reverse=True)
-    elif sort_by == "Created Date":
-        filtered_projects.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-    elif sort_by == "Name":
-        filtered_projects.sort(key=lambda x: x.get('project_name', ''))
-    elif sort_by == "Progress":
-        filtered_projects.sort(key=lambda x: x.get('completion_percentage', 0), reverse=True)
-    
-    st.markdown("---")
-    
-    # Display projects
-    if view_mode == "Grid":
-        # Grid view (3 columns)
-        cols = st.columns(3)
-        
-        for idx, project in enumerate(filtered_projects):
-            with cols[idx % 3]:
-                show_project_card(project, db)
-    
-    else:
-        # List view
-        for project in filtered_projects:
-            show_project_row(project, db)
-
-
-def show_project_card(project, db):
-    """Show project as card (grid view)"""
-    is_owner = project['owner_id'] == st.session_state.user_id
-    is_demo = project.get('is_demo_project', False)
-    
-    with st.container(border=True):
-        # Header
-        st.markdown(f"**{project['project_name']}**")
-        
-        if is_demo:
-            st.caption("🎭 Demo Project")
-        elif is_owner:
-            st.caption("👤 Owner")
-        else:
-            st.caption("👥 Collaborator")
-        
-        # Progress
-        progress = project.get('completion_percentage', 0)
-        st.progress(progress / 100, text=f"Progress: {progress}%")
-        
-        # Stats
-        col1, col2 = st.columns(2)
-        with col1:
-            st.caption(f"📄 {project.get('total_parameters', 0)} params")
-        with col2:
-            st.caption(f"📊 {project.get('total_scenarios', 0)} scenarios")
-        
-        # Actions
-        col_btn1, col_btn2 = st.columns(2)
-        
-        with col_btn1:
-            if st.button("Open", key=f"open_{project['project_id']}", use_container_width=True):
-                st.session_state.current_project_id = project['project_id']
-                
-                # Update last accessed
-                db.update_project_progress(
-                    project_id=project['project_id'],
-                    current_page=project.get('current_page', 2)
-                )
-                
-                st.switch_page(f"pages/{project.get('current_page', 2):02d}_*.py")
-        
-        with col_btn2:
-            if st.button("⋯", key=f"menu_{project['project_id']}", use_container_width=True):
-                st.session_state[f"show_menu_{project['project_id']}"] = True
-
-
-def show_project_row(project, db):
-    """Show project as row (list view)"""
-    is_owner = project['owner_id'] == st.session_state.user_id
-    is_demo = project.get('is_demo_project', False)
-    
-    with st.expander(f"{'🎭' if is_demo else '📁'} {project['project_name']}", expanded=False):
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.markdown(f"**Description:** {project.get('description', 'No description')}")
-            st.caption(f"**Code:** {project.get('project_code', 'N/A')}")
-            st.caption(f"**Created:** {datetime.fromisoformat(project['created_at'].replace('Z', '')).strftime('%Y-%m-%d')}")
-            
-            if not is_owner:
-                st.caption("👥 Shared with you")
-        
-        with col2:
-            st.metric("Progress", f"{project.get('completion_percentage', 0)}%")
-            st.metric("Parameters", project.get('total_parameters', 0))
-            st.metric("Scenarios", project.get('total_scenarios', 0))
-        
-        # Actions
-        col_act1, col_act2, col_act3, col_act4 = st.columns(4)
-        
-        with col_act1:
-            if st.button("Open Project", key=f"open_list_{project['project_id']}", type="primary"):
-                st.session_state.current_project_id = project['project_id']
-                db.update_project_progress(
-                    project_id=project['project_id'],
-                    current_page=project.get('current_page', 2)
-                )
-                st.switch_page(f"pages/{project.get('current_page', 2):02d}_*.py")
-        
-        with col_act2:
-            if st.button("Settings", key=f"settings_{project['project_id']}"):
-                st.info("Project settings coming soon")
-        
-        with col_act3:
-            if st.button("Share", key=f"share_{project['project_id']}"):
-                st.info("Sharing functionality coming soon")
-        
-        with col_act4:
-            if is_owner and not is_demo:
-                if st.button("Delete", key=f"delete_{project['project_id']}"):
-                    if st.session_state.get(f"confirm_delete_{project['project_id']}"):
-                        db.delete_project(project['project_id'], st.session_state.user_id)
-                        st.success("Project deleted")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.session_state[f"confirm_delete_{project['project_id']}"] = True
-                        st.warning("⚠️ Click again to confirm deletion")
-
-
-def main():
-    """Main dashboard"""
-    
-    check_authentication()
-    
-    # Sidebar
-    try:
-        render_app_sidebar()
-    except:
-        # Minimal sidebar
-        st.sidebar.title("ExplainFutures")
-        st.sidebar.markdown(f"**User:** {st.session_state.get('username', 'Unknown')}")
-        
-        if st.sidebar.button("Logout", use_container_width=True):
-            logout_user()
-    
-    # Show demo timer if demo user
-    if st.session_state.get('is_demo'):
-        show_demo_timer()
-    
-    # Header
-    st.title("🏠 Dashboard")
-    st.markdown(f"**Welcome back, {st.session_state.get('full_name', 'User')}!**")
-    
-    if st.session_state.get('is_demo'):
-        st.info("🎭 **Demo Mode**: Explore with pre-loaded data. Your session will expire in 30 minutes and changes will be reset.")
-    
-    st.markdown("---")
-    
-    # Get database
-    db = get_db_manager()
-    
-    # User stats
-    show_user_stats(db)
-    
-    st.markdown("---")
-    
-    # Main content tabs
-    tab1, tab2, tab3 = st.tabs(["📂 Projects", "➕ Create Project", "📊 Activity"])
-    
-    with tab1:
-        show_projects_list(db)
-    
-    with tab2:
-        if st.session_state.get('is_demo'):
-            st.warning("🎭 Demo users cannot create projects. Use the pre-loaded demo project.")
-        else:
-            create_new_project()
-    
-    with tab3:
-        st.info("📊 Activity feed coming soon")
-        st.caption("Recent actions, collaborations, and notifications will appear here.")
-
-
-if __name__ == "__main__":
-    if not DB_AVAILABLE:
-        st.stop()
-    
-    main()
+# ✅ If App.py is in pages/:
+# st.switch_page("01_Home.py")
