@@ -1,45 +1,54 @@
 """
-App.py Template - Fix for Your Root File
-
-INSTRUCTIONS:
-1. If your App.py is in the ROOT (same level as pages/ folder):
-   - Use "pages/00_Login.py" (with "pages/" prefix)
-   
-2. If your App.py is INSIDE pages/ folder:
-   - Use "00_Login.py" (no "pages/" prefix)
+App.py - Main Entry Point
+Landing page that redirects to login or dashboard
 """
 
 import streamlit as st
 import time
 
+# Page config FIRST (before any other Streamlit commands)
 st.set_page_config(
     page_title="ExplainFutures",
     page_icon="🚀",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-def check_authentication():
-    """Check authentication - use correct path based on where App.py is located"""
-    if not st.session_state.get('authenticated', False):
-        st.warning("⚠️ Please log in to continue")
-        time.sleep(1)
+# Initialize session state
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+# Check authentication and redirect
+if not st.session_state.authenticated:
+    # Not authenticated - show welcome and redirect to login
+    st.title("🚀 Welcome to ExplainFutures")
+    st.markdown("### Scenario Analysis & Futures Forecasting")
+    st.markdown("---")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("""
+        **ExplainFutures** helps you:
+        - 📊 Analyze future scenarios
+        - 🔮 Generate forecasts
+        - 📈 Compare outcomes
+        - 🎯 Make data-driven decisions
+        """)
+    
+    with col2:
+        st.info("Please log in to continue")
+        if st.button("🔐 Go to Login", type="primary", use_container_width=True):
+            st.switch_page("pages/00_Login.py")
         
-        # ✅ If App.py is in ROOT folder:
-        st.switch_page("pages/00_Login.py")
-        
-        # ✅ If App.py is in pages/ folder:
-        # st.switch_page("00_Login.py")
-        
-        st.stop()
-
-check_authentication()
-
-# Redirect authenticated users to dashboard
-st.info("Redirecting to dashboard...")
-time.sleep(1)
-
-# ✅ If App.py is in ROOT:
-st.switch_page("pages/01_Home.py")
-
-# ✅ If App.py is in pages/:
-# st.switch_page("01_Home.py")
+        st.markdown("---")
+        st.caption("Don't have an account? Try the demo!")
+        if st.button("🎭 Try Demo", use_container_width=True):
+            st.switch_page("pages/00_Login.py")
+    
+else:
+    # Authenticated - redirect to dashboard
+    st.success(f"✅ Welcome back, {st.session_state.get('username', 'User')}!")
+    st.info("Redirecting to dashboard...")
+    time.sleep(1)
+    st.switch_page("pages/01_Home.py")
