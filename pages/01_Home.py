@@ -8,11 +8,10 @@ from datetime import datetime
 import time
 from pathlib import Path
 
-
 # Page configuration
 st.set_page_config(
     page_title="Dashboard - ExplainFutures",
-     page_icon=str(Path("assets/logo_small.png")),
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
@@ -180,6 +179,39 @@ def show_projects_list(db):
         st.info("🎯 No projects yet. Create your first project to get started!")
         return
     
+    # Separate owned and shared projects
+    owned_projects = [p for p in projects if p.get('is_owner', True)]
+    shared_projects = [p for p in projects if not p.get('is_owner', True)]
+    
+    # Create tabs for owned and shared
+    if shared_projects:
+        tab_owned, tab_shared = st.tabs([
+            f"📁 My Projects ({len(owned_projects)})",
+            f"👥 Shared with Me ({len(shared_projects)})"
+        ])
+    else:
+        tab_owned = st.container()
+        tab_shared = None
+    
+    # Show owned projects
+    with tab_owned:
+        show_project_section(db, owned_projects, "owned")
+    
+    # Show shared projects if any
+    if tab_shared:
+        with tab_shared:
+            show_project_section(db, shared_projects, "shared")
+
+
+def show_project_section(db, projects, section_type):
+    """Show a section of projects (owned or shared)"""
+    if not projects:
+        if section_type == "shared":
+            st.info("📭 No projects have been shared with you yet.")
+        else:
+            st.info("🎯 No projects yet. Create your first project to get started!")
+        return
+    
     # Filter options
     col_filter1, col_filter2, col_filter3 = st.columns(3)
     
@@ -187,14 +219,16 @@ def show_projects_list(db):
         filter_status = st.selectbox(
             "Status",
             options=["All", "Active", "Archived"],
-            index=0
+            index=0,
+            key=f"status_{section_type}"
         )
     
     with col_filter2:
         sort_by = st.selectbox(
             "Sort by",
             options=["Last Accessed", "Created Date", "Name", "Progress"],
-            index=0
+            index=0,
+            key=f"sort_{section_type}"
         )
     
     with col_filter3:
@@ -202,7 +236,8 @@ def show_projects_list(db):
             "View",
             options=["Grid", "List"],
             index=0,
-            horizontal=True
+            horizontal=True,
+            key=f"view_{section_type}"
         )
     
     # Filter projects
@@ -242,7 +277,7 @@ def show_projects_list(db):
 
 def show_project_card(project, db):
     """Show project as card (grid view)"""
-    is_owner = project['owner_id'] == st.session_state.user_id
+    is_owner = project.get('is_owner', project['owner_id'] == st.session_state.user_id)
     is_demo = project.get('is_demo_project', False)
     
     with st.container(border=True):
@@ -254,7 +289,17 @@ def show_project_card(project, db):
         elif is_owner:
             st.caption("👤 Owner")
         else:
-            st.caption("👥 Collaborator")
+            access_role = project.get('access_role', 'collaborator')
+            st.caption(f"👥 {access_role.title()}")
+        
+        # Show collaborators if owner
+        if is_owner and not is_demo:
+            collaborators = db.get_project_collaborators(project['project_id'])
+            if collaborators:
+                collab_names = ", ".join([c['username'] for c in collaborators[:2]])
+                if len(collaborators) > 2:
+                    collab_names += f" +{len(collaborators) - 2} more"
+                st.caption(f"🤝 Shared with: {collab_names}")
         
         # Progress
         progress = project.get('completion_percentage', 0)
@@ -292,27 +337,65 @@ def show_project_card(project, db):
         if st.session_state.get(f"show_menu_{project['project_id']}", False):
             st.markdown("---")
             
-            col_menu1, col_menu2 = st.columns(2)
-            
-            with col_menu1:
-                if st.button("Share", key=f"share_card_{project['project_id']}", use_container_width=True):
-                    st.session_state[f"show_share_{project['project_id']}"] = True
+            if is_owner:
+                col_menu1, col_menu2 = st.columns(2)
+                
+                with col_menu1:
+                    if st.button("Share", key=f"share_card_{project['project_id']}", use_container_width=True):
+                        st.session_state[f"show_share_{project['project_id']}"] = True
+                        st.session_state[f"show_menu_{project['project_id']}"] = False
+                        st.rerun()
+                
+                with col_menu2:
+                    if not is_demo:
+                        if st.button("Delete", key=f"delete_card_{project['project_id']}", use_container_width=True):
+                            if st.session_state.get(f"confirm_delete_{project['project_id']}"):
+                                db.delete_project(project['project_id'], st.session_state.user_id)
+                                st.success("Project deleted")
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.session_state[f"confirm_delete_{project['project_id']}"] = True
+                                st.warning("⚠️ Click again to confirm")
+                
+                # Show collaborators management
+                if st.button("Manage Access", key=f"manage_collab_card_{project['project_id']}", use_container_width=True):
+                    st.session_state[f"show_collaborators_{project['project_id']}"] = True
                     st.session_state[f"show_menu_{project['project_id']}"] = False
                     st.rerun()
-            
-            with col_menu2:
-                if is_owner and not is_demo:
-                    if st.button("Delete", key=f"delete_card_{project['project_id']}", use_container_width=True):
-                        if st.session_state.get(f"confirm_delete_{project['project_id']}"):
-                            db.delete_project(project['project_id'], st.session_state.user_id)
-                            st.success("Project deleted")
-                            time.sleep(1)
-                            st.rerun()
-                        else:
-                            st.session_state[f"confirm_delete_{project['project_id']}"] = True
-                            st.warning("⚠️ Click again to confirm")
+            else:
+                # For collaborators, show limited options
+                st.caption(f"Access: {project.get('access_role', 'collaborator').title()}")
+                if project.get('can_edit'):
+                    st.caption("✓ Can edit")
         
-        # Share dialog (same as list view)
+        # Collaborators management dialog
+        if st.session_state.get(f"show_collaborators_{project['project_id']}", False):
+            st.markdown("---")
+            st.markdown("**👥 Project Access**")
+            
+            collaborators = db.get_project_collaborators(project['project_id'])
+            
+            if collaborators:
+                for collab in collaborators:
+                    col_name, col_remove = st.columns([3, 1])
+                    with col_name:
+                        st.text(f"{collab['full_name']} ({collab['username']})")
+                        st.caption(f"Role: {collab['role']}")
+                    with col_remove:
+                        if st.button("Remove", key=f"remove_{collab['collaborator_id']}"):
+                            if db.remove_collaborator(project['project_id'], collab['user_id'], st.session_state.user_id):
+                                st.success(f"Removed {collab['username']}")
+                                time.sleep(1)
+                                st.rerun()
+            else:
+                st.caption("No collaborators yet")
+            
+            if st.button("Close", key=f"close_collab_card_{project['project_id']}", use_container_width=True):
+                st.session_state[f"show_collaborators_{project['project_id']}"] = False
+                st.rerun()
+        
+        # Share dialog (same as before)
         if st.session_state.get(f"show_share_{project['project_id']}", False):
             st.markdown("---")
             st.markdown("**👥 Share Project**")
@@ -371,7 +454,7 @@ def show_project_card(project, db):
 
 def show_project_row(project, db):
     """Show project as row (list view)"""
-    is_owner = project['owner_id'] == st.session_state.user_id
+    is_owner = project.get('is_owner', project['owner_id'] == st.session_state.user_id)
     is_demo = project.get('is_demo_project', False)
     
     with st.expander(f"{'🎭' if is_demo else '📁'} {project['project_name']}", expanded=False):
@@ -383,7 +466,13 @@ def show_project_row(project, db):
             st.caption(f"**Created:** {datetime.fromisoformat(project['created_at'].replace('Z', '')).strftime('%Y-%m-%d')}")
             
             if not is_owner:
-                st.caption("👥 Shared with you")
+                st.caption(f"👥 Shared by owner • Role: {project.get('access_role', 'collaborator').title()}")
+            else:
+                # Show collaborators for owner
+                collaborators = db.get_project_collaborators(project['project_id'])
+                if collaborators:
+                    collab_list = ", ".join([c['username'] for c in collaborators])
+                    st.caption(f"🤝 **Collaborators:** {collab_list}")
         
         with col2:
             st.metric("Progress", f"{project.get('completion_percentage', 0)}%")
@@ -391,7 +480,11 @@ def show_project_row(project, db):
             st.metric("Scenarios", project.get('total_scenarios', 0))
         
         # Actions
-        col_act1, col_act2, col_act3, col_act4 = st.columns(4)
+        if is_owner:
+            col_act1, col_act2, col_act3, col_act4 = st.columns(4)
+        else:
+            col_act1, col_act2 = st.columns([1, 3])
+            col_act3 = col_act4 = None
         
         with col_act1:
             if st.button("Open Project", key=f"open_list_{project['project_id']}", type="primary"):
@@ -403,13 +496,60 @@ def show_project_row(project, db):
                 # Navigate to Data Import page
                 st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
         
-        with col_act2:
-            if st.button("Settings", key=f"settings_{project['project_id']}"):
-                st.info("Project settings coming soon")
+        if is_owner:
+            with col_act2:
+                if st.button("Manage Access", key=f"manage_access_{project['project_id']}"):
+                    st.session_state[f"show_manage_access_{project['project_id']}"] = True
+                    st.rerun()
+            
+            with col_act3:
+                if st.button("Share", key=f"share_{project['project_id']}"):
+                    st.session_state[f"show_share_{project['project_id']}"] = True
+                    st.rerun()
+            
+            with col_act4:
+                if not is_demo:
+                    if st.button("Delete", key=f"delete_{project['project_id']}"):
+                        if st.session_state.get(f"confirm_delete_{project['project_id']}"):
+                            db.delete_project(project['project_id'], st.session_state.user_id)
+                            st.success("Project deleted")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.session_state[f"confirm_delete_{project['project_id']}"] = True
+                            st.warning("⚠️ Click again to confirm deletion")
         
-        with col_act3:
-            if st.button("Share", key=f"share_{project['project_id']}"):
-                st.session_state[f"show_share_{project['project_id']}"] = True
+        # Manage Access dialog
+        if st.session_state.get(f"show_manage_access_{project['project_id']}", False):
+            st.markdown("---")
+            st.markdown("#### 👥 Manage Project Access")
+            
+            collaborators = db.get_project_collaborators(project['project_id'])
+            
+            if collaborators:
+                for collab in collaborators:
+                    col_user, col_role, col_actions = st.columns([2, 1, 1])
+                    
+                    with col_user:
+                        st.markdown(f"**{collab['full_name']}**")
+                        st.caption(collab['email'])
+                    
+                    with col_role:
+                        st.text(collab['role'].title())
+                        if collab['can_edit']:
+                            st.caption("✓ Can edit")
+                    
+                    with col_actions:
+                        if st.button("Remove", key=f"remove_list_{collab['collaborator_id']}"):
+                            if db.remove_collaborator(project['project_id'], collab['user_id'], st.session_state.user_id):
+                                st.success(f"Removed {collab['username']}")
+                                time.sleep(1)
+                                st.rerun()
+            else:
+                st.info("No collaborators yet. Use the 'Share' button to add collaborators.")
+            
+            if st.button("Close", key=f"close_manage_{project['project_id']}", use_container_width=True):
+                st.session_state[f"show_manage_access_{project['project_id']}"] = False
                 st.rerun()
         
         # Share dialog
@@ -473,18 +613,6 @@ def show_project_row(project, db):
                 if cancel_share:
                     st.session_state[f"show_share_{project['project_id']}"] = False
                     st.rerun()
-        
-        with col_act4:
-            if is_owner and not is_demo:
-                if st.button("Delete", key=f"delete_{project['project_id']}"):
-                    if st.session_state.get(f"confirm_delete_{project['project_id']}"):
-                        db.delete_project(project['project_id'], st.session_state.user_id)
-                        st.success("Project deleted")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.session_state[f"confirm_delete_{project['project_id']}"] = True
-                        st.warning("⚠️ Click again to confirm deletion")
 
 
 def main():
