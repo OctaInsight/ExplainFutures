@@ -17,7 +17,7 @@ import plotly.express as px
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
     page_title="Scenario Analysis (NLP)",
-    page_icon="🔮",
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"  # CRITICAL: Use full page width
 )
 
