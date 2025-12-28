@@ -29,8 +29,11 @@ class SupabaseManager:
             self.url = st.secrets["supabase"]["url"]
             self.key = st.secrets["supabase"]["key"]
             
-            # Create Supabase client (same client for all operations)
-            self.client: Client = create_client(self.url, self.key)
+            # Create Supabase client with minimal options (no proxy parameter)
+            self.client: Client = create_client(
+                supabase_url=self.url,
+                supabase_key=self.key
+            )
             
             # Demo user/project IDs
             self.demo_user_id = st.secrets["app"]["demo_user_id"]
@@ -145,6 +148,67 @@ class SupabaseManager:
             'failure_reason': failure_reason,
             'ip_address': ip_address,
             'user_agent': user_agent
+        }).execute()
+    
+    def request_password_reset(self, email: str) -> Dict[str, Any]:
+        """
+        Request password reset - sends email with credentials if email exists
+        
+        Args:
+            email: User's email address
+            
+        Returns:
+            Dict with:
+                - success: bool
+                - message: str (user-facing message)
+                - email_sent: bool (for logging)
+                - user_found: bool (for internal use)
+        """
+        try:
+            # Check if email exists
+            result = self.client.table('users').select('*').eq('email', email).execute()
+            
+            if not result.data:
+                # Email not found
+                return {
+                    'success': False,
+                    'message': f"This email is not registered. Please request a subscription at sales@octainsight.com",
+                    'email_sent': False,
+                    'user_found': False
+                }
+            
+            user = result.data[0]
+            
+            # Use Supabase auth to send password reset email
+            # This will send a reset link to the user's email
+            try:
+                self.client.auth.reset_password_email(email)
+                
+                return {
+                    'success': True,
+                    'message': f"Password reset instructions have been sent to {email}. Please check your inbox.",
+                    'email_sent': True,
+                    'user_found': True,
+                    'username': user['username']  # For confirmation
+                }
+            except Exception as email_error:
+                # If Supabase auth fails, return helpful message
+                return {
+                    'success': True,
+                    'message': f"Password reset requested for {email}. Please contact sales@octainsight.com for assistance.",
+                    'email_sent': False,
+                    'user_found': True,
+                    'username': user['username']
+                }
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f"An error occurred. Please contact sales@octainsight.com",
+                'email_sent': False,
+                'user_found': False,
+                'error': str(e)
+            }
         }).execute()
     
     def is_demo_user(self, user_id: str) -> bool:
