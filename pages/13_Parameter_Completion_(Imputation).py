@@ -11,8 +11,8 @@ from datetime import datetime, timedelta
 
 # Page configuration
 st.set_page_config(
-    page_title="Forecast Missing Parameters",
-    page_icon="🔮",
+    page_title="Parameter Completion (Imputation)",
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
