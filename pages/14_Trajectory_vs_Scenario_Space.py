@@ -14,8 +14,8 @@ import plotly.express as px
 
 # Page configuration
 st.set_page_config(
-    page_title="Trajectory-Scenario Space",
-    page_icon="🎯",
+    page_title="Trajectory vs Scenario Space",
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
