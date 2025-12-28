@@ -1,232 +1,421 @@
 """
-ExplainFutures - Main Entry Point
-Login/Logout Page
+Page 1: User Dashboard (Updated)
+Project selection and management with multi-user support
 """
 
 import streamlit as st
 from datetime import datetime
-from pathlib import Path
-import base64
+import time
 
-# MUST be first Streamlit command
+# Page configuration
 st.set_page_config(
-    page_title="ExplainFutures - Login",
-    page_icon="🔮",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Dashboard - ExplainFutures",
+    page_icon="🏠",
+    layout="wide"
 )
 
-# Helper function to get logo
-def get_logo_base64():
-    """Get logo as base64 string for embedding"""
-    logo_path = Path(__file__).parent / "assets" / "logo_small.png"
-    try:
-        with open(logo_path, "rb") as f:
-            return base64.b64encode(f.read()).decode()
-    except Exception as e:
-        # Try alternative path
+# Import database manager
+try:
+    from core.database.supabase_manager import get_db_manager
+    from core.shared_sidebar import render_app_sidebar
+    DB_AVAILABLE = True
+except ImportError as e:
+    DB_AVAILABLE = False
+    st.error(f"⚠️ Import error: {str(e)}")
+
+
+def check_authentication():
+    """Check if user is authenticated, redirect to login if not"""
+    if not st.session_state.get('authenticated', False):
+        st.warning("⚠️ Please log in to continue")
+        time.sleep(1)
+        st.switch_page("pages/00_Login.py")
+        st.stop()
+
+
+def show_demo_timer():
+    """Show countdown timer for demo users"""
+    if st.session_state.get('is_demo') and st.session_state.get('demo_expires_at'):
+        expires_at = datetime.fromisoformat(st.session_state.demo_expires_at.replace('Z', '+00:00'))
+        remaining = (expires_at - datetime.now()).total_seconds()
+        
+        if remaining > 0:
+            minutes = int(remaining // 60)
+            seconds = int(remaining % 60)
+            
+            st.sidebar.warning(f"🎭 Demo expires in: {minutes:02d}:{seconds:02d}")
+        else:
+            st.sidebar.error("🎭 Demo session expired!")
+            if st.sidebar.button("Start New Demo"):
+                logout_user()
+
+
+def logout_user():
+    """Logout and cleanup"""
+    db = get_db_manager()
+    
+    # Cleanup demo session if needed
+    if st.session_state.get('is_demo') and st.session_state.get('demo_session_id'):
         try:
-            logo_path = Path("assets/logo_small.png")
-            with open(logo_path, "rb") as f:
-                return base64.b64encode(f.read()).decode()
-        except:
-            return None
+            db.end_demo_session(st.session_state.demo_session_id)
+            st.success("🎭 Demo session cleaned up!")
+        except Exception as e:
+            st.error(f"Cleanup error: {str(e)}")
+    
+    # Clear session state
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    
+    st.success("✅ Logged out successfully")
+    time.sleep(1)
+    st.switch_page("pages/00_Login.py")
 
-# Render sidebar
-def render_sidebar():
-    """Render the sidebar with logo and info"""
-    
-    # Try to get logo as base64
-    logo_base64 = get_logo_base64()
-    
-    # Logo and Title at the very top
-    if logo_base64:
-        st.sidebar.markdown(f"""
-            <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
-                <img src='data:image/png;base64,{logo_base64}' style='width: 80px; height: 80px; margin-bottom: 0.5rem;' alt='Logo'/>
-                <h2 style='margin: 0; color: white; font-weight: 600;'>ExplainFutures</h2>
-                <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
-            </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.sidebar.markdown("""
-            <div style='text-align: center; padding: 1.5rem 0 1rem 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-bottom: 1rem;'>
-                <div style='font-size: 3rem; margin-bottom: 0.5rem;'>🔮</div>
-                <h2 style='margin: 0; color: white; font-weight: 600;'>ExplainFutures</h2>
-                <p style='margin: 0.3rem 0 0 0; font-size: 0.85rem; color: rgba(255,255,255,0.9);'>Data-Driven Future Exploration</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    st.sidebar.markdown("---")
-    
-    # Login/Logout section
-    if st.session_state.get("logged_in", False):
-        st.sidebar.success(f"✅ Logged in: **{st.session_state.get('username', 'User')}**")
-        
-        if st.session_state.get("login_time"):
-            duration = datetime.now() - st.session_state.login_time
-            minutes = int(duration.total_seconds() / 60)
-            st.sidebar.caption(f"Session: {minutes} min")
-        
-        if st.sidebar.button("🚪 Logout", use_container_width=True, key="sidebar_logout_btn"):
-            st.session_state.logged_in = False
-            st.session_state.username = None
-            st.session_state.login_time = None
-            st.rerun()
-    else:
-        st.sidebar.warning("⚠️ Not logged in")
-        st.sidebar.caption("Please login below")
-    
-    st.sidebar.markdown("---")
-    
-    # About ExplainFutures
-    with st.sidebar.expander("📖 About ExplainFutures"):
-        st.markdown("""
-        **Version:** 1.0.0-phase1
-        
-        A modular platform for:
-        - Time-series analysis
-        - Interactive visualizations
-        - Predictive modeling
-        - Future exploration
-        - Scenario planning
-        """)
-    
-    # About Octa Insight
-    with st.sidebar.expander("🏢 About Octa Insight"):
-        st.markdown("""
-        **Octa Insight** specializes in data-driven decision support systems.
-        
-        - Analytics platforms
-        - AI/ML solutions
-        - Consulting services
-        
-        📧 info@octainsight.com
-        """)
-    
-    # Footer
-    st.sidebar.markdown("<br>", unsafe_allow_html=True)
-    st.sidebar.caption("ExplainFutures v1.0.0")
-    st.sidebar.caption("© 2024 Octa Insight")
 
-# Render sidebar
-render_sidebar()
-
-# Initialize session state
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "username" not in st.session_state:
-    st.session_state.username = None
-if "login_time" not in st.session_state:
-    st.session_state.login_time = None
-
-# Main content
-st.title("🔮 ExplainFutures")
-st.markdown("### Data-Driven Future Exploration")
-st.markdown("---")
-
-if not st.session_state.logged_in:
-    # Login Form
-    st.subheader("🔐 Login")
+def create_new_project():
+    """Show create project dialog"""
+    st.subheader("📁 Create New Project")
     
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        with st.form("login_form"):
-            username = st.text_input("Username", placeholder="Enter your username")
-            password = st.text_input("Password", type="password", placeholder="Enter your password")
+    with st.form("create_project_form"):
+        project_name = st.text_input(
+            "Project Name*",
+            placeholder="e.g., Climate Scenarios 2050",
+            help="Give your project a descriptive name"
+        )
+        
+        description = st.text_area(
+            "Description",
+            placeholder="Brief description of your project goals...",
+            height=100
+        )
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            baseline_year = st.number_input(
+                "Baseline Year",
+                min_value=1900,
+                max_value=2030,
+                value=2020,
+                help="Reference year for historical data"
+            )
+        
+        with col2:
+            target_year = st.number_input(
+                "Target Year",
+                min_value=2025,
+                max_value=2100,
+                value=2050,
+                help="Future year for scenario analysis"
+            )
+        
+        submitted = st.form_submit_button("Create Project", type="primary", use_container_width=True)
+        
+        if submitted:
+            if not project_name:
+                st.error("⚠️ Project name is required")
+                return
             
-            col_btn1, col_btn2 = st.columns(2)
+            db = get_db_manager()
             
-            with col_btn1:
-                login_button = st.form_submit_button("🚀 Login", use_container_width=True, type="primary")
+            # Check limits
+            limits = db.check_user_limits(st.session_state.user_id)
             
-            with col_btn2:
-                guest_button = st.form_submit_button("👤 Continue as Guest", use_container_width=True)
+            if not limits['can_create_project']:
+                st.error("❌ You've reached your project limit. Please upgrade or delete old projects.")
+                return
             
-            if login_button:
-                if username and password:
-                    # Simple authentication (you can customize this)
-                    st.session_state.logged_in = True
-                    st.session_state.username = username
-                    st.session_state.login_time = datetime.now()
-                    st.success(f"✅ Welcome, {username}!")
+            # Create project
+            try:
+                project = db.create_project(
+                    owner_id=st.session_state.user_id,
+                    project_name=project_name,
+                    description=description,
+                    baseline_year=baseline_year,
+                    scenario_target_year=target_year
+                )
+                
+                if project:
+                    st.success(f"✅ Project created: {project['project_code']}")
+                    st.session_state.current_project_id = project['project_id']
+                    time.sleep(1)
                     st.rerun()
                 else:
-                    st.warning("⚠️ Please enter both username and password")
-            
-            if guest_button:
-                st.session_state.logged_in = True
-                st.session_state.username = "Guest"
-                st.session_state.login_time = datetime.now()
-                st.success("✅ Welcome, Guest!")
-                st.rerun()
-        
-        st.markdown("---")
-        st.info("""
-        **Demo Credentials:**
-        - Username: `demo`
-        - Password: `demo`
-        
-        Or click "Continue as Guest" to explore the app.
-        """)
+                    st.error("❌ Failed to create project")
+                    
+            except Exception as e:
+                st.error(f"Error creating project: {str(e)}")
 
-else:
-    # Logged In - Show Welcome
-    st.success(f"✅ You are logged in as **{st.session_state.username}**")
+
+def show_user_stats(db):
+    """Show user statistics and limits"""
+    user = db.admin_client.table('users').select('*').eq('user_id', st.session_state.user_id).execute()
+    
+    if user.data:
+        user_data = user.data[0]
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                "Projects",
+                f"{user_data.get('current_project_count', 0)} / {user_data.get('max_projects', 3)}",
+                help="Number of active projects"
+            )
+        
+        with col2:
+            st.metric(
+                "Storage",
+                f"{user_data.get('current_storage_mb', 0):.1f} / {user_data.get('max_storage_mb', 1000)} MB",
+                help="Storage space used"
+            )
+        
+        with col3:
+            st.metric(
+                "Uploads This Month",
+                f"{user_data.get('uploads_this_month', 0)} / {user_data.get('max_uploads_per_month', 50)}",
+                help="Files uploaded this month"
+            )
+        
+        with col4:
+            tier = user_data.get('subscription_tier', 'free').upper()
+            st.metric(
+                "Subscription",
+                tier,
+                help="Current subscription tier"
+            )
+
+
+def show_projects_list(db):
+    """Show user's projects"""
+    st.subheader("📂 My Projects")
+    
+    # Get projects
+    projects = db.get_user_projects(
+        user_id=st.session_state.user_id,
+        include_collaborations=True
+    )
+    
+    if not projects:
+        st.info("🎯 No projects yet. Create your first project to get started!")
+        return
+    
+    # Filter options
+    col_filter1, col_filter2, col_filter3 = st.columns(3)
+    
+    with col_filter1:
+        filter_status = st.selectbox(
+            "Status",
+            options=["All", "Active", "Archived"],
+            index=0
+        )
+    
+    with col_filter2:
+        sort_by = st.selectbox(
+            "Sort by",
+            options=["Last Accessed", "Created Date", "Name", "Progress"],
+            index=0
+        )
+    
+    with col_filter3:
+        view_mode = st.radio(
+            "View",
+            options=["Grid", "List"],
+            index=0,
+            horizontal=True
+        )
+    
+    # Filter projects
+    filtered_projects = projects
+    
+    if filter_status == "Active":
+        filtered_projects = [p for p in projects if p['status'] == 'active']
+    elif filter_status == "Archived":
+        filtered_projects = [p for p in projects if p['status'] == 'archived']
+    
+    # Sort projects
+    if sort_by == "Last Accessed":
+        filtered_projects.sort(key=lambda x: x.get('last_accessed', ''), reverse=True)
+    elif sort_by == "Created Date":
+        filtered_projects.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+    elif sort_by == "Name":
+        filtered_projects.sort(key=lambda x: x.get('project_name', ''))
+    elif sort_by == "Progress":
+        filtered_projects.sort(key=lambda x: x.get('completion_percentage', 0), reverse=True)
     
     st.markdown("---")
     
-    col1, col2 = st.columns(2)
+    # Display projects
+    if view_mode == "Grid":
+        # Grid view (3 columns)
+        cols = st.columns(3)
+        
+        for idx, project in enumerate(filtered_projects):
+            with cols[idx % 3]:
+                show_project_card(project, db)
     
-    with col1:
-        st.markdown("""
-        ### 📊 Path A: Historical Data Analysis
-        
-        Analyze historical data to understand system behavior and predict future trends:
-        
-        1. **Upload Data** - Import your dataset
-        2. **Clean & Preprocess** - Prepare data for analysis
-        3. **Explore** - Visualize patterns and trends
-        4. **Analyze Relationships** - Understand variable interactions
-        5. **Dimensionality Reduction** - Simplify complex systems
-        6. **Build Models** - Train predictive models
-        7. **Evaluate** - Compare model performance
-        8. **Project Future** - Generate forecasts
-        """)
+    else:
+        # List view
+        for project in filtered_projects:
+            show_project_row(project, db)
+
+
+def show_project_card(project, db):
+    """Show project as card (grid view)"""
+    is_owner = project['owner_id'] == st.session_state.user_id
+    is_demo = project.get('is_demo_project', False)
     
-    with col2:
-        st.markdown("""
-        ### 📝 Path B: Scenario Definition
+    with st.container(border=True):
+        # Header
+        st.markdown(f"**{project['project_name']}**")
         
-        Extract and define scenario parameters from text:
+        if is_demo:
+            st.caption("🎭 Demo Project")
+        elif is_owner:
+            st.caption("👤 Owner")
+        else:
+            st.caption("👥 Collaborator")
         
-        9. **Extract Parameters** - Analyze scenario descriptions
-        10. **Scenario Matrix** - Compare and organize scenarios
+        # Progress
+        progress = project.get('completion_percentage', 0)
+        st.progress(progress / 100, text=f"Progress: {progress}%")
         
-        ### 🎯 Integration
+        # Stats
+        col1, col2 = st.columns(2)
+        with col1:
+            st.caption(f"📄 {project.get('total_parameters', 0)} params")
+        with col2:
+            st.caption(f"📊 {project.get('total_scenarios', 0)} scenarios")
         
-        Combine both paths to see which scenarios align with historical trends:
+        # Actions
+        col_btn1, col_btn2 = st.columns(2)
         
-        11. **System Trajectories** - Plot scenarios against historical data
-        """)
+        with col_btn1:
+            if st.button("Open", key=f"open_{project['project_id']}", use_container_width=True):
+                st.session_state.current_project_id = project['project_id']
+                
+                # Update last accessed
+                db.update_project_progress(
+                    project_id=project['project_id'],
+                    current_page=project.get('current_page', 2)
+                )
+                
+                st.switch_page(f"pages/{project.get('current_page', 2):02d}_*.py")
+        
+        with col_btn2:
+            if st.button("⋯", key=f"menu_{project['project_id']}", use_container_width=True):
+                st.session_state[f"show_menu_{project['project_id']}"] = True
+
+
+def show_project_row(project, db):
+    """Show project as row (list view)"""
+    is_owner = project['owner_id'] == st.session_state.user_id
+    is_demo = project.get('is_demo_project', False)
+    
+    with st.expander(f"{'🎭' if is_demo else '📁'} {project['project_name']}", expanded=False):
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            st.markdown(f"**Description:** {project.get('description', 'No description')}")
+            st.caption(f"**Code:** {project.get('project_code', 'N/A')}")
+            st.caption(f"**Created:** {datetime.fromisoformat(project['created_at'].replace('Z', '')).strftime('%Y-%m-%d')}")
+            
+            if not is_owner:
+                st.caption("👥 Shared with you")
+        
+        with col2:
+            st.metric("Progress", f"{project.get('completion_percentage', 0)}%")
+            st.metric("Parameters", project.get('total_parameters', 0))
+            st.metric("Scenarios", project.get('total_scenarios', 0))
+        
+        # Actions
+        col_act1, col_act2, col_act3, col_act4 = st.columns(4)
+        
+        with col_act1:
+            if st.button("Open Project", key=f"open_list_{project['project_id']}", type="primary"):
+                st.session_state.current_project_id = project['project_id']
+                db.update_project_progress(
+                    project_id=project['project_id'],
+                    current_page=project.get('current_page', 2)
+                )
+                st.switch_page(f"pages/{project.get('current_page', 2):02d}_*.py")
+        
+        with col_act2:
+            if st.button("Settings", key=f"settings_{project['project_id']}"):
+                st.info("Project settings coming soon")
+        
+        with col_act3:
+            if st.button("Share", key=f"share_{project['project_id']}"):
+                st.info("Sharing functionality coming soon")
+        
+        with col_act4:
+            if is_owner and not is_demo:
+                if st.button("Delete", key=f"delete_{project['project_id']}"):
+                    if st.session_state.get(f"confirm_delete_{project['project_id']}"):
+                        db.delete_project(project['project_id'], st.session_state.user_id)
+                        st.success("Project deleted")
+                        time.sleep(1)
+                        st.rerun()
+                    else:
+                        st.session_state[f"confirm_delete_{project['project_id']}"] = True
+                        st.warning("⚠️ Click again to confirm deletion")
+
+
+def main():
+    """Main dashboard"""
+    
+    check_authentication()
+    
+    # Sidebar
+    try:
+        render_app_sidebar()
+    except:
+        # Minimal sidebar
+        st.sidebar.title("ExplainFutures")
+        st.sidebar.markdown(f"**User:** {st.session_state.get('username', 'Unknown')}")
+        
+        if st.sidebar.button("Logout", use_container_width=True):
+            logout_user()
+    
+    # Show demo timer if demo user
+    if st.session_state.get('is_demo'):
+        show_demo_timer()
+    
+    # Header
+    st.title("🏠 Dashboard")
+    st.markdown(f"**Welcome back, {st.session_state.get('full_name', 'User')}!**")
+    
+    if st.session_state.get('is_demo'):
+        st.info("🎭 **Demo Mode**: Explore with pre-loaded data. Your session will expire in 30 minutes and changes will be reset.")
     
     st.markdown("---")
     
-    st.info("""
-    👈 **Use the sidebar** to navigate between different analysis steps.
+    # Get database
+    db = get_db_manager()
     
-    **Workflow:**
-    - Start with **Path A** if you have historical data to analyze
-    - Use **Path B** to define and extract scenario parameters
-    - Combine both in **Integration** to validate scenarios against historical trends
-    """)
+    # User stats
+    show_user_stats(db)
     
     st.markdown("---")
     
-    # Logout button in main area
-    if st.button("🚪 Logout", type="secondary"):
-        st.session_state.logged_in = False
-        st.session_state.username = None
-        st.session_state.login_time = None
-        st.rerun()
+    # Main content tabs
+    tab1, tab2, tab3 = st.tabs(["📂 Projects", "➕ Create Project", "📊 Activity"])
+    
+    with tab1:
+        show_projects_list(db)
+    
+    with tab2:
+        if st.session_state.get('is_demo'):
+            st.warning("🎭 Demo users cannot create projects. Use the pre-loaded demo project.")
+        else:
+            create_new_project()
+    
+    with tab3:
+        st.info("📊 Activity feed coming soon")
+        st.caption("Recent actions, collaborations, and notifications will appear here.")
+
+
+if __name__ == "__main__":
+    if not DB_AVAILABLE:
+        st.stop()
+    
+    main()
