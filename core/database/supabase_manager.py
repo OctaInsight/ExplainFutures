@@ -216,11 +216,16 @@ class SupabaseManager:
     # PROJECT MANAGEMENT
     # ========================================================================
     
-    def get_user_projects(self, user_id: str, include_collaborations: bool = True) -> List[Dict]:
+    def get_user_projects(self, user_id: str, include_collaborations: bool = True, include_deleted: bool = False) -> List[Dict]:
         """Get user's projects (owned + collaborated)"""
         try:
-            # Get owned projects
+            # Build query for owned projects
             owned_query = self.client.table('projects').select('*').eq('owner_id', user_id)
+            
+            # Exclude deleted projects unless specifically requested
+            if not include_deleted:
+                owned_query = owned_query.neq('status', 'deleted')
+            
             owned_result = owned_query.execute()
             owned_projects = owned_result.data if owned_result.data else []
             
@@ -245,6 +250,11 @@ class SupabaseManager:
                     
                     if project_ids:
                         projects_query = self.client.table('projects').select('*').in_('project_id', project_ids)
+                        
+                        # Exclude deleted projects from collaborations
+                        if not include_deleted:
+                            projects_query = projects_query.neq('status', 'deleted')
+                        
                         projects_result = projects_query.execute()
                         
                         if projects_result.data:
@@ -459,20 +469,124 @@ class SupabaseManager:
             return None
     
     def delete_project(self, project_id: str, user_id: str) -> bool:
-        """Delete project (soft delete by setting status to archived)"""
+        """
+        Soft delete project (marks as deleted, doesn't remove from database)
+        Also removes all collaborators when project is deleted
+        """
+        try:
+            # Verify ownership
+            project = self.client.table('projects').select('owner_id, project_name').eq('project_id', project_id).execute()
+            
+            if not project.data or project.data[0]['owner_id'] != user_id:
+                st.error("Only the project owner can delete this project")
+                return False
+            
+            project_name = project.data[0].get('project_name', 'Unknown')
+            
+            # Soft delete - set status to deleted (not archived)
+            self.client.table('projects').update({
+                'status': 'deleted',
+                'deleted_at': datetime.now().isoformat(),
+                'deleted_by': user_id,
+                'updated_at': datetime.now().isoformat()
+            }).eq('project_id', project_id).execute()
+            
+            # Remove all collaborators when project is deleted
+            try:
+                self.client.table('project_collaborators').delete().eq('project_id', project_id).execute()
+            except Exception as e:
+                st.warning(f"Note: Could not remove collaborators: {str(e)}")
+            
+            # Update user's project count (only count active projects)
+            try:
+                # Count active projects
+                active_projects = self.client.table('projects').select(
+                    'project_id', count='exact'
+                ).eq('owner_id', user_id).eq('status', 'active').execute()
+                
+                new_count = active_projects.count if hasattr(active_projects, 'count') else 0
+                
+                self.client.table('users').update({
+                    'current_project_count': new_count
+                }).eq('user_id', user_id).execute()
+            except Exception as e:
+                st.warning(f"Note: Could not update project count: {str(e)}")
+            
+            st.success(f"✅ Project '{project_name}' moved to trash")
+            st.info("💡 Project can be restored from the trash within 30 days")
+            return True
+            
+        except Exception as e:
+            st.error(f"Error deleting project: {str(e)}")
+            return False
+    
+    def restore_project(self, project_id: str, user_id: str) -> bool:
+        """Restore a soft-deleted project"""
+        try:
+            # Verify ownership
+            project = self.client.table('projects').select('owner_id, status, project_name').eq('project_id', project_id).execute()
+            
+            if not project.data:
+                st.error("Project not found")
+                return False
+            
+            if project.data[0]['owner_id'] != user_id:
+                st.error("Only the project owner can restore this project")
+                return False
+            
+            if project.data[0]['status'] != 'deleted':
+                st.warning("Project is not deleted")
+                return False
+            
+            project_name = project.data[0].get('project_name', 'Unknown')
+            
+            # Restore project
+            self.client.table('projects').update({
+                'status': 'active',
+                'deleted_at': None,
+                'deleted_by': None,
+                'updated_at': datetime.now().isoformat()
+            }).eq('project_id', project_id).execute()
+            
+            # Update user's project count
+            try:
+                active_projects = self.client.table('projects').select(
+                    'project_id', count='exact'
+                ).eq('owner_id', user_id).eq('status', 'active').execute()
+                
+                new_count = active_projects.count if hasattr(active_projects, 'count') else 0
+                
+                self.client.table('users').update({
+                    'current_project_count': new_count
+                }).eq('user_id', user_id).execute()
+            except:
+                pass
+            
+            st.success(f"✅ Project '{project_name}' restored successfully")
+            return True
+            
+        except Exception as e:
+            st.error(f"Error restoring project: {str(e)}")
+            return False
+    
+    def permanently_delete_project(self, project_id: str, user_id: str) -> bool:
+        """
+        PERMANENTLY delete a project from database (admin only)
+        WARNING: This cannot be undone!
+        """
         try:
             # Verify ownership
             project = self.client.table('projects').select('owner_id').eq('project_id', project_id).execute()
             
             if not project.data or project.data[0]['owner_id'] != user_id:
-                st.error("You don't have permission to delete this project")
+                st.error("Unauthorized")
                 return False
             
-            # Soft delete - set status to archived
-            self.client.table('projects').update({
-                'status': 'archived',
-                'updated_at': datetime.now().isoformat()
-            }).eq('project_id', project_id).execute()
+            # Delete all related data first
+            self.client.table('project_collaborators').delete().eq('project_id', project_id).execute()
+            
+            # Finally delete the project
+            self.client.table('projects').delete().eq('project_id', project_id).execute()
             
             # Update user's project count
             user = self.client.table('users').select('current_project_count').eq('user_id', user_id).execute()
@@ -485,7 +599,7 @@ class SupabaseManager:
             return True
             
         except Exception as e:
-            st.error(f"Error deleting project: {str(e)}")
+            st.error(f"Error permanently deleting project: {str(e)}")
             return False
 
 
