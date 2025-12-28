@@ -42,6 +42,15 @@ st.title("📊 Model Evaluation & Selection")
 st.markdown("*Evaluate trained models and select the best for each variable*")
 st.markdown("---")
 
+# Copy these 6 lines to the TOP of each page (02-13)
+if not st.session_state.get('authenticated', False):
+    st.warning("⚠️ Please log in to continue")
+    time.sleep(1)
+    st.switch_page("App.py")
+    st.stop()
+
+# Then your existing code continues...
+
 
 def initialize_selection_state():
     """Initialize session state for model selection"""
