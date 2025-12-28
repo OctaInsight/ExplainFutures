@@ -278,8 +278,8 @@ class SupabaseManager:
             }
     
     def create_project(self, owner_id: str, project_name: str, 
-                      description: str = None, baseline_year: int = 2020,
-                      scenario_target_year: int = 2050) -> Optional[Dict]:
+                      description: str = None, baseline_year: int = None,
+                      scenario_target_year: int = None) -> Optional[Dict]:
         """Create new project"""
         try:
             # Generate project code
@@ -287,18 +287,24 @@ class SupabaseManager:
             import string
             project_code = f"PRJ-{''.join(random.choices(string.ascii_uppercase + string.digits, k=8))}"
             
-            result = self.client.table('projects').insert({
+            project_data = {
                 'owner_id': owner_id,
                 'project_name': project_name,
                 'project_code': project_code,
                 'description': description,
-                'baseline_year': baseline_year,
-                'scenario_target_year': scenario_target_year,
                 'status': 'active',
                 'workflow_state': 'setup',
                 'current_page': 2,
                 'completion_percentage': 0
-            }).execute()
+            }
+            
+            # Only add year fields if provided
+            if baseline_year is not None:
+                project_data['baseline_year'] = baseline_year
+            if scenario_target_year is not None:
+                project_data['scenario_target_year'] = scenario_target_year
+            
+            result = self.client.table('projects').insert(project_data).execute()
             
             if result.data:
                 # Update user's project count
