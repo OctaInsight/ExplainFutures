@@ -6,12 +6,11 @@ Project selection and management with multi-user support
 import streamlit as st
 from datetime import datetime
 import time
-from pathlib import Path
 
 # Page configuration
 st.set_page_config(
     page_title="Dashboard - ExplainFutures",
-    page_icon=str(Path("assets/logo_small.png")),
+    page_icon="🏠",
     layout="wide"
 )
 
@@ -89,26 +88,6 @@ def create_new_project():
             height=100
         )
         
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            baseline_year = st.number_input(
-                "Baseline Year",
-                min_value=1900,
-                max_value=2030,
-                value=2020,
-                help="Reference year for historical data"
-            )
-        
-        with col2:
-            target_year = st.number_input(
-                "Target Year",
-                min_value=2025,
-                max_value=2100,
-                value=2050,
-                help="Future year for scenario analysis"
-            )
-        
         submitted = st.form_submit_button("Create Project", type="primary", use_container_width=True)
         
         if submitted:
@@ -130,9 +109,7 @@ def create_new_project():
                 project = db.create_project(
                     owner_id=st.session_state.user_id,
                     project_name=project_name,
-                    description=description,
-                    baseline_year=baseline_year,
-                    scenario_target_year=target_year
+                    description=description
                 )
                 
                 if project:
@@ -301,11 +278,93 @@ def show_project_card(project, db):
                     current_page=project.get('current_page', 2)
                 )
                 
-                st.switch_page(f"pages/{project.get('current_page', 2):02d}_*.py")
+                # Navigate to Data Import page
+                st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
         
         with col_btn2:
             if st.button("⋯", key=f"menu_{project['project_id']}", use_container_width=True):
-                st.session_state[f"show_menu_{project['project_id']}"] = True
+                st.session_state[f"show_menu_{project['project_id']}"] = not st.session_state.get(f"show_menu_{project['project_id']}", False)
+                st.rerun()
+        
+        # Show menu options if toggled
+        if st.session_state.get(f"show_menu_{project['project_id']}", False):
+            st.markdown("---")
+            
+            col_menu1, col_menu2 = st.columns(2)
+            
+            with col_menu1:
+                if st.button("Share", key=f"share_card_{project['project_id']}", use_container_width=True):
+                    st.session_state[f"show_share_{project['project_id']}"] = True
+                    st.session_state[f"show_menu_{project['project_id']}"] = False
+                    st.rerun()
+            
+            with col_menu2:
+                if is_owner and not is_demo:
+                    if st.button("Delete", key=f"delete_card_{project['project_id']}", use_container_width=True):
+                        if st.session_state.get(f"confirm_delete_{project['project_id']}"):
+                            db.delete_project(project['project_id'], st.session_state.user_id)
+                            st.success("Project deleted")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.session_state[f"confirm_delete_{project['project_id']}"] = True
+                            st.warning("⚠️ Click again to confirm")
+        
+        # Share dialog (same as list view)
+        if st.session_state.get(f"show_share_{project['project_id']}", False):
+            st.markdown("---")
+            st.markdown("**👥 Share Project**")
+            
+            with st.form(key=f"share_form_card_{project['project_id']}"):
+                share_email = st.text_input(
+                    "Email",
+                    placeholder="user@example.com",
+                    label_visibility="collapsed"
+                )
+                
+                col_s1, col_s2 = st.columns(2)
+                
+                with col_s1:
+                    share_btn = st.form_submit_button("Share", type="primary", use_container_width=True)
+                
+                with col_s2:
+                    cancel_btn = st.form_submit_button("Cancel", use_container_width=True)
+                
+                if share_btn:
+                    if not share_email:
+                        st.error("⚠️ Enter email")
+                    else:
+                        user_result = db.client.table('users').select('user_id, username, email').eq('email', share_email).execute()
+                        
+                        if user_result.data:
+                            target_user = user_result.data[0]
+                            existing = db.client.table('project_collaborators').select('*').eq('project_id', project['project_id']).eq('user_id', target_user['user_id']).execute()
+                            
+                            if existing.data:
+                                st.warning(f"Already shared with {target_user['username']}")
+                            else:
+                                try:
+                                    db.client.table('project_collaborators').insert({
+                                        'project_id': project['project_id'],
+                                        'user_id': target_user['user_id'],
+                                        'role': 'collaborator',
+                                        'can_edit': True,
+                                        'can_delete': False
+                                    }).execute()
+                                    
+                                    st.success(f"✅ Shared with {target_user['username']}")
+                                    time.sleep(2)
+                                    st.session_state[f"show_share_{project['project_id']}"] = False
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error: {str(e)}")
+                        else:
+                            st.warning(f"No user: {share_email}")
+                            st.info("Ask them to register first")
+                
+                if cancel_btn:
+                    st.session_state[f"show_share_{project['project_id']}"] = False
+                    st.rerun()
 
 
 def show_project_row(project, db):
@@ -339,7 +398,8 @@ def show_project_row(project, db):
                     project_id=project['project_id'],
                     current_page=project.get('current_page', 2)
                 )
-                st.switch_page(f"pages/{project.get('current_page', 2):02d}_*.py")
+                # Navigate to Data Import page
+                st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
         
         with col_act2:
             if st.button("Settings", key=f"settings_{project['project_id']}"):
@@ -347,7 +407,70 @@ def show_project_row(project, db):
         
         with col_act3:
             if st.button("Share", key=f"share_{project['project_id']}"):
-                st.info("Sharing functionality coming soon")
+                st.session_state[f"show_share_{project['project_id']}"] = True
+                st.rerun()
+        
+        # Share dialog
+        if st.session_state.get(f"show_share_{project['project_id']}", False):
+            st.markdown("---")
+            st.markdown("#### 👥 Share Project")
+            
+            with st.form(key=f"share_form_{project['project_id']}"):
+                share_email = st.text_input(
+                    "Enter email address",
+                    placeholder="user@example.com",
+                    help="Share this project with another user"
+                )
+                
+                col_share1, col_share2 = st.columns(2)
+                
+                with col_share1:
+                    share_button = st.form_submit_button("Share", type="primary", use_container_width=True)
+                
+                with col_share2:
+                    cancel_share = st.form_submit_button("Cancel", use_container_width=True)
+                
+                if share_button:
+                    if not share_email:
+                        st.error("⚠️ Please enter an email address")
+                    else:
+                        # Check if user exists
+                        user_result = db.client.table('users').select('user_id, username, email').eq('email', share_email).execute()
+                        
+                        if user_result.data:
+                            # User exists - share the project
+                            target_user = user_result.data[0]
+                            
+                            # Check if already shared
+                            existing = db.client.table('project_collaborators').select('*').eq('project_id', project['project_id']).eq('user_id', target_user['user_id']).execute()
+                            
+                            if existing.data:
+                                st.warning(f"⚠️ Project already shared with {target_user['username']}")
+                            else:
+                                # Add collaborator
+                                try:
+                                    db.client.table('project_collaborators').insert({
+                                        'project_id': project['project_id'],
+                                        'user_id': target_user['user_id'],
+                                        'role': 'collaborator',
+                                        'can_edit': True,
+                                        'can_delete': False
+                                    }).execute()
+                                    
+                                    st.success(f"✅ Project shared with {target_user['username']} ({share_email})")
+                                    time.sleep(2)
+                                    st.session_state[f"show_share_{project['project_id']}"] = False
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"Error sharing project: {str(e)}")
+                        else:
+                            # User doesn't exist
+                            st.warning(f"⚠️ No user found with email: {share_email}")
+                            st.info("💡 Please ask them to register at the ExplainFutures platform first, then try sharing again.")
+                
+                if cancel_share:
+                    st.session_state[f"show_share_{project['project_id']}"] = False
+                    st.rerun()
         
         with col_act4:
             if is_owner and not is_demo:
