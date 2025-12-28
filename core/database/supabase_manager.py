@@ -209,7 +209,6 @@ class SupabaseManager:
                 'user_found': False,
                 'error': str(e)
             }
-        }).execute()
     
     def is_demo_user(self, user_id: str) -> bool:
         """Check if user is demo user"""
