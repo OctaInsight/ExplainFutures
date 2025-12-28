@@ -6,6 +6,7 @@ Project selection and management with multi-user support
 import streamlit as st
 from datetime import datetime
 import time
+from pathlib import Path
 
 # Page configuration
 st.set_page_config(
