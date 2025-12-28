@@ -42,6 +42,15 @@ st.title("🎯 Trajectory-Scenario Space Visualization")
 st.markdown("*Analyze parameter trajectories from baseline to scenario targets*")
 st.markdown("---")
 
+# Copy these 6 lines to the TOP of each page (02-13)
+if not st.session_state.get('authenticated', False):
+    st.warning("⚠️ Please log in to continue")
+    time.sleep(1)
+    st.switch_page("App.py")
+    st.stop()
+
+# Then your existing code continues...
+
 
 def get_data_time_range(master_df: pd.DataFrame) -> dict:
     """Get time range from data"""
