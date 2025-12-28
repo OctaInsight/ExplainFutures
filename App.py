@@ -7,17 +7,13 @@ import streamlit as st
 import time
 from pathlib import Path
 
-# Page config FIRST
+# Page config FIRST (before any other Streamlit commands)
 st.set_page_config(
     page_title="ExplainFutures - Scenario Analysis Platform",
-    page_icon=str(Path("assets/logo_small.png")),  # Convert Path to string
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# Initialize
-initialize_session_state()
-render_app_sidebar()
 
 # Import database manager
 try:
@@ -27,11 +23,31 @@ except ImportError as e:
     DB_AVAILABLE = False
     st.error(f"⚠️ Database connection not available: {str(e)}")
 
-# Initialize session state
+# Import sidebar utilities (optional - won't break if missing)
+try:
+    from core.shared_sidebar import render_app_sidebar, initialize_session_state
+    SIDEBAR_AVAILABLE = True
+except ImportError:
+    SIDEBAR_AVAILABLE = False
+    # Define dummy functions if sidebar module doesn't exist
+    def initialize_session_state():
+        pass
+    def render_app_sidebar():
+        pass
+
+# Initialize session state (call the function after it's defined/imported)
+initialize_session_state()
+
+# Initialize authentication-specific session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 if 'show_password_reset' not in st.session_state:
     st.session_state.show_password_reset = False
+
+# Render sidebar (after everything is initialized)
+if SIDEBAR_AVAILABLE:
+    render_app_sidebar()
+
 
 def login_user(username: str, password: str):
     """Authenticate user and initialize session"""
