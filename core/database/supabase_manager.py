@@ -1,6 +1,6 @@
 """
-ExplainFutures - Supabase Database Manager (SIMPLIFIED VERSION)
-Avoids proxy and advanced client options
+ExplainFutures - Supabase Database Manager (PLAINTEXT PASSWORD VERSION)
+⚠️ WARNING: This version uses plaintext passwords - NOT RECOMMENDED for production!
 """
 
 import streamlit as st
@@ -9,11 +9,10 @@ from typing import Dict, List, Optional, Any
 import uuid
 from datetime import datetime, timedelta
 import json
-import bcrypt
 
 
 class SupabaseManager:
-    """Simplified Supabase manager without advanced options"""
+    """Simplified Supabase manager with plaintext password authentication"""
     
     def __init__(self):
         """Initialize Supabase client from Streamlit secrets"""
@@ -51,22 +50,23 @@ class SupabaseManager:
             return None
     
     def verify_password(self, username: str, password: str) -> bool:
-        """Verify user password"""
+        """
+        Verify user password (plaintext comparison)
+        ⚠️ WARNING: This is insecure - passwords are stored in plaintext!
+        """
         user = self.get_user_by_username(username)
         if not user:
             return False
         
         try:
-            return bcrypt.checkpw(
-                password.encode('utf-8'), 
-                user['password_hash'].encode('utf-8')
-            )
+            # Simple plaintext comparison
+            return user.get('password') == password
         except Exception:
             return False
     
     def login_user(self, username: str, password: str, 
                    ip_address: str = None, user_agent: str = None) -> Optional[Dict]:
-        """Login user"""
+        """Login user with plaintext password verification"""
         user = self.get_user_by_username(username)
         
         if not user or not user.get('is_active'):
@@ -108,6 +108,43 @@ class SupabaseManager:
         
         return user
     
+    def create_user(self, username: str, email: str, password: str, 
+                    full_name: str = None, subscription_tier: str = 'free') -> Optional[Dict]:
+        """
+        Create new user with plaintext password
+        ⚠️ WARNING: Password stored in plaintext - very insecure!
+        """
+        try:
+            result = self.client.table('users').insert({
+                'username': username,
+                'email': email,
+                'password': password,  # Plaintext password (INSECURE!)
+                'full_name': full_name or username,
+                'subscription_tier': subscription_tier,
+                'is_active': True
+            }).execute()
+            
+            return result.data[0] if result.data else None
+            
+        except Exception as e:
+            st.error(f"Error creating user: {str(e)}")
+            return None
+    
+    def update_password(self, user_id: str, new_password: str) -> bool:
+        """
+        Update user password
+        ⚠️ WARNING: Password stored in plaintext - very insecure!
+        """
+        try:
+            self.client.table('users').update({
+                'password': new_password,  # Plaintext password (INSECURE!)
+                'updated_at': datetime.now().isoformat()
+            }).eq('user_id', user_id).execute()
+            return True
+        except Exception as e:
+            st.error(f"Error updating password: {str(e)}")
+            return False
+    
     def request_password_reset(self, email: str) -> Dict[str, Any]:
         """Request password reset"""
         try:
@@ -123,23 +160,14 @@ class SupabaseManager:
             
             user = result.data[0]
             
-            # Try to send reset email via Supabase auth
-            try:
-                # This uses Supabase's built-in password reset
-                self.client.auth.reset_password_for_email(email)
-                
-                return {
-                    'success': True,
-                    'message': f"Password reset instructions sent to {email}. Check your inbox.",
-                    'email_sent': True
-                }
-            except:
-                # Fallback if email fails
-                return {
-                    'success': True,
-                    'message': f"Password reset requested. Please contact sales@octainsight.com for assistance.",
-                    'email_sent': False
-                }
+            # Since we're using plaintext passwords, we could theoretically
+            # send the password in email (EXTREMELY INSECURE!)
+            # But we'll just tell them to contact support
+            return {
+                'success': True,
+                'message': f"Please contact sales@octainsight.com for password reset assistance.",
+                'email_sent': False
+            }
                 
         except Exception as e:
             return {
