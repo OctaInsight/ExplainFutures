@@ -232,34 +232,39 @@ class SupabaseManager:
             if not include_collaborations:
                 return owned_projects
             
-            # Get collaborated projects
-            collab_query = self.client.table('project_collaborators').select(
-                'project_id, role, can_edit, can_delete, created_at'
-            ).eq('user_id', user_id)
-            collab_result = collab_query.execute()
-            
-            if collab_result.data:
-                # Get project details for collaborated projects
-                project_ids = [c['project_id'] for c in collab_result.data]
+            try:
+                # Get collaborated projects
+                collab_query = self.client.table('project_collaborators').select(
+                    'project_id, role, can_edit, can_delete, created_at'
+                ).eq('user_id', user_id)
+                collab_result = collab_query.execute()
                 
-                if project_ids:
-                    projects_query = self.client.table('projects').select('*').in_('project_id', project_ids)
-                    projects_result = projects_query.execute()
+                if collab_result.data:
+                    # Get project details for collaborated projects
+                    project_ids = [c['project_id'] for c in collab_result.data]
                     
-                    if projects_result.data:
-                        # Add collaboration info to projects
-                        collab_dict = {c['project_id']: c for c in collab_result.data}
+                    if project_ids:
+                        projects_query = self.client.table('projects').select('*').in_('project_id', project_ids)
+                        projects_result = projects_query.execute()
                         
-                        for project in projects_result.data:
-                            collab_info = collab_dict.get(project['project_id'])
-                            if collab_info:
-                                project['access_role'] = collab_info['role']
-                                project['is_owner'] = False
-                                project['can_edit'] = collab_info['can_edit']
-                                project['can_delete'] = collab_info['can_delete']
-                                project['collaboration_since'] = collab_info['created_at']
-                        
-                        owned_projects.extend(projects_result.data)
+                        if projects_result.data:
+                            # Add collaboration info to projects
+                            collab_dict = {c['project_id']: c for c in collab_result.data}
+                            
+                            for project in projects_result.data:
+                                collab_info = collab_dict.get(project['project_id'])
+                                if collab_info:
+                                    project['access_role'] = collab_info.get('role', 'collaborator')
+                                    project['is_owner'] = False
+                                    project['can_edit'] = collab_info.get('can_edit', True)
+                                    project['can_delete'] = collab_info.get('can_delete', False)
+                                    project['collaboration_since'] = collab_info.get('created_at')
+                            
+                            owned_projects.extend(projects_result.data)
+            
+            except Exception as collab_error:
+                # If collaboration fetch fails, just return owned projects
+                st.warning(f"Note: Could not fetch shared projects: {str(collab_error)}")
             
             return owned_projects
             
@@ -270,9 +275,10 @@ class SupabaseManager:
     def get_project_collaborators(self, project_id: str) -> List[Dict]:
         """Get all collaborators for a project with their user info"""
         try:
-            # Get collaborators with user details
+            # Specify the exact foreign key relationship to use
+            # Using the user_id foreign key (not invited_by)
             result = self.client.table('project_collaborators').select(
-                '*, users(user_id, username, email, full_name)'
+                '*, users!project_collaborators_user_id_fkey(user_id, username, email, full_name)'
             ).eq('project_id', project_id).execute()
             
             if result.data:
@@ -280,24 +286,59 @@ class SupabaseManager:
                 collaborators = []
                 for collab in result.data:
                     user_info = collab.get('users', {})
-                    collaborators.append({
-                        'collaborator_id': collab['collaborator_id'],
-                        'user_id': collab['user_id'],
-                        'username': user_info.get('username', 'Unknown'),
-                        'email': user_info.get('email', ''),
-                        'full_name': user_info.get('full_name', user_info.get('username', 'Unknown')),
-                        'role': collab['role'],
-                        'can_edit': collab['can_edit'],
-                        'can_delete': collab['can_delete'],
-                        'created_at': collab['created_at']
-                    })
+                    if user_info:  # Only add if user info exists
+                        collaborators.append({
+                            'collaborator_id': collab.get('collaborator_id'),
+                            'user_id': collab['user_id'],
+                            'username': user_info.get('username', 'Unknown'),
+                            'email': user_info.get('email', ''),
+                            'full_name': user_info.get('full_name', user_info.get('username', 'Unknown')),
+                            'role': collab.get('role', 'collaborator'),
+                            'can_edit': collab.get('can_edit', True),
+                            'can_delete': collab.get('can_delete', False),
+                            'created_at': collab.get('created_at')
+                        })
                 return collaborators
             
             return []
             
         except Exception as e:
-            st.error(f"Error fetching collaborators: {str(e)}")
-            return []
+            # If the specific foreign key doesn't work, try a simpler approach
+            try:
+                # Get collaborators without join
+                collab_result = self.client.table('project_collaborators').select(
+                    'collaborator_id, user_id, role, can_edit, can_delete, created_at'
+                ).eq('project_id', project_id).execute()
+                
+                if not collab_result.data:
+                    return []
+                
+                # Get user info separately
+                collaborators = []
+                for collab in collab_result.data:
+                    user_result = self.client.table('users').select(
+                        'user_id, username, email, full_name'
+                    ).eq('user_id', collab['user_id']).execute()
+                    
+                    if user_result.data:
+                        user_info = user_result.data[0]
+                        collaborators.append({
+                            'collaborator_id': collab.get('collaborator_id'),
+                            'user_id': collab['user_id'],
+                            'username': user_info.get('username', 'Unknown'),
+                            'email': user_info.get('email', ''),
+                            'full_name': user_info.get('full_name', user_info.get('username', 'Unknown')),
+                            'role': collab.get('role', 'collaborator'),
+                            'can_edit': collab.get('can_edit', True),
+                            'can_delete': collab.get('can_delete', False),
+                            'created_at': collab.get('created_at')
+                        })
+                
+                return collaborators
+                
+            except Exception as e2:
+                st.error(f"Error fetching collaborators: {str(e2)}")
+                return []
     
     def remove_collaborator(self, project_id: str, user_id: str, requesting_user_id: str) -> bool:
         """Remove a collaborator from a project (owner only)"""
