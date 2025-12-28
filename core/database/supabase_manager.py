@@ -25,14 +25,12 @@ class SupabaseManager:
     def __init__(self):
         """Initialize Supabase client from Streamlit secrets"""
         try:
-            # Get credentials from Streamlit secrets
+            # Get credentials from Streamlit secrets (only 2 parameters needed)
             self.url = st.secrets["supabase"]["url"]
             self.key = st.secrets["supabase"]["key"]
-            self.service_key = st.secrets["supabase"]["service_key"]
             
-            # Create Supabase client
+            # Create Supabase client (same client for all operations)
             self.client: Client = create_client(self.url, self.key)
-            self.admin_client: Client = create_client(self.url, self.service_key)
             
             # Demo user/project IDs
             self.demo_user_id = st.secrets["app"]["demo_user_id"]
@@ -73,7 +71,7 @@ class SupabaseManager:
             **kwargs
         }
         
-        response = self.admin_client.table('users').insert(user_data).execute()
+        response = self.client.table('users').insert(user_data).execute()
         
         if response.data:
             self.log_audit(None, response.data[0]['user_id'], 'create', 'user', response.data[0]['user_id'])
@@ -117,7 +115,7 @@ class SupabaseManager:
             self.log_login_attempt(user['user_id'], False, "Invalid password", ip_address, user_agent)
             
             # Increment failed attempts
-            self.admin_client.table('users').update({
+            self.client.table('users').update({
                 'failed_login_attempts': user.get('failed_login_attempts', 0) + 1,
                 'last_failed_login': datetime.now().isoformat()
             }).eq('user_id', user['user_id']).execute()
@@ -125,7 +123,7 @@ class SupabaseManager:
             return None
         
         # Update last login
-        self.admin_client.table('users').update({
+        self.client.table('users').update({
             'last_login': datetime.now().isoformat(),
             'last_login_ip': ip_address,
             'last_login_user_agent': user_agent,
@@ -141,7 +139,7 @@ class SupabaseManager:
     def log_login_attempt(self, user_id: str, successful: bool, failure_reason: str = None,
                          ip_address: str = None, user_agent: str = None):
         """Log login attempt"""
-        self.admin_client.table('user_login_history').insert({
+        self.client.table('user_login_history').insert({
             'user_id': user_id,
             'login_successful': successful,
             'failure_reason': failure_reason,
@@ -169,16 +167,16 @@ class SupabaseManager:
             **kwargs
         }
         
-        response = self.admin_client.table('projects').insert(project_data).execute()
+        response = self.client.table('projects').insert(project_data).execute()
         
         if response.data:
             project_id = response.data[0]['project_id']
             
             # Update user project count
-            user = self.admin_client.table('users').select('current_project_count').eq('user_id', owner_id).execute()
+            user = self.client.table('users').select('current_project_count').eq('user_id', owner_id).execute()
             if user.data:
                 new_count = user.data[0].get('current_project_count', 0) + 1
-                self.admin_client.table('users').update({'current_project_count': new_count}).eq('user_id', owner_id).execute()
+                self.client.table('users').update({'current_project_count': new_count}).eq('user_id', owner_id).execute()
             
             self.log_audit(project_id, owner_id, 'create', 'project', project_id)
             return response.data[0]
@@ -226,14 +224,14 @@ class SupabaseManager:
         
         update_data['last_accessed'] = datetime.now().isoformat()
         
-        self.admin_client.table('projects').update(update_data).eq('project_id', project_id).execute()
+        self.client.table('projects').update(update_data).eq('project_id', project_id).execute()
     
     def delete_project(self, project_id: str, user_id: str, hard_delete: bool = False):
         """Delete project (soft delete by default)"""
         if hard_delete:
-            self.admin_client.table('projects').delete().eq('project_id', project_id).execute()
+            self.client.table('projects').delete().eq('project_id', project_id).execute()
         else:
-            self.admin_client.table('projects').update({
+            self.client.table('projects').update({
                 'deleted_at': datetime.now().isoformat(),
                 'status': 'deleted'
             }).eq('project_id', project_id).execute()
@@ -275,7 +273,7 @@ class SupabaseManager:
             'user_agent': st.context.headers.get('User-Agent') if hasattr(st, 'context') else None
         }
         
-        response = self.admin_client.table('demo_sessions').insert(session_data).execute()
+        response = self.client.table('demo_sessions').insert(session_data).execute()
         return response.data[0] if response.data else None
     
     def get_active_demo_session(self, user_id: str) -> Optional[Dict]:
@@ -291,11 +289,11 @@ class SupabaseManager:
     def end_demo_session(self, session_id: str):
         """End demo session and trigger cleanup"""
         # Call cleanup function
-        self.admin_client.rpc('cleanup_demo_session', {'p_session_id': session_id}).execute()
+        self.client.rpc('cleanup_demo_session', {'p_session_id': session_id}).execute()
     
     def track_demo_action(self, session_id: str, entity_type: str, entity_id: str):
         """Track entity created in demo session"""
-        session = self.admin_client.table('demo_sessions').select('*').eq('session_id', session_id).execute()
+        session = self.client.table('demo_sessions').select('*').eq('session_id', session_id).execute()
         
         if session.data:
             field_name = f'created_{entity_type}s'  # e.g., 'created_files'
@@ -306,7 +304,7 @@ class SupabaseManager:
             
             current_list.append(entity_id)
             
-            self.admin_client.table('demo_sessions').update({
+            self.client.table('demo_sessions').update({
                 field_name: current_list
             }).eq('session_id', session_id).execute()
     
@@ -330,7 +328,7 @@ class SupabaseManager:
             **kwargs
         }
         
-        response = self.admin_client.table('parameters').insert(param_data).execute()
+        response = self.client.table('parameters').insert(param_data).execute()
         
         if response.data and demo_session_id:
             self.track_demo_action(demo_session_id, 'parameter', response.data[0]['parameter_id'])
@@ -381,7 +379,7 @@ class SupabaseManager:
             **kwargs
         }
         
-        response = self.admin_client.table('trained_models').insert(model_data).execute()
+        response = self.client.table('trained_models').insert(model_data).execute()
         
         if response.data and demo_session_id:
             self.track_demo_action(demo_session_id, 'model', response.data[0]['model_id'])
@@ -416,7 +414,7 @@ class SupabaseManager:
             **kwargs
         }
         
-        response = self.admin_client.table('scenarios').insert(scenario_data).execute()
+        response = self.client.table('scenarios').insert(scenario_data).execute()
         
         if response.data and demo_session_id:
             self.track_demo_action(demo_session_id, 'scenario', response.data[0]['scenario_id'])
@@ -440,7 +438,7 @@ class SupabaseManager:
             **kwargs
         }
         
-        response = self.admin_client.table('scenario_parameters').insert(param_data).execute()
+        response = self.client.table('scenario_parameters').insert(param_data).execute()
         return response.data[0] if response.data else None
     
     def get_scenarios(self, project_id: str, include_demo_base: bool = True) -> List[Dict]:
@@ -472,7 +470,7 @@ class SupabaseManager:
             'new_value': json.dumps(new_value) if new_value else None
         }
         
-        self.admin_client.table('audit_log').insert(audit_data).execute()
+        self.client.table('audit_log').insert(audit_data).execute()
     
     # ========================================================================
     # HELPER METHODS
@@ -480,7 +478,7 @@ class SupabaseManager:
     
     def check_user_limits(self, user_id: str) -> Dict[str, bool]:
         """Check if user has reached limits"""
-        user = self.admin_client.table('users').select('*').eq('user_id', user_id).execute()
+        user = self.client.table('users').select('*').eq('user_id', user_id).execute()
         
         if not user.data:
             return {'can_create_project': False, 'can_upload': False}
