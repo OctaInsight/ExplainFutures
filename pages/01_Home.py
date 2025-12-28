@@ -6,12 +6,11 @@ Project selection and management with multi-user support
 import streamlit as st
 from datetime import datetime
 import time
-from pathlib import Path
 
 # Page configuration
 st.set_page_config(
     page_title="Dashboard - ExplainFutures",
-    page_icon=str(Path("assets/logo_small.png")),
+    page_icon="🏠",
     layout="wide"
 )
 
@@ -179,6 +178,74 @@ def show_user_stats(db):
                 tier,
                 help="Current subscription tier"
             )
+
+
+def show_trash(db):
+    """Show deleted projects with restore option"""
+    st.subheader("🗑️ Trash")
+    st.caption("Deleted projects are kept for 30 days before permanent deletion")
+    
+    # Get deleted projects
+    deleted_projects = db.get_user_projects(
+        user_id=st.session_state.user_id,
+        include_collaborations=False,  # Only show owned projects in trash
+        include_deleted=True
+    )
+    
+    # Filter only deleted projects
+    deleted_projects = [p for p in deleted_projects if p.get('status') == 'deleted']
+    
+    if not deleted_projects:
+        st.info("🎉 Trash is empty! All projects are safe.")
+        return
+    
+    st.warning(f"📦 {len(deleted_projects)} project(s) in trash")
+    
+    st.markdown("---")
+    
+    for project in deleted_projects:
+        with st.container(border=True):
+            col1, col2, col3 = st.columns([3, 1, 1])
+            
+            with col1:
+                st.markdown(f"**{project['project_name']}**")
+                st.caption(f"Code: {project.get('project_code', 'N/A')}")
+                
+                # Show deletion info
+                if project.get('deleted_at'):
+                    deleted_time = datetime.fromisoformat(project['deleted_at'].replace('Z', ''))
+                    time_ago = datetime.now() - deleted_time
+                    days_ago = time_ago.days
+                    
+                    if days_ago == 0:
+                        st.caption("🕐 Deleted today")
+                    elif days_ago == 1:
+                        st.caption("🕐 Deleted yesterday")
+                    else:
+                        st.caption(f"🕐 Deleted {days_ago} days ago")
+                    
+                    # Warning if close to permanent deletion (> 25 days)
+                    if days_ago > 25:
+                        days_left = 30 - days_ago
+                        st.error(f"⚠️ Will be permanently deleted in {days_left} day(s)!")
+            
+            with col2:
+                if st.button("♻️ Restore", key=f"restore_{project['project_id']}", use_container_width=True):
+                    if db.restore_project(project['project_id'], st.session_state.user_id):
+                        time.sleep(1)
+                        st.rerun()
+            
+            with col3:
+                if st.button("🗑️ Delete Forever", key=f"permanent_{project['project_id']}", use_container_width=True, type="secondary"):
+                    if st.session_state.get(f"confirm_permanent_{project['project_id']}"):
+                        if db.permanently_delete_project(project['project_id'], st.session_state.user_id):
+                            st.success("Project permanently deleted")
+                            time.sleep(1)
+                            st.rerun()
+                    else:
+                        st.session_state[f"confirm_permanent_{project['project_id']}"] = True
+                        st.warning("⚠️ Click again to permanently delete. This CANNOT be undone!")
+                        st.rerun()
 
 
 def show_projects_list(db):
@@ -676,7 +743,7 @@ def main():
     st.markdown("---")
     
     # Main content tabs
-    tab1, tab2, tab3 = st.tabs(["📂 Projects", "➕ Create Project", "📊 Activity"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📂 Projects", "➕ Create Project", "🗑️ Trash", "📊 Activity"])
     
     with tab1:
         show_projects_list(db)
@@ -688,6 +755,9 @@ def main():
             create_new_project()
     
     with tab3:
+        show_trash(db)
+    
+    with tab4:
         st.info("📊 Activity feed coming soon")
         st.caption("Recent actions, collaborations, and notifications will appear here.")
 
