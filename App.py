@@ -23,6 +23,13 @@ except ImportError as e:
     DB_AVAILABLE = False
     st.error(f"⚠️ Database connection not available: {str(e)}")
 
+# Import sidebar
+try:
+    from core.shared_sidebar import render_app_sidebar
+    SIDEBAR_AVAILABLE = True
+except ImportError:
+    SIDEBAR_AVAILABLE = False
+
 # Initialize authentication-specific session state
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
@@ -79,6 +86,20 @@ def login_user(username: str, password: str):
 
 
 # ============================================================================
+# RENDER SIDEBAR
+# ============================================================================
+if SIDEBAR_AVAILABLE:
+    try:
+        render_app_sidebar()
+    except Exception as e:
+        # If sidebar fails, show minimal info
+        st.sidebar.title("ExplainFutures")
+        if st.session_state.get('authenticated'):
+            st.sidebar.success(f"✅ {st.session_state.get('username', 'User')}")
+        else:
+            st.sidebar.warning("⚠️ Please login")
+
+# ============================================================================
 # MAIN PAGE
 # ============================================================================
 
@@ -114,7 +135,7 @@ with col_left:
             "Password",
             type="password",
             placeholder="Enter your password",
-            help="Demo password: 'demo123'"
+            help="Demo password: demo123"
         )
         
         col_btn1, col_btn2 = st.columns(2)
