@@ -16,6 +16,15 @@ st.set_page_config(
     layout="wide"  # CRITICAL: Use full page width
 )
 
+# Copy these 6 lines to the TOP of each page (02-13)
+if not st.session_state.get('authenticated', False):
+    st.warning("⚠️ Please log in to continue")
+    time.sleep(1)
+    st.switch_page("App.py")
+    st.stop()
+
+# Then your existing code continues...
+
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
