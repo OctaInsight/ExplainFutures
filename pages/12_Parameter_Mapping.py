@@ -13,8 +13,8 @@ import plotly.express as px
 
 # Page configuration
 st.set_page_config(
-    page_title="Parameter Mapping & Validation",
-    page_icon="🔗",
+    page_title="Parameter Mapping",
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
