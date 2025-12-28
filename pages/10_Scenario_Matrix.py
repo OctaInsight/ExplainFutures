@@ -57,19 +57,40 @@ except ImportError:
 
 
 # =========================
+# CONSTANTS
+# =========================
+
+SCORE_RANGE = 200  # Total range (-100 to +100)
+SCORE_MIN = -100
+SCORE_MAX = 100
+NEAR_ZERO_THRESHOLD = 1e-10  # For baseline validation
+
+
+# =========================
 # UTILITY FUNCTIONS
 # =========================
 
-def infer_polarity(param_name: str, category: str = "") -> bool:
+def infer_polarity(parameter_name: str, category: str = "") -> bool:
     """
     Infer if higher is better based on parameter name and category.
+    
+    Parameters:
+    -----------
+    parameter_name : str
+        Name of the parameter
+    category : str
+        Category of the parameter
+    
     Returns:
+    --------
+    bool
         True if higher is better, False if lower is better
     """
 
-    param_lower = (param_name or "").lower()
+    param_lower = (parameter_name or "").lower()
     category_lower = (category or "").lower()
 
+    # Keywords indicating lower is better
     negative_keywords = [
         'emission', 'co2', 'carbon', 'pollution', 'waste',
         'fossil', 'coal', 'oil consumption', 'gas consumption',
@@ -78,6 +99,7 @@ def infer_polarity(param_name: str, category: str = "") -> bool:
         'risk', 'loss', 'damage', 'accident', 'crime'
     ]
 
+    # Keywords indicating higher is better
     positive_keywords = [
         'gdp', 'income', 'growth', 'renewable', 'efficiency',
         'employment', 'education', 'health', 'life expectancy',
@@ -86,10 +108,12 @@ def infer_polarity(param_name: str, category: str = "") -> bool:
         'safety', 'literacy', 'coverage', 'access'
     ]
 
+    # Check negative keywords first
     for keyword in negative_keywords:
         if keyword in param_lower:
             return False
 
+    # Check positive keywords
     for keyword in positive_keywords:
         if keyword in param_lower:
             return True
@@ -97,14 +121,28 @@ def infer_polarity(param_name: str, category: str = "") -> bool:
     # Default based on category
     if 'environmental' in category_lower:
         return False
-    return True
+    
+    return True  # Default: higher is better
 
 
-def _safe_float(x):
-    if x is None:
+def safe_float(value):
+    """
+    Safely convert value to float, returning None if invalid.
+    
+    Parameters:
+    -----------
+    value : any
+        Value to convert
+    
+    Returns:
+    --------
+    float | None
+        Converted float or None
+    """
+    if pd.isna(value):
         return None
     try:
-        return float(x)
+        return float(value)
     except (ValueError, TypeError):
         return None
 
@@ -113,20 +151,24 @@ def detect_value_type_from_item(item: dict) -> str:
     """
     Detect whether an extracted scenario value is already a percent change.
 
-    Returns: 'percent' or 'absolute_or_unknown'
-
-    Notes:
-    - If your extraction step already sets item['value_type'] or item['unit'],
-      this function will respect it.
-    - Otherwise, we try a conservative heuristic based on common metadata fields.
+    Parameters:
+    -----------
+    item : dict
+        Scenario item with metadata
+    
+    Returns:
+    --------
+    str
+        'percent' or 'absolute_or_unknown'
     """
     # Trust explicit metadata if present
-    vt = (item.get("value_type") or item.get("value_kind") or "").strip().lower()
-    if vt in {"percent", "percentage", "%", "pct"}:
+    value_type = (item.get("value_type") or item.get("value_kind") or "").strip().lower()
+    if value_type in {"percent", "percentage", "%", "pct"}:
         return "percent"
-    if vt in {"absolute", "number", "value", "level", "units"}:
+    if value_type in {"absolute", "number", "value", "level", "units"}:
         return "absolute_or_unknown"
 
+    # Check unit field
     unit = (item.get("unit") or "").strip().lower()
     if unit in {"%", "percent", "percentage", "pct"}:
         return "percent"
@@ -143,40 +185,72 @@ def detect_value_type_from_item(item: dict) -> str:
     return "absolute_or_unknown"
 
 
-def convert_absolute_to_percent(value_abs: float, baseline: float) -> float | None:
+def convert_absolute_to_percent(value_absolute: float, baseline: float) -> float | None:
     """
-    Convert absolute target level to percent change relative to baseline:
-        pct = ((value_abs - baseline) / baseline) * 100
-
-    Returns None if baseline invalid.
+    Convert absolute target level to percent change relative to baseline.
+    
+    Formula: percent = ((value_absolute - baseline) / baseline) × 100
+    
+    Parameters:
+    -----------
+    value_absolute : float
+        Absolute value to convert
+    baseline : float
+        Baseline reference value
+    
+    Returns:
+    --------
+    float | None
+        Percent change, or None if invalid
     """
-    if value_abs is None:
+    if pd.isna(value_absolute):
         return None
-    if baseline is None or baseline == 0:
+    if pd.isna(baseline) or abs(baseline) < NEAR_ZERO_THRESHOLD:
         return None
-    return ((value_abs - baseline) / baseline) * 100.0
+    
+    return ((value_absolute - baseline) / baseline) * 100.0
 
 
-def normalize_parameter(values: list, better_when_higher: bool) -> list:
+def normalize_parameter(values: list[float | None], better_when_higher: bool) -> list[float | None]:
     """
     Normalize parameter values to -100 to +100 scale across scenarios.
-
-    IMPORTANT:
-    - None values are kept as None (not forced to 0).
-    - This prevents missingness from biasing category means.
+    
+    Uses min-max normalization:
+    - For positive indicators: score = 200 * (v - min) / (max - min) - 100
+    - For negative indicators: score = 200 * (max - v) / (max - min) - 100
+    
+    Parameters:
+    -----------
+    values : list[float | None]
+        Parameter values across scenarios
+    better_when_higher : bool
+        True if higher values are better
+    
+    Returns:
+    --------
+    list[float | None]
+        Normalized scores (-100 to +100), None preserved
+    
+    Notes:
+    ------
+    - None values are kept as None (not forced to 0)
+    - This prevents missingness from biasing category means
+    - If all values are equal, returns constant score based on sign
     """
 
     if not values:
         return []
 
-    valid_values = [v for v in values if v is not None and not np.isnan(v)]
+    # Filter out None/NaN values
+    valid_values = [v for v in values if not pd.isna(v)]
+    
     if len(valid_values) == 0:
         return [None] * len(values)
 
     min_val = min(valid_values)
     max_val = max(valid_values)
 
-    # If all values equal, map to a constant (still relative)
+    # If all values equal, map to a constant
     if max_val == min_val:
         # Keep interpretability: direction of the constant itself
         if min_val > 0:
@@ -185,18 +259,22 @@ def normalize_parameter(values: list, better_when_higher: bool) -> list:
             const = -50.0
         else:
             const = 0.0
-        return [None if (v is None or (isinstance(v, float) and np.isnan(v))) else const for v in values]
+        return [None if pd.isna(v) else const for v in values]
 
+    # Apply min-max normalization
     normalized = []
     for v in values:
-        if v is None or (isinstance(v, float) and np.isnan(v)):
+        if pd.isna(v):
             normalized.append(None)
             continue
 
         if better_when_higher:
-            score = 200 * (v - min_val) / (max_val - min_val) - 100
+            # Higher values get higher scores
+            score = SCORE_RANGE * (v - min_val) / (max_val - min_val) + SCORE_MIN
         else:
-            score = 200 * (max_val - v) / (max_val - min_val) - 100
+            # Lower values get higher scores (inverted)
+            score = SCORE_RANGE * (max_val - v) / (max_val - min_val) + SCORE_MIN
+        
         normalized.append(float(score))
 
     return normalized
@@ -207,9 +285,23 @@ def calculate_category_scores_equal_weights(scenarios: list, polarity_dict: dict
     Calculate -100 to +100 scores for each category in each scenario.
     EQUAL WEIGHT VERSION - All parameters contribute equally.
 
-    Missing values:
-    - Excluded from the category mean (no forced zeros).
-    - If a scenario has no valid values in a category, category score is NaN.
+    Parameters:
+    -----------
+    scenarios : list
+        List of scenario dictionaries
+    polarity_dict : dict
+        Parameter name -> bool (True if higher is better)
+    
+    Returns:
+    --------
+    dict
+        {scenario_name: {category: score}}
+    
+    Notes:
+    ------
+    - Missing values are excluded from the category mean
+    - If a scenario has no valid values in a category, score is NaN
+    - Category score = mean of normalized parameter scores
     """
 
     # Group parameter values by category and parameter
@@ -219,45 +311,45 @@ def calculate_category_scores_equal_weights(scenarios: list, polarity_dict: dict
         scenario_name = scenario.get("title", "Untitled Scenario")
         for item in scenario.get("items", []):
             category = item.get("category", "Other")
-            param = item.get("parameter_canonical", item.get("parameter", ""))
+            parameter_name = item.get("parameter_canonical", item.get("parameter", ""))
 
-            if not param:
+            if not parameter_name:
                 continue
 
-            params_by_category.setdefault(category, {}).setdefault(param, [])
+            params_by_category.setdefault(category, {}).setdefault(parameter_name, [])
 
-            value = _safe_float(item.get("value"))
-            params_by_category[category][param].append({
+            value = safe_float(item.get("value"))
+            params_by_category[category][parameter_name].append({
                 "scenario": scenario_name,
                 "value": value
             })
 
-    # Normalize parameter across scenarios, then collect by scenario/category
+    # Normalize each parameter across scenarios, then collect by scenario/category
     normalized_scores = {}
 
     for category, params in params_by_category.items():
-        for param, data_points in params.items():
+        for parameter_name, data_points in params.items():
             values = [d["value"] for d in data_points]
-            better_when_higher = polarity_dict.get(param, True)
+            better_when_higher = polarity_dict.get(parameter_name, True)
 
             scores = normalize_parameter(values, better_when_higher)
 
-            for i, d in enumerate(data_points):
-                sname = d["scenario"]
-                normalized_scores.setdefault(sname, {}).setdefault(category, [])
-                normalized_scores[sname][category].append(scores[i])
+            for i, data_point in enumerate(data_points):
+                scenario_name = data_point["scenario"]
+                normalized_scores.setdefault(scenario_name, {}).setdefault(category, [])
+                normalized_scores[scenario_name][category].append(scores[i])
 
-    # Category mean (exclude missing)
+    # Calculate category mean (exclude missing)
     category_scores = {}
     all_categories = set(params_by_category.keys())
     all_scenarios = {s.get("title", "Untitled Scenario") for s in scenarios}
 
-    for sname in all_scenarios:
-        category_scores[sname] = {}
+    for scenario_name in all_scenarios:
+        category_scores[scenario_name] = {}
         for category in all_categories:
-            scores = normalized_scores.get(sname, {}).get(category, [])
-            valid = [x for x in scores if x is not None and not np.isnan(x)]
-            category_scores[sname][category] = float(np.mean(valid)) if valid else np.nan
+            scores = normalized_scores.get(scenario_name, {}).get(category, [])
+            valid_scores = [x for x in scores if not pd.isna(x)]
+            category_scores[scenario_name][category] = float(np.mean(valid_scores)) if valid_scores else np.nan
 
     return category_scores
 
@@ -265,17 +357,18 @@ def calculate_category_scores_equal_weights(scenarios: list, polarity_dict: dict
 def get_parameter_normalized_scores(scenarios: list, polarity_dict: dict) -> dict:
     """
     Get normalized scores for each parameter across scenarios.
-    Missing remains None (not 0).
-
+    
+    Parameters:
+    -----------
+    scenarios : list
+        List of scenario dictionaries
+    polarity_dict : dict
+        Parameter name -> bool (True if higher is better)
+    
     Returns:
-    {
-        'category': {
-            'parameter': {
-                'Scenario 1': normalized_score or None,
-                'Scenario 2': normalized_score or None,
-            }
-        }
-    }
+    --------
+    dict
+        {category: {parameter: {scenario_name: normalized_score or None}}}
     """
 
     params_by_category = {}
@@ -284,15 +377,15 @@ def get_parameter_normalized_scores(scenarios: list, polarity_dict: dict) -> dic
         scenario_name = scenario.get("title", "Untitled Scenario")
         for item in scenario.get("items", []):
             category = item.get("category", "Other")
-            param = item.get("parameter_canonical", item.get("parameter", ""))
+            parameter_name = item.get("parameter_canonical", item.get("parameter", ""))
 
-            if not param:
+            if not parameter_name:
                 continue
 
-            params_by_category.setdefault(category, {}).setdefault(param, [])
+            params_by_category.setdefault(category, {}).setdefault(parameter_name, [])
 
-            value = _safe_float(item.get("value"))
-            params_by_category[category][param].append({
+            value = safe_float(item.get("value"))
+            params_by_category[category][parameter_name].append({
                 "scenario": scenario_name,
                 "value": value
             })
@@ -300,26 +393,43 @@ def get_parameter_normalized_scores(scenarios: list, polarity_dict: dict) -> dic
     result = {}
     for category, params in params_by_category.items():
         result[category] = {}
-        for param, data_points in params.items():
+        for parameter_name, data_points in params.items():
             values = [d["value"] for d in data_points]
-            better_when_higher = polarity_dict.get(param, True)
+            better_when_higher = polarity_dict.get(parameter_name, True)
             scores = normalize_parameter(values, better_when_higher)
 
-            result[category][param] = {}
-            for i, d in enumerate(data_points):
-                result[category][param][d["scenario"]] = scores[i]
+            result[category][parameter_name] = {}
+            for i, data_point in enumerate(data_points):
+                result[category][parameter_name][data_point["scenario"]] = scores[i]
 
     return result
 
 
 def calculate_category_scores_weighted(scenarios: list, polarity_dict: dict, weight_dict: dict) -> dict:
     """
-    Weighted category scores.
-
-    NOTE (per your instruction):
-    - We do NOT change your weight sign logic.
-    - We only fix missing handling: missing values are excluded from weighted sum and weight total.
-      (No missing -> category score is NaN.)
+    Calculate weighted category scores.
+    
+    Formula: Score = Σ(w_i × score_i) / Σ|w_i|
+    
+    Parameters:
+    -----------
+    scenarios : list
+        List of scenario dictionaries
+    polarity_dict : dict
+        Parameter name -> bool (True if higher is better)
+    weight_dict : dict
+        {category: {parameter: weight}}
+    
+    Returns:
+    --------
+    dict
+        {scenario_name: {category: weighted_score}}
+    
+    Notes:
+    ------
+    - Missing values are excluded from both numerator and denominator
+    - Allows negative weights (e.g., to penalize certain parameters)
+    - Normalizes by sum of absolute weights
     """
 
     param_scores = get_parameter_normalized_scores(scenarios, polarity_dict)
@@ -338,34 +448,56 @@ def calculate_category_scores_weighted(scenarios: list, polarity_dict: dict, wei
             weighted_sum = 0.0
             total_weight = 0.0
 
-            for param, scores_by_scenario in params.items():
-                if param in weight_dict[category]:
-                    weight = float(weight_dict[category][param])
+            for parameter_name, scores_by_scenario in params.items():
+                if parameter_name in weight_dict[category]:
+                    weight = float(weight_dict[category][parameter_name])
                     score = scores_by_scenario.get(scenario_name, None)
 
-                    # Missing: skip
-                    if score is None or (isinstance(score, float) and np.isnan(score)):
+                    # Skip missing values
+                    if pd.isna(score):
                         continue
 
                     weighted_sum += weight * score
                     total_weight += abs(weight)
 
-            category_scores[scenario_name][category] = (weighted_sum / total_weight) if total_weight > 0 else np.nan
+            if total_weight > 0:
+                category_scores[scenario_name][category] = weighted_sum / total_weight
+            else:
+                category_scores[scenario_name][category] = np.nan
 
     return category_scores
 
 
 def extract_scenario_year(scenarios: list) -> str | None:
+    """
+    Extract scenario target year from scenario metadata.
+    
+    Parameters:
+    -----------
+    scenarios : list
+        List of scenario dictionaries
+    
+    Returns:
+    --------
+    str | None
+        Year as string, or None if not found
+    """
     if not scenarios:
         return None
+    
     first = scenarios[0]
+    
     if "year" in first:
         return str(first["year"])
     if "target_year" in first:
         return str(first["target_year"])
+    if "horizon" in first:
+        return str(first["horizon"])
+    
+    # Try to extract from title
     title = first.get("title", "")
-    m = re.search(r"\b(20\d{2})\b", title)
-    return m.group(1) if m else None
+    match = re.search(r"\b(20\d{2})\b", title)
+    return match.group(1) if match else None
 
 
 # =========================
@@ -383,6 +515,71 @@ if 'scenario_parameters' not in st.session_state or not st.session_state.scenari
     st.stop()
 
 scenarios = st.session_state.scenario_parameters
+
+# === IMPORTANT SCIENTIFIC NOTES ===
+with st.expander("⚠️ **IMPORTANT: Scientific Methodology & Interpretation**", expanded=True):
+    st.markdown("""
+### 🔬 Scientific Methodology
+
+This page uses **Multi-Criteria Decision Analysis (MCDA)** with **min-max normalization** to compare scenarios.
+
+#### **How Scores are Calculated:**
+
+1. **Normalization** (-100 to +100 scale):
+   - For each parameter, values are normalized across all scenarios
+   - **Positive indicators** (higher is better): min value → -100, max value → +100
+   - **Negative indicators** (lower is better): max value → -100, min value → +100
+
+2. **Category Scores**:
+   - **Equal Weights**: Simple mean of all parameter scores in category
+   - **Weighted**: Weighted mean using custom weights
+
+#### **⚠️ CRITICAL WARNINGS:**
+
+1. **Relative Scoring**: 
+   - Scores are **relative to THIS set of scenarios ONLY**
+   - Adding/removing scenarios will **change ALL scores**
+   - Scores are **NOT comparable across different scenario sets**
+   - A score of +100 means "best among these scenarios", not "perfect"
+
+2. **Baseline Consistency**:
+   - ALL baselines MUST be from the **SAME reference year**
+   - Mixing baseline years produces meaningless results
+   - Use a common baseline year for all parameters (e.g., 2020)
+
+3. **Missing Data**:
+   - Missing values are **excluded** from calculations (not replaced with zeros)
+   - Category scores calculated from available parameters only
+   - Prevents missing data from biasing results
+
+#### **Score Interpretation:**
+
+**Scale: -100 to +100**
+- **+100** = Best performance in this category (among these scenarios)
+- **0** = Midpoint between best and worst
+- **-100** = Worst performance in this category (among these scenarios)
+
+**What scores mean:**
+- ✅ Relative ranking among included scenarios
+- ✅ Direction of performance (positive = better, negative = worse)
+- ✅ Consistent comparison framework
+
+**What scores DON'T mean:**
+- ❌ Absolute performance against a fixed target
+- ❌ Comparable across different scenario sets
+- ❌ "Good" or "bad" in absolute terms
+- ❌ Independent of which scenarios are included
+
+#### **Example:**
+```
+Given scenarios: A (GDP +2%), B (GDP +5%), C (GDP +8%)
+Scores: A = -100, B = 0, C = +100
+
+If you add scenario D (GDP +12%):
+New scores: A = -100, B = -20, C = +40, D = +100
+→ All scores changed because D is now the best!
+```
+    """)
 
 # === GUIDE ===
 with st.expander("📖 **How to Use This Page**", expanded=False):
@@ -407,13 +604,6 @@ Each parameter can be **positive** (higher is better) or **negative** (lower is 
 5. **Calculate Scores** — Normalize all parameters to **-100 to +100** scale
 6. **Visualize Matrix** — Compare scenarios on X–Y plot with custom axes
 7. **Export Results** — Download plots and data
-
-### Scoring (Interpretation):
-- **-100 to +100 scale** for each category
-- **+100** = highest relative performance among included scenarios (for that category)
-- **-100** = lowest relative performance among included scenarios (for that category)
-- **0** = midpoint of the relative scale among included scenarios (not a baseline vs today)
-- Scores are **relative between scenarios** (not absolute).
 """)
 
 st.markdown("---")
@@ -425,23 +615,23 @@ st.caption("Review and confirm whether higher values are better for each paramet
 all_parameters = {}
 for scenario in scenarios:
     for item in scenario.get("items", []):
-        param = item.get('parameter_canonical', item.get('parameter', ''))
-        if not param:
+        parameter_name = item.get('parameter_canonical', item.get('parameter', ''))
+        if not parameter_name:
             continue
         category = item.get('category', 'Other')
 
-        if param not in all_parameters:
-            auto_polarity = infer_polarity(param, category)
-            all_parameters[param] = {
+        if parameter_name not in all_parameters:
+            auto_polarity = infer_polarity(parameter_name, category)
+            all_parameters[parameter_name] = {
                 'category': category,
                 'auto_polarity': auto_polarity,
                 'user_polarity': auto_polarity
             }
 
 edit_data = []
-for param, info in all_parameters.items():
+for parameter_name, info in all_parameters.items():
     edit_data.append({
-        'Parameter': param,
+        'Parameter': parameter_name,
         'Category': info['category'],
         'Polarity': 'Positive (↑)' if info['user_polarity'] else 'Negative (↓)'
     })
@@ -468,10 +658,11 @@ edited_df = st.data_editor(
     key="polarity_editor"
 )
 
+# Update polarity based on edits
 for _, row in edited_df.iterrows():
-    param = row['Parameter']
-    if param in all_parameters:
-        all_parameters[param]['user_polarity'] = (row['Polarity'] == 'Positive (↑)')
+    parameter_name = row['Parameter']
+    if parameter_name in all_parameters:
+        all_parameters[parameter_name]['user_polarity'] = (row['Polarity'] == 'Positive (↑)')
 
 polarity_dict = {param: info['user_polarity'] for param, info in all_parameters.items()}
 
@@ -489,38 +680,38 @@ if st.button("✅ Confirm All Polarities & Continue", type="primary", use_contai
     st.rerun()
 
 
-# === STEP 1B: ENFORCE PERCENT CHANGE CONSISTENCY (Issue 2 fix) ===
+# === STEP 2: ENSURE VALUES ARE PERCENT CHANGES ===
 if st.session_state.get('polarity_confirmed', False):
     st.markdown("---")
     st.subheader("🧮 Step 2: Ensure Values Are Percent Changes")
     st.caption("This page scores scenarios using percent changes. If any parameter values are not in percent, convert them using a baseline.")
 
-    # Build parameter value type table (per parameter)
+    # Build parameter value type table
     param_meta = {}
     for scenario in scenarios:
         for item in scenario.get("items", []):
-            param = item.get('parameter_canonical', item.get('parameter', ''))
-            if not param:
+            parameter_name = item.get('parameter_canonical', item.get('parameter', ''))
+            if not parameter_name:
                 continue
             category = item.get('category', 'Other')
-            vt = detect_value_type_from_item(item)
-            param_meta.setdefault(param, {"Category": category, "Detected": set()})
-            param_meta[param]["Detected"].add(vt)
+            value_type = detect_value_type_from_item(item)
+            param_meta.setdefault(parameter_name, {"Category": category, "Detected": set()})
+            param_meta[parameter_name]["Detected"].add(value_type)
 
     rows = []
-    for param, info in param_meta.items():
+    for parameter_name, info in param_meta.items():
         detected = "percent" if info["Detected"] == {"percent"} else "mixed_or_non_percent"
         rows.append({
-            "Parameter": param,
+            "Parameter": parameter_name,
             "Category": info["Category"],
             "Detected": "Percent (%)" if detected == "percent" else "Non-percent / mixed",
             "Use as": "Percent (%)" if detected == "percent" else "Absolute → Convert to Percent"
         })
 
-    df_vt = pd.DataFrame(rows).sort_values(["Category", "Parameter"])
+    df_value_type = pd.DataFrame(rows).sort_values(["Category", "Parameter"])
 
-    vt_editor = st.data_editor(
-        df_vt,
+    value_type_editor = st.data_editor(
+        df_value_type,
         column_config={
             "Parameter": st.column_config.TextColumn(width="large"),
             "Category": st.column_config.TextColumn(width="medium"),
@@ -539,73 +730,79 @@ if st.session_state.get('polarity_confirmed', False):
     )
 
     # Baselines input for parameters that need conversion
-    needs_baseline = vt_editor[vt_editor["Use as"] == "Absolute → Convert to Percent"]["Parameter"].tolist()
+    needs_baseline = value_type_editor[value_type_editor["Use as"] == "Absolute → Convert to Percent"]["Parameter"].tolist()
     baseline_dict = st.session_state.get("baseline_dict", {})
 
     if needs_baseline:
-        st.warning("Some parameters are not in percent. Please provide a baseline value for conversion to percent change.")
-        st.markdown("**Baseline definition:** percent change is computed as:  \n`((scenario_value - baseline) / baseline) * 100`")
+        st.warning("⚠️ Some parameters are not in percent. Please provide a baseline value for conversion to percent change.")
+        st.markdown("**Baseline definition:** Percent change is computed as: `((scenario_value - baseline) / baseline) × 100`")
+        st.info("💡 **IMPORTANT**: All baselines should be from the SAME reference year (e.g., all from 2020)")
 
         with st.expander("📌 Provide Baselines (only for parameters requiring conversion)", expanded=True):
-            for p in needs_baseline:
-                baseline_dict[p] = st.number_input(
-                    label=f"Baseline for: {p}",
-                    value=float(baseline_dict.get(p, 0.0)),
-                    help="Baseline must be non-zero to convert absolute values to percent change.",
-                    key=f"baseline_{p}"
+            for parameter_name in needs_baseline:
+                current_baseline = baseline_dict.get(parameter_name, 0.0)
+                baseline_dict[parameter_name] = st.number_input(
+                    label=f"Baseline for: {parameter_name}",
+                    value=float(current_baseline),
+                    help=f"Baseline must be non-zero. Current: {current_baseline}",
+                    key=f"baseline_{parameter_name}"
                 )
 
         st.session_state.baseline_dict = baseline_dict
 
-    # Apply conversion to scenarios (in-place copy into a new structure, to avoid mutating upstream)
-    def build_percent_scenarios(original_scenarios, vt_editor_df, baselines):
-        use_map = dict(zip(vt_editor_df["Parameter"], vt_editor_df["Use as"]))
-        out = []
+    # Apply conversion to scenarios
+    def build_percent_scenarios(original_scenarios, value_type_df, baselines):
+        """Convert scenarios to percent-based values"""
+        use_map = dict(zip(value_type_df["Parameter"], value_type_df["Use as"]))
+        output_scenarios = []
 
-        for sc in original_scenarios:
-            sc_out = dict(sc)
-            sc_out["items"] = []
-            for item in sc.get("items", []):
+        for scenario in original_scenarios:
+            scenario_output = dict(scenario)
+            scenario_output["items"] = []
+            
+            for item in scenario.get("items", []):
                 new_item = dict(item)
-                param = item.get('parameter_canonical', item.get('parameter', ''))
-                if not param:
-                    sc_out["items"].append(new_item)
+                parameter_name = item.get('parameter_canonical', item.get('parameter', ''))
+                
+                if not parameter_name:
+                    scenario_output["items"].append(new_item)
                     continue
 
-                use_as = use_map.get(param, "Percent (%)")
-                v = _safe_float(item.get("value"))
+                use_as = use_map.get(parameter_name, "Percent (%)")
+                value = safe_float(item.get("value"))
 
                 if use_as == "Percent (%)":
                     # Keep as-is (assume already percent change)
-                    new_item["value"] = v
+                    new_item["value"] = value
                     new_item["value_type"] = "percent"
                 else:
-                    # Convert absolute -> percent
-                    baseline = _safe_float(baselines.get(param))
-                    pct = convert_absolute_to_percent(v, baseline)
-                    new_item["value"] = pct
+                    # Convert absolute → percent
+                    baseline = safe_float(baselines.get(parameter_name))
+                    percent_change = convert_absolute_to_percent(value, baseline)
+                    new_item["value"] = percent_change
                     new_item["value_type"] = "percent_converted"
 
-                sc_out["items"].append(new_item)
+                scenario_output["items"].append(new_item)
 
-            out.append(sc_out)
-        return out
+            output_scenarios.append(scenario_output)
+        
+        return output_scenarios
 
-    # Validation: any conversion requested but baseline missing/invalid
+    # Validation: check all required baselines are valid
     conversion_blocked = False
     if needs_baseline:
-        for p in needs_baseline:
-            b = _safe_float(baseline_dict.get(p))
-            if b is None or b == 0:
+        for parameter_name in needs_baseline:
+            baseline = safe_float(baseline_dict.get(parameter_name))
+            if pd.isna(baseline) or abs(baseline) < NEAR_ZERO_THRESHOLD:
+                st.error(f"⚠️ Cannot convert **{parameter_name}**: baseline must be non-zero (current: {baseline})")
                 conversion_blocked = True
-                break
 
     if conversion_blocked:
-        st.error("Conversion is blocked: at least one required baseline is missing or zero. Please provide valid baselines to continue.")
+        st.error("❌ Conversion is blocked: at least one required baseline is missing or zero. Please provide valid baselines to continue.")
         st.stop()
 
-    # Use percent-ready scenarios downstream
-    scenarios_percent = build_percent_scenarios(scenarios, vt_editor, baseline_dict)
+    # Create percent-ready scenarios
+    scenarios_percent = build_percent_scenarios(scenarios, value_type_editor, baseline_dict)
     st.session_state.scenarios_percent = scenarios_percent
 
     st.success("✅ Values validated. Percent-change dataset is ready for scoring.")
@@ -618,9 +815,9 @@ if st.session_state.get('polarity_confirmed', False):
     st.caption("Choose how parameters contribute to each category score")
 
     st.info("""
-**Important Note:** You have two options:
+**Two Options:**
 1. **Equal Weights** — All parameters contribute equally (simple average)
-2. **Custom Weights** — Define specific weights for each parameter in each category (weighted formula)
+2. **Custom Weights** — Define specific weights for each parameter (weighted formula)
 """)
 
     weighting_method = st.radio(
@@ -641,8 +838,8 @@ if st.session_state.get('polarity_confirmed', False):
         st.latex(r"\text{Category Score} = \frac{1}{n} \sum_{i=1}^{n} \text{Parameter}_i")
         st.caption("Where each parameter contributes equally to the category score (missing values excluded).")
 
-        if st.button("Calculate Category Scores (Equal Weights)", type="primary", use_container_width=True):
-            with st.spinner("Calculating scores with equal weights..."):
+        if st.button("✅ Calculate Category Scores (Equal Weights)", type="primary", use_container_width=True):
+            with st.spinner(f"Calculating scores for {len(scenarios_for_scoring)} scenarios..."):
                 category_scores = calculate_category_scores_equal_weights(
                     scenarios_for_scoring,
                     st.session_state.polarity_dict
@@ -665,13 +862,15 @@ if st.session_state.get('polarity_confirmed', False):
 
         all_categories = sorted(param_scores.keys())
 
+        # Initialize weight dict
         if 'weight_dict' not in st.session_state:
             st.session_state.weight_dict = {}
             for category in all_categories:
                 st.session_state.weight_dict[category] = {}
-                for param in param_scores[category].keys():
-                    st.session_state.weight_dict[category][param] = 1.0
+                for parameter_name in param_scores[category].keys():
+                    st.session_state.weight_dict[category][parameter_name] = 1.0
 
+        # Create tabs for each category
         category_tabs = st.tabs(all_categories)
 
         for idx, category in enumerate(all_categories):
@@ -681,11 +880,11 @@ if st.session_state.get('polarity_confirmed', False):
                 params_in_category = sorted(param_scores[category].keys())
 
                 weight_data = []
-                for param in params_in_category:
-                    current_weight = st.session_state.weight_dict[category].get(param, 1.0)
-                    direction = "↑ Positive" if st.session_state.polarity_dict.get(param, True) else "↓ Negative"
+                for parameter_name in params_in_category:
+                    current_weight = st.session_state.weight_dict[category].get(parameter_name, 1.0)
+                    direction = "↑ Positive" if st.session_state.polarity_dict.get(parameter_name, True) else "↓ Negative"
                     weight_data.append({
-                        'Parameter': param,
+                        'Parameter': parameter_name,
                         'Direction': direction,
                         'Weight': current_weight
                     })
@@ -714,22 +913,24 @@ if st.session_state.get('polarity_confirmed', False):
                     key=f"weights_editor_{category}"
                 )
 
+                # Update weights
                 for _, row in edited_weights.iterrows():
-                    p = row['Parameter']
-                    w = row['Weight']
-                    st.session_state.weight_dict[category][p] = w
+                    parameter_name = row['Parameter']
+                    weight = row['Weight']
+                    st.session_state.weight_dict[category][parameter_name] = weight
 
+                # Show formula preview
                 st.markdown("**Formula preview (this category):**")
                 formula_parts = []
                 for _, row in edited_weights.iterrows():
-                    pname = row['Parameter'][:20] + "..." if len(row['Parameter']) > 20 else row['Parameter']
-                    w = row['Weight']
-                    formula_parts.append(f"{w:.2f} × {pname}" if w >= 0 else f"({w:.2f}) × {pname}")
+                    param_short = row['Parameter'][:20] + "..." if len(row['Parameter']) > 20 else row['Parameter']
+                    weight = row['Weight']
+                    formula_parts.append(f"{weight:.2f} × {param_short}" if weight >= 0 else f"({weight:.2f}) × {param_short}")
                 st.code(f"{category} Score = ({' + '.join(formula_parts)}) / Σ|wᵢ|", language="text")
 
         st.markdown("---")
-        if st.button("Calculate Category Scores (Weighted Formula)", type="primary", use_container_width=True):
-            with st.spinner("Calculating scores with custom weights..."):
+        if st.button("✅ Calculate Category Scores (Weighted Formula)", type="primary", use_container_width=True):
+            with st.spinner(f"Calculating weighted scores for {len(scenarios_for_scoring)} scenarios..."):
                 category_scores = calculate_category_scores_weighted(
                     scenarios_for_scoring,
                     st.session_state.polarity_dict,
@@ -753,6 +954,7 @@ if st.session_state.get('category_scores') is not None:
 
     category_scores = st.session_state.category_scores
 
+    # Build summary table
     summary_data = []
     for scenario_name, scores in category_scores.items():
         row = {'Scenario': scenario_name}
@@ -764,13 +966,14 @@ if st.session_state.get('category_scores') is not None:
     with st.expander("📊 **Category Scores Table**", expanded=True):
         display_df = df_scores.copy()
 
-        # Format: keep NaN visible as blank (so missingness is clear)
+        # Format: keep NaN visible as blank
         for col in display_df.columns:
             if col != 'Scenario':
-                display_df[col] = display_df[col].apply(lambda x: "" if (x is None or (isinstance(x, float) and np.isnan(x))) else f"{x:.1f}")
+                display_df[col] = display_df[col].apply(lambda x: "" if pd.isna(x) else f"{x:.1f}")
 
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
+        # Export options
         col_d1, col_d2 = st.columns(2)
         with col_d1:
             csv_data = df_scores.to_csv(index=False)
@@ -823,56 +1026,68 @@ if st.session_state.get('category_scores') is not None:
 
             scenario_colors = {}
             scenario_list = list(category_scores.keys())
+            
+            # Use modulo to handle more scenarios than colors
             for idx, scenario_name in enumerate(scenario_list):
                 scenario_colors[scenario_name] = default_colors[idx % len(default_colors)]
 
+            # Color pickers in rows
             cols_per_row = 4
             for row_start in range(0, len(scenario_list), cols_per_row):
                 cols = st.columns(cols_per_row)
                 for col_idx in range(cols_per_row):
-                    sidx = row_start + col_idx
-                    if sidx < len(scenario_list):
-                        sname = scenario_list[sidx]
+                    scenario_idx = row_start + col_idx
+                    if scenario_idx < len(scenario_list):
+                        scenario_name = scenario_list[scenario_idx]
                         with cols[col_idx]:
-                            scenario_colors[sname] = st.color_picker(
-                                f"{sname[:15]}...",
-                                value=scenario_colors[sname],
-                                key=f'color_picker_{sidx}'
+                            scenario_colors[scenario_name] = st.color_picker(
+                                f"{scenario_name[:15]}...",
+                                value=scenario_colors[scenario_name],
+                                key=f'color_picker_{scenario_idx}'
                             )
 
         # Create plot
         fig = go.Figure()
 
         # Cross at origin
-        fig.add_shape(type="line", x0=-110, y0=0, x1=110, y1=0,
-                      line=dict(color="rgba(255, 255, 255, 0.5)", width=2, dash="dash"),
-                      layer="below")
-        fig.add_shape(type="line", x0=0, y0=-110, x1=0, y1=110,
-                      line=dict(color="rgba(255, 255, 255, 0.5)", width=2, dash="dash"),
-                      layer="below")
+        fig.add_shape(
+            type="line", 
+            x0=-110, y0=0, x1=110, y1=0,
+            line=dict(color="rgba(255, 255, 255, 0.5)", width=2, dash="dash"),
+            layer="below"
+        )
+        fig.add_shape(
+            type="line", 
+            x0=0, y0=-110, x1=0, y1=110,
+            line=dict(color="rgba(255, 255, 255, 0.5)", width=2, dash="dash"),
+            layer="below"
+        )
 
-        # Add scenarios
+        # Add scenarios with error boxes
         for scenario_name, scores in category_scores.items():
             x_raw = scores.get(x_category, np.nan)
             y_raw = scores.get(y_category, np.nan)
 
-            # If missing category score, plot at 0 but label as missing in hover
-            x_missing = (x_raw is None) or (isinstance(x_raw, float) and np.isnan(x_raw))
-            y_missing = (y_raw is None) or (isinstance(y_raw, float) and np.isnan(y_raw))
+            # Handle missing scores
+            x_missing = pd.isna(x_raw)
+            y_missing = pd.isna(y_raw)
 
             x_val = 0.0 if x_missing else float(x_raw)
             y_val = 0.0 if y_missing else float(y_raw)
 
+            # Calculate error margins
             x_error = (error_margin / 100) * abs(x_val) if x_val != 0 else 5
             y_error = (error_margin / 100) * abs(y_val) if y_val != 0 else 5
 
             color = scenario_colors.get(scenario_name, '#636EFA')
 
+            # Bounds check
             x0 = max(-110, x_val - x_error)
             y0 = max(-110, y_val - y_error)
             x1 = min(110, x_val + x_error)
             y1 = min(110, y_val + y_error)
 
+            # Add error box
             fig.add_shape(
                 type="rect",
                 x0=x0, y0=y0,
@@ -884,9 +1099,11 @@ if st.session_state.get('category_scores') is not None:
                 name=scenario_name
             )
 
+            # Format hover text
             x_text = "MISSING" if x_missing else f"{x_val:.1f}"
             y_text = "MISSING" if y_missing else f"{y_val:.1f}"
 
+            # Add marker
             fig.add_trace(go.Scatter(
                 x=[x_val],
                 y=[y_val],
@@ -904,13 +1121,30 @@ if st.session_state.get('category_scores') is not None:
                 )
             ))
 
+        # Title
         scenario_year = extract_scenario_year(scenarios)
-        plot_title = f"Scenario Comparison: {x_category} vs {y_category}" + (f" (Projected {scenario_year})" if scenario_year else "")
+        plot_title = f"Scenario Comparison: {x_category} vs {y_category}"
+        if scenario_year:
+            plot_title += f" (Projected {scenario_year})"
 
+        # Layout
         fig.update_layout(
-            title=dict(text=plot_title, font=dict(color='white', size=18), x=0.5, xanchor='center'),
-            xaxis_title=dict(text=f"{x_category} Score", font=dict(color='white', size=14), standoff=20),
-            yaxis_title=dict(text=f"{y_category} Score", font=dict(color='white', size=14), standoff=20),
+            title=dict(
+                text=plot_title, 
+                font=dict(color='white', size=18), 
+                x=0.5, 
+                xanchor='center'
+            ),
+            xaxis_title=dict(
+                text=f"{x_category} Score", 
+                font=dict(color='white', size=14), 
+                standoff=20
+            ),
+            yaxis_title=dict(
+                text=f"{y_category} Score", 
+                font=dict(color='white', size=14), 
+                standoff=20
+            ),
             xaxis=dict(
                 range=[-110, 110],
                 showgrid=True,
@@ -959,38 +1193,81 @@ if st.session_state.get('category_scores') is not None:
             margin=dict(l=80, r=40, t=100, b=80)
         )
 
-        # Quadrant labels (kept exactly as your design)
-        fig.add_annotation(x=55, y=55, text="+ / +", showarrow=False,
-                           font=dict(size=14, color="white", family="monospace"),
-                           bgcolor='rgba(0,100,0,0.3)', bordercolor='rgba(255,255,255,0.5)',
-                           borderwidth=1, borderpad=6)
-        fig.add_annotation(x=-55, y=55, text="- / +", showarrow=False,
-                           font=dict(size=14, color="white", family="monospace"),
-                           bgcolor='rgba(128,128,0,0.3)', bordercolor='rgba(255,255,255,0.5)',
-                           borderwidth=1, borderpad=6)
-        fig.add_annotation(x=-55, y=-55, text="- / -", showarrow=False,
-                           font=dict(size=14, color="white", family="monospace"),
-                           bgcolor='rgba(100,0,0,0.3)', bordercolor='rgba(255,255,255,0.5)',
-                           borderwidth=1, borderpad=6)
-        fig.add_annotation(x=55, y=-55, text="+ / -", showarrow=False,
-                           font=dict(size=14, color="white", family="monospace"),
-                           bgcolor='rgba(128,128,0,0.3)', bordercolor='rgba(255,255,255,0.5)',
-                           borderwidth=1, borderpad=6)
+        # Quadrant labels
+        fig.add_annotation(
+            x=55, y=55, 
+            text="+ / +", 
+            showarrow=False,
+            font=dict(size=14, color="white", family="monospace"),
+            bgcolor='rgba(0,100,0,0.3)', 
+            bordercolor='rgba(255,255,255,0.5)',
+            borderwidth=1, 
+            borderpad=6
+        )
+        fig.add_annotation(
+            x=-55, y=55, 
+            text="- / +", 
+            showarrow=False,
+            font=dict(size=14, color="white", family="monospace"),
+            bgcolor='rgba(128,128,0,0.3)', 
+            bordercolor='rgba(255,255,255,0.5)',
+            borderwidth=1, 
+            borderpad=6
+        )
+        fig.add_annotation(
+            x=-55, y=-55, 
+            text="- / -", 
+            showarrow=False,
+            font=dict(size=14, color="white", family="monospace"),
+            bgcolor='rgba(100,0,0,0.3)', 
+            bordercolor='rgba(255,255,255,0.5)',
+            borderwidth=1, 
+            borderpad=6
+        )
+        fig.add_annotation(
+            x=55, y=-55, 
+            text="+ / -", 
+            showarrow=False,
+            font=dict(size=14, color="white", family="monospace"),
+            bgcolor='rgba(128,128,0,0.3)', 
+            bordercolor='rgba(255,255,255,0.5)',
+            borderwidth=1, 
+            borderpad=6
+        )
 
-        # Export version with white background (kept exactly as your design)
+        # Export version with white background
         export_fig = go.Figure(fig)
         export_fig.update_layout(
             title=dict(font=dict(color='black', size=18)),
             xaxis_title=dict(font=dict(color='black', size=14)),
             yaxis_title=dict(font=dict(color='black', size=14)),
-            xaxis=dict(range=[-110, 110], gridcolor='rgba(0, 0, 0, 0.1)', color='black',
-                       linecolor='black', zeroline=True, zerolinewidth=2, zerolinecolor='rgba(0, 0, 0, 0.5)'),
-            yaxis=dict(range=[-110, 110], gridcolor='rgba(0, 0, 0, 0.1)', color='black',
-                       linecolor='black', zeroline=True, zerolinewidth=2, zerolinecolor='rgba(0, 0, 0, 0.5)'),
+            xaxis=dict(
+                range=[-110, 110], 
+                gridcolor='rgba(0, 0, 0, 0.1)', 
+                color='black',
+                linecolor='black', 
+                zeroline=True, 
+                zerolinewidth=2, 
+                zerolinecolor='rgba(0, 0, 0, 0.5)'
+            ),
+            yaxis=dict(
+                range=[-110, 110], 
+                gridcolor='rgba(0, 0, 0, 0.1)', 
+                color='black',
+                linecolor='black', 
+                zeroline=True, 
+                zerolinewidth=2, 
+                zerolinecolor='rgba(0, 0, 0, 0.5)'
+            ),
             plot_bgcolor='white',
             paper_bgcolor='white',
             font=dict(color='black'),
-            legend=dict(font=dict(color='black'), bgcolor='rgba(255,255,255,0.9)', bordercolor='black', borderwidth=1)
+            legend=dict(
+                font=dict(color='black'), 
+                bgcolor='rgba(255,255,255,0.9)', 
+                bordercolor='black', 
+                borderwidth=1
+            )
         )
 
         # Update cross lines for export
@@ -1009,12 +1286,15 @@ if st.session_state.get('category_scores') is not None:
                 annotation.bgcolor = 'rgba(150,150,0,0.15)'
             annotation.bordercolor = 'black'
 
+        # Store export figure
         if 'export_figures' not in st.session_state:
             st.session_state.export_figures = {}
         st.session_state.export_figures['scenario_matrix'] = export_fig
 
+        # Display plot
         st.plotly_chart(fig, use_container_width=True)
 
+        # Export options
         st.markdown("---")
         with st.expander("💾 Export Plot", expanded=False):
             quick_export_buttons(
@@ -1023,7 +1303,8 @@ if st.session_state.get('category_scores') is not None:
                 show_formats=['png', 'pdf', 'html']
             )
 
-        st.markdown("**📥 Export Data:**")
+        # Export plot data
+        st.markdown("**📥 Export Plot Data:**")
         plot_data = []
         for scenario_name, scores in category_scores.items():
             x_raw = scores.get(x_category, np.nan)
