@@ -15,8 +15,8 @@ from copy import deepcopy
 
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
-    page_title="Future Projections",
-    page_icon="🔮",
+    page_title="Forcasting and Projections",
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"  # CRITICAL: Use full page width
 )
 
