@@ -9,7 +9,7 @@ import time
 # Page config FIRST
 st.set_page_config(
     page_title="ExplainFutures - Scenario Analysis Platform",
-    page_icon="🚀",
+    page_icon= Path("assets/logo_small.png"),
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -96,17 +96,6 @@ st.markdown("---")
 col_left, col_right = st.columns([1.2, 1])
 
 with col_left:
-    st.markdown("#### What is ExplainFutures?")
-    st.markdown("""
-    **ExplainFutures** helps you:
-    - 📊 Analyze future scenarios
-    - 🔮 Generate forecasts
-    - 📈 Compare outcomes
-    - 🎯 Make data-driven decisions
-    """)
-    
-    st.markdown("---")
-    
     # Login form
     st.markdown("#### 🔐 Login to Your Account")
     
@@ -158,7 +147,33 @@ with col_left:
         if forgot_button:
             st.info("📧 Password reset: Please contact support at sales@octainsight.com")
 
+    
+       if st.button("🚀 Launch Demo Session", type="secondary", use_container_width=True):
+        with st.spinner("Starting demo session..."):
+            if login_user("demo", "demo123"):
+                st.success("✅ Demo session started!")
+                st.info("🎭 Explore with pre-loaded data. Session expires in 30 minutes.")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("❌ Demo session failed to start. Please try again or contact support.")
+ 
+    
+    
+
 with col_right:
+
+    st.markdown("#### What is ExplainFutures?")
+    st.markdown("""
+    **ExplainFutures** helps you:
+    - 📊 Analyze future scenarios
+    - 🔮 Generate forecasts
+    - 📈 Compare outcomes
+    - 🎯 Make data-driven decisions
+    """)
+    
+    st.markdown("---")
+    
     st.markdown("#### 🎭 Try Demo (No Registration)")
     
     st.markdown("""
@@ -166,7 +181,7 @@ with col_right:
     
     **Demo Features:**
     - ✅ Full access to all features
-    - ✅ Pre-loaded climate scenarios
+    - ✅ Pre-loaded scenarios
     - ✅ Train models & generate forecasts
     - ✅ Create scenario analyses
     
@@ -176,15 +191,6 @@ with col_right:
     - 🔄 Changes reset on logout
     """)
     
-    if st.button("🚀 Launch Demo Session", type="secondary", use_container_width=True):
-        with st.spinner("Starting demo session..."):
-            if login_user("demo", "demo123"):
-                st.success("✅ Demo session started!")
-                st.info("🎭 Explore with pre-loaded data. Session expires in 30 minutes.")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("❌ Demo session failed to start. Please try again or contact support.")
 
 st.markdown("---")
 
@@ -192,17 +198,14 @@ st.markdown("---")
 # SUBSCRIPTION PLANS
 # ============================================================================
 
-st.markdown("## 💼 Subscription Plans")
+st.markdown("## 👩‍🔬 Committed to Inclusion & Diversity")
 
 st.info("""
-**Committed to Inclusion & Diversity**
-
-At **Octa Insight**, we believe in making advanced scenario analysis accessible to all. 
+At **Octa Insight**, we believe in making our applications accessible to all. 
 We offer flexible pricing based on your location, organization type, and research goals:
 
 - 🌍 **Developing Countries:** Special financial discounts available
 - 👩‍🔬 **Underrepresented Groups:** Dedicated support and special offers for women scientists and researchers from underrepresented communities
-- 🤝 **Custom Solutions:** Every subscription is tailored through direct negotiation
 
 **All pricing is determined through discussion to ensure accessibility and value.**
 """)
@@ -313,7 +316,7 @@ st.markdown("---")
 # Footer
 st.markdown("""
 <div style='text-align: center; color: #666; padding: 20px;'>
-    <p>© 2024 Octa Insight | <a href='#'>Privacy Policy</a> | <a href='#'>Terms of Service</a></p>
+    <p>© 2025 Octa Insight | <a href='#'>Privacy Policy</a> | <a href='#'>Terms of Service</a></p>
     <p>Committed to diversity, inclusion, and accessible futures research</p>
 </div>
 """, unsafe_allow_html=True)
