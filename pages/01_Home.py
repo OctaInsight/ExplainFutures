@@ -6,13 +6,11 @@ Project selection and management with multi-user support
 import streamlit as st
 from datetime import datetime
 import time
-from pathlib import Path
-
 
 # Page configuration
 st.set_page_config(
     page_title="Dashboard - ExplainFutures",
-    page_icon=str(Path("assets/logo_small.png")),
+    page_icon="🏠",
     layout="wide"
 )
 
@@ -134,30 +132,46 @@ def show_user_stats(db):
     if user.data:
         user_data = user.data[0]
         
-        col1, col2, col3, col4 = st.columns(4)
+        # Get count of shared projects
+        try:
+            shared_count_result = db.client.table('project_collaborators').select(
+                'project_id', count='exact'
+            ).eq('user_id', st.session_state.user_id).execute()
+            shared_projects_count = shared_count_result.count if hasattr(shared_count_result, 'count') else 0
+        except:
+            shared_projects_count = 0
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
         
         with col1:
             st.metric(
-                "Projects",
+                "My Projects",
                 f"{user_data.get('current_project_count', 0)} / {user_data.get('max_projects', 3)}",
-                help="Number of active projects"
+                help="Number of projects you own"
             )
         
         with col2:
+            st.metric(
+                "Shared with Me",
+                shared_projects_count,
+                help="Projects others have shared with you"
+            )
+        
+        with col3:
             st.metric(
                 "Storage",
                 f"{user_data.get('current_storage_mb', 0):.1f} / {user_data.get('max_storage_mb', 1000)} MB",
                 help="Storage space used"
             )
         
-        with col3:
+        with col4:
             st.metric(
                 "Uploads This Month",
                 f"{user_data.get('uploads_this_month', 0)} / {user_data.get('max_uploads_per_month', 50)}",
                 help="Files uploaded this month"
             )
         
-        with col4:
+        with col5:
             tier = user_data.get('subscription_tier', 'free').upper()
             st.metric(
                 "Subscription",
