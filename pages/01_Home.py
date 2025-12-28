@@ -29,7 +29,7 @@ def check_authentication():
     if not st.session_state.get('authenticated', False):
         st.warning("⚠️ Please log in to continue")
         time.sleep(1)
-        st.switch_page("pages/00_Login.py")
+        st.switch_page("App.py")  # Redirect to App.py (login is there)
         st.stop()
 
 
@@ -68,7 +68,7 @@ def logout_user():
     
     st.success("✅ Logged out successfully")
     time.sleep(1)
-    st.switch_page("pages/00_Login.py")
+    st.switch_page("App.py")  # Back to login page
 
 
 def create_new_project():
