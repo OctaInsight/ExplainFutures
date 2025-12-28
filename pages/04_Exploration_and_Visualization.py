@@ -12,7 +12,7 @@ import plotly.graph_objects as go
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
     page_title="Data Exploration & Visualization",
-    page_icon="🔮",
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"  # CRITICAL: Use full page width
 )
 
