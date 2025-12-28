@@ -200,9 +200,11 @@ def render_app_sidebar():
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
                 
+                # Redirect to login page
+                st.switch_page("App.py")
+            except Exception as e:
+                # If switch_page fails, just rerun
                 st.rerun()
-            except:
-                st.error("Logout failed")
     else:
         st.sidebar.warning("⚠️ Not logged in")
         st.sidebar.caption("Please login via home page")
