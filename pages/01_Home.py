@@ -8,6 +8,7 @@ from datetime import datetime
 import time
 from pathlib import Path
 
+
 # Page configuration
 st.set_page_config(
     page_title="Dashboard - ExplainFutures",
@@ -179,9 +180,15 @@ def show_projects_list(db):
         st.info("🎯 No projects yet. Create your first project to get started!")
         return
     
+    # Debug: Show project count
+    st.caption(f"Total projects loaded: {len(projects)}")
+    
     # Separate owned and shared projects
     owned_projects = [p for p in projects if p.get('is_owner', True)]
     shared_projects = [p for p in projects if not p.get('is_owner', True)]
+    
+    # Debug: Show counts
+    st.caption(f"Owned: {len(owned_projects)} | Shared with me: {len(shared_projects)}")
     
     # Create tabs for owned and shared
     if shared_projects:
