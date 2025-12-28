@@ -6,11 +6,13 @@ Project selection and management with multi-user support
 import streamlit as st
 from datetime import datetime
 import time
+from pathlib import Path
+
 
 # Page configuration
 st.set_page_config(
     page_title="Dashboard - ExplainFutures",
-    page_icon="🏠",
+     page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
