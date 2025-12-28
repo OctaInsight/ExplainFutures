@@ -10,7 +10,7 @@ import time
 # Page configuration
 st.set_page_config(
     page_title="Dashboard - ExplainFutures",
-    page_icon="🏠",
+    page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
