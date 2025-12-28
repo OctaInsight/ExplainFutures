@@ -91,13 +91,15 @@ langdetect
 
 
 # Supabase client
-supabase==2.3.0
+# ExplainFutures - Python Dependencies
+# Add these to your existing requirements.txt
 
-# Password hashing
+# Supabase (use version 1.x to avoid proxy issues)
+supabase==1.0.4
+postgrest==0.10.8
 bcrypt==4.1.2
 
-# Already should have:
-# streamlit>=1.30.0
-# pandas>=2.0.0
-# numpy>=1.24.0
+# If you still get proxy errors, try pinning these:
+httpx==0.24.1
+httpcore==0.17.3
 
