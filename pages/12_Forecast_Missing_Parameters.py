@@ -46,12 +46,25 @@ st.markdown("---")
 
 
 def calculate_health_index(metrics: dict) -> float:
-    """Calculate health index (0-100) from metrics"""
+    """
+    Calculate health index (0-100) from metrics.
+    
+    Parameters:
+    -----------
+    metrics : dict
+        Dictionary containing r2, mae, rmse, mape
+    
+    Returns:
+    --------
+    float
+        Health index score (0-100)
+    """
     r2 = metrics.get('r2', 0)
     mae = metrics.get('mae', np.inf)
     rmse = metrics.get('rmse', np.inf)
     mape = metrics.get('mape', np.inf)
     
+    # Handle NaN and inf
     if np.isnan(r2) or np.isinf(r2):
         r2 = 0
     if np.isnan(mae) or np.isinf(mae):
@@ -61,6 +74,7 @@ def calculate_health_index(metrics: dict) -> float:
     if np.isnan(mape) or np.isinf(mape):
         mape = 100
     
+    # Calculate component scores
     r2_score = max(0, min(r2, 1)) * 40
     mae_score = max(0, 20 * (1 - min(mae / 50, 1)))
     rmse_score = max(0, 20 * (1 - min(rmse / 50, 1)))
@@ -72,7 +86,23 @@ def calculate_health_index(metrics: dict) -> float:
 
 
 def get_metric_color(value: float, metric: str, all_values: list) -> str:
-    """Get color for metric value (gradient from red to green)"""
+    """
+    Get color for metric value (gradient from red to green).
+    
+    Parameters:
+    -----------
+    value : float
+        Metric value
+    metric : str
+        Metric name
+    all_values : list
+        All values for normalization
+    
+    Returns:
+    --------
+    str
+        RGB color string
+    """
     if len(all_values) == 0 or np.isnan(value):
         return 'rgb(200, 200, 200)'
     
@@ -83,14 +113,18 @@ def get_metric_color(value: float, metric: str, all_values: list) -> str:
     min_val = min(clean_values)
     max_val = max(clean_values)
     
+    # Normalize
     if max_val == min_val:
         normalized = 0.5
     else:
         if metric in ['r2', 'health_index']:
+            # Higher is better
             normalized = (value - min_val) / (max_val - min_val)
         else:
+            # Lower is better
             normalized = 1 - (value - min_val) / (max_val - min_val)
     
+    # Color gradient (red -> yellow -> green)
     if normalized < 0.5:
         r = 255
         g = int(255 * (normalized * 2))
@@ -108,10 +142,10 @@ def main():
     
     # Check if we were sent here from Page 11
     if 'trajectory_forecast_params' not in st.session_state:
-        st.error("❌ This page should be accessed from Trajectory-Scenario Space")
+        st.error("❌ This page should be accessed from Parameter Mapping & Validation")
         
-        if st.button("🎯 Go to Trajectory Analysis"):
-            st.switch_page("pages/11_Trajectory-Scenario_Space.py")
+        if st.button("🔗 Go to Parameter Mapping"):
+            st.switch_page("pages/11_Parameter_Mapping_&_Validation.py")
         return
     
     params_to_forecast = st.session_state.trajectory_forecast_params
@@ -340,7 +374,7 @@ def main():
     st.markdown("---")
     
     # Data rows
-    for param in params_to_forecast:
+    for param_idx, param in enumerate(params_to_forecast):
         if param not in matrix_data:
             continue
         
@@ -359,7 +393,7 @@ def main():
                 else:
                     metric_value = metrics.get(metric_display, np.nan)
                     
-                    # Check if selected (NOW THIS WORKS IMMEDIATELY)
+                    # Check if selected
                     is_selected = (param in st.session_state.trajectory_selected_models and 
                                  st.session_state.trajectory_selected_models[param] == model)
                     
@@ -402,10 +436,12 @@ def main():
                     
                     st.markdown(button_html, unsafe_allow_html=True)
                     
-                    # Selection button - NOW SHOWS VISUALIZATION
+                    # Selection button - FIXED: Use unique key with indices
+                    button_key = f"select_p{param_idx}_m{model_idx}_{param[:20]}_{model[:20]}"
+                    
                     if st.button(
                         "Select" if not is_selected else "✓ Selected",
-                        key=f"select_{param}_{model}",
+                        key=button_key,
                         type="primary" if is_selected else "secondary",
                         use_container_width=True
                     ):
@@ -505,12 +541,11 @@ def main():
             )
             
             # Apply customizations to actual data points
-            # The first trace is usually the actual data (train + test combined)
             if len(fig.data) > 0:
                 fig.data[0].marker.size = point_size
                 fig.data[0].marker.color = actual_color
             
-            # Apply line width to model predictions (usually trace 1+)
+            # Apply line width to model predictions
             for i in range(1, len(fig.data)):
                 if hasattr(fig.data[i], 'line'):
                     fig.data[i].line.width = line_width
