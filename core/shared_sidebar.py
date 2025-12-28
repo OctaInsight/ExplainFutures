@@ -159,24 +159,63 @@ def render_app_sidebar():
     
     st.sidebar.markdown("---")
     
-    # Login/Logout section
-    if st.session_state.get("logged_in", False):
-        st.sidebar.success(f"✅ Logged in: **{st.session_state.get('username', 'User')}**")
+    # Login/Logout section - Use 'authenticated' instead of 'logged_in'
+    if st.session_state.get("authenticated", False):
+        # Get user info from session
+        username = st.session_state.get('username', 'User')
+        full_name = st.session_state.get('full_name', username)
+        is_demo = st.session_state.get('is_demo', False)
         
-        # Show login duration
-        if st.session_state.get("login_time"):
-            duration = datetime.now() - st.session_state.login_time
-            minutes = int(duration.total_seconds() / 60)
-            st.sidebar.caption(f"Session: {minutes} min")
+        if is_demo:
+            st.sidebar.warning(f"🎭 Demo: **{username}**")
+        else:
+            st.sidebar.success(f"✅ **{full_name}**")
+            st.sidebar.caption(f"@{username}")
         
+        # Show subscription tier
+        tier = st.session_state.get('subscription_tier', 'free')
+        st.sidebar.caption(f"Plan: {tier.upper()}")
+        
+        # Logout button
         if st.sidebar.button("🚪 Logout", use_container_width=True, key="logout_btn"):
-            st.session_state.logged_in = False
-            st.session_state.username = None
-            st.session_state.login_time = None
-            st.rerun()
+            # Import and call logout function
+            try:
+                import time
+                
+                # Get database manager for cleanup
+                try:
+                    from core.database.supabase_manager import get_db_manager
+                    db = get_db_manager()
+                    
+                    # Cleanup demo session if needed
+                    if st.session_state.get('is_demo') and st.session_state.get('demo_session_id'):
+                        try:
+                            db.end_demo_session(st.session_state.demo_session_id)
+                        except:
+                            pass
+                except:
+                    pass
+                
+                # Clear session state
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
+                
+                st.rerun()
+            except:
+                st.error("Logout failed")
     else:
         st.sidebar.warning("⚠️ Not logged in")
         st.sidebar.caption("Please login via home page")
+    
+    st.sidebar.markdown("---")
+    
+    # Database Status - Check actual connection
+    try:
+        from core.database.supabase_manager import get_db_manager
+        db = get_db_manager()
+        st.sidebar.success("🗄️ Database: Connected")
+    except:
+        st.sidebar.error("🗄️ Database: Not Connected")
     
     st.sidebar.markdown("---")
     
@@ -187,13 +226,40 @@ def render_app_sidebar():
         </div>
     """, unsafe_allow_html=True)
     
-    # Project Information
-    if st.session_state.get("project_name"):
-        st.sidebar.info(f"**Project:** {st.session_state.project_name}")
+    # Project Information from session state and database
+    current_project_id = st.session_state.get("current_project_id")
+    
+    if current_project_id:
+        try:
+            from core.database.supabase_manager import get_db_manager
+            db = get_db_manager()
+            
+            # Get current project details
+            project_result = db.client.table('projects').select('*').eq('project_id', current_project_id).execute()
+            
+            if project_result.data:
+                project = project_result.data[0]
+                project_name = project.get('project_name', 'Unknown')
+                project_code = project.get('project_code', 'N/A')
+                progress = project.get('completion_percentage', 0)
+                
+                st.sidebar.info(f"**{project_name}**")
+                st.sidebar.caption(f"Code: {project_code}")
+                st.sidebar.progress(progress / 100, text=f"Progress: {progress}%")
+                
+                # Show workflow state
+                workflow_state = project.get('workflow_state', 'setup')
+                st.sidebar.caption(f"Stage: {workflow_state.title()}")
+            else:
+                st.sidebar.caption("📁 Project not found")
+        except:
+            # Fallback to session state
+            project_name = st.session_state.get("project_name", "Unnamed Project")
+            st.sidebar.info(f"**{project_name}**")
     else:
         st.sidebar.caption("📁 No project loaded")
     
-    # Data Status
+    # Data Status from session state
     if st.session_state.get("data_loaded", False):
         st.sidebar.success("✅ Data loaded")
         
@@ -210,14 +276,7 @@ def render_app_sidebar():
             if st.session_state.get("uploaded_file_name"):
                 st.sidebar.caption(f"📄 {st.session_state.uploaded_file_name}")
     else:
-        st.sidebar.caption("📥 No data loaded")
-    
-    # Database Status
-    st.sidebar.markdown("")  # Small spacer
-    if st.session_state.get("database_connected", False):
-        st.sidebar.success("🗄️ Database: Connected")
-    else:
-        st.sidebar.caption("🗄️ Database: Phase 4 (in-memory)")
+        st.sidebar.caption("📥 No data loaded yet")
     
     st.sidebar.markdown("---")
     
@@ -227,10 +286,15 @@ def render_app_sidebar():
         **Workflow:**
         1. 📁 Upload data
         2. 🧹 Clean & preprocess
-        3. 📊 Visualize
-        4. 🔬 Analyze
-        5. 🤖 Model
-        6. 🔮 Project
+        3. 📊 Visualize & explore
+        4. 🔬 Analyze relationships
+        5. 📉 Reduce dimensions
+        6. 🤖 Train models
+        7. ✅ Evaluate models
+        8. 🔮 Generate projections
+        9. 📝 Analyze scenarios (NLP)
+        10. 📊 Create scenario matrix
+        11. 🎯 Build trajectory space
         """)
     
     st.sidebar.markdown("---")
@@ -238,7 +302,7 @@ def render_app_sidebar():
     # About sections in sidebar
     with st.sidebar.expander("📖 About ExplainFutures"):
         st.markdown("""
-        **Version:** 1.0.0-phase1
+        **Version:** 1.0.0
         
         A modular platform for:
         - Time-series analysis
@@ -261,12 +325,5 @@ def render_app_sidebar():
     
     # Footer
     st.sidebar.markdown("<br>", unsafe_allow_html=True)
-    try:
-        from core.config import get_config
-        config_data = get_config()
-        version = config_data.get('version', '1.0.0')
-    except:
-        version = '1.0.0'
-    
-    st.sidebar.caption(f"ExplainFutures v{version}")
-    st.sidebar.caption("© 2024 Octa Insight")
+    st.sidebar.caption("ExplainFutures v1.0.0")
+    st.sidebar.caption("© 2025 Octa Insight")
