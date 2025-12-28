@@ -827,8 +827,9 @@ if st.session_state.get('polarity_confirmed', False):
         key="weighting_method",
         help="Choose how parameters should contribute to category scores"
     )
-
-    st.session_state.weighting_method = weighting_method
+    
+    # Don't set st.session_state.weighting_method - it's already set by the widget key
+    # Access it directly from the widget return value or session state
 
     scenarios_for_scoring = st.session_state.get("scenarios_percent", scenarios)
 
