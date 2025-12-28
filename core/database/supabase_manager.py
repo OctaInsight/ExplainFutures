@@ -29,11 +29,23 @@ class SupabaseManager:
             self.url = st.secrets["supabase"]["url"]
             self.key = st.secrets["supabase"]["key"]
             
-            # Create Supabase client with minimal options (no proxy parameter)
-            self.client: Client = create_client(
-                supabase_url=self.url,
-                supabase_key=self.key
-            )
+            # Create Supabase client with options to avoid proxy issues
+            # Use the simpler create_client without custom options
+            try:
+                # Try simple client creation first
+                self.client: Client = create_client(self.url, self.key)
+            except TypeError:
+                # If that fails, try with explicit options
+                from supabase import ClientOptions
+                options = ClientOptions(
+                    auto_refresh_token=True,
+                    persist_session=True
+                )
+                self.client: Client = create_client(
+                    supabase_url=self.url,
+                    supabase_key=self.key,
+                    options=options
+                )
             
             # Demo user/project IDs
             self.demo_user_id = st.secrets["app"]["demo_user_id"]
