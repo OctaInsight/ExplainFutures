@@ -794,7 +794,7 @@ def main():
             
             if st.button("🔮 Train & Forecast Missing Parameters →", type="primary", use_container_width=True):
                 # Navigate to Page 12 Forecasting Helper
-                st.switch_page("pages/12_Forecasting_Helper.py")
+                st.switch_page("pages/12_Forecast_Missing_Parameters.py")
 
 
 if __name__ == "__main__":
