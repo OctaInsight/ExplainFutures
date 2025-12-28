@@ -103,7 +103,7 @@ def main():
     if st.session_state.authenticated:
         st.success(f"✅ Already logged in as {st.session_state.username}")
         time.sleep(1)
-        st.switch_page("01_Home.py")  # Just filename, no "pages/" prefix
+        st.switch_page("pages/01_Home.py")
         return
     
     # Header
