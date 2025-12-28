@@ -639,13 +639,14 @@ def show_project_row(project, db):
 def main():
     """Main dashboard"""
     
+    # Check authentication first - redirect if not logged in
     check_authentication()
     
     # Sidebar
     try:
         render_app_sidebar()
-    except:
-        # Minimal sidebar
+    except Exception as e:
+        # Minimal sidebar on error
         st.sidebar.title("ExplainFutures")
         st.sidebar.markdown(f"**User:** {st.session_state.get('username', 'Unknown')}")
         
