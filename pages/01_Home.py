@@ -148,7 +148,8 @@ def create_new_project():
 
 def show_user_stats(db):
     """Show user statistics and limits"""
-    user = db.admin_client.table('users').select('*').eq('user_id', st.session_state.user_id).execute()
+    # FIXED: Use db.client instead of db.admin_client
+    user = db.client.table('users').select('*').eq('user_id', st.session_state.user_id).execute()
     
     if user.data:
         user_data = user.data[0]
