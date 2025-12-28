@@ -242,6 +242,110 @@ class SupabaseManager:
             self.client.table('projects').update(update_data).eq('project_id', project_id).execute()
         except Exception as e:
             st.warning(f"Progress update warning: {str(e)}")
+    
+    def check_user_limits(self, user_id: str) -> Dict[str, Any]:
+        """Check if user can create more projects/upload files"""
+        try:
+            user = self.client.table('users').select('*').eq('user_id', user_id).execute()
+            
+            if not user.data:
+                return {
+                    'can_create_project': False,
+                    'can_upload': False,
+                    'reason': 'User not found'
+                }
+            
+            user_data = user.data[0]
+            
+            can_create = user_data.get('current_project_count', 0) < user_data.get('max_projects', 3)
+            can_upload = user_data.get('uploads_this_month', 0) < user_data.get('max_uploads_per_month', 50)
+            
+            return {
+                'can_create_project': can_create,
+                'can_upload': can_upload,
+                'current_projects': user_data.get('current_project_count', 0),
+                'max_projects': user_data.get('max_projects', 3),
+                'current_uploads': user_data.get('uploads_this_month', 0),
+                'max_uploads': user_data.get('max_uploads_per_month', 50)
+            }
+            
+        except Exception as e:
+            st.error(f"Error checking limits: {str(e)}")
+            return {
+                'can_create_project': False,
+                'can_upload': False,
+                'reason': str(e)
+            }
+    
+    def create_project(self, owner_id: str, project_name: str, 
+                      description: str = None, baseline_year: int = 2020,
+                      scenario_target_year: int = 2050) -> Optional[Dict]:
+        """Create new project"""
+        try:
+            # Generate project code
+            import random
+            import string
+            project_code = f"PRJ-{''.join(random.choices(string.ascii_uppercase + string.digits, k=8))}"
+            
+            result = self.client.table('projects').insert({
+                'owner_id': owner_id,
+                'project_name': project_name,
+                'project_code': project_code,
+                'description': description,
+                'baseline_year': baseline_year,
+                'scenario_target_year': scenario_target_year,
+                'status': 'active',
+                'workflow_state': 'setup',
+                'current_page': 2,
+                'completion_percentage': 0
+            }).execute()
+            
+            if result.data:
+                # Update user's project count
+                user = self.client.table('users').select('current_project_count').eq('user_id', owner_id).execute()
+                if user.data:
+                    new_count = user.data[0].get('current_project_count', 0) + 1
+                    self.client.table('users').update({
+                        'current_project_count': new_count
+                    }).eq('user_id', owner_id).execute()
+                
+                return result.data[0]
+            
+            return None
+            
+        except Exception as e:
+            st.error(f"Error creating project: {str(e)}")
+            return None
+    
+    def delete_project(self, project_id: str, user_id: str) -> bool:
+        """Delete project (soft delete by setting status to archived)"""
+        try:
+            # Verify ownership
+            project = self.client.table('projects').select('owner_id').eq('project_id', project_id).execute()
+            
+            if not project.data or project.data[0]['owner_id'] != user_id:
+                st.error("You don't have permission to delete this project")
+                return False
+            
+            # Soft delete - set status to archived
+            self.client.table('projects').update({
+                'status': 'archived',
+                'updated_at': datetime.now().isoformat()
+            }).eq('project_id', project_id).execute()
+            
+            # Update user's project count
+            user = self.client.table('users').select('current_project_count').eq('user_id', user_id).execute()
+            if user.data:
+                new_count = max(0, user.data[0].get('current_project_count', 0) - 1)
+                self.client.table('users').update({
+                    'current_project_count': new_count
+                }).eq('user_id', user_id).execute()
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error deleting project: {str(e)}")
+            return False
 
 
 # Singleton pattern with caching
