@@ -217,14 +217,108 @@ class SupabaseManager:
     # ========================================================================
     
     def get_user_projects(self, user_id: str, include_collaborations: bool = True) -> List[Dict]:
-        """Get user's projects"""
+        """Get user's projects (owned + collaborated)"""
         try:
-            query = self.client.table('projects').select('*').eq('owner_id', user_id)
-            result = query.execute()
-            return result.data if result.data else []
+            # Get owned projects
+            owned_query = self.client.table('projects').select('*').eq('owner_id', user_id)
+            owned_result = owned_query.execute()
+            owned_projects = owned_result.data if owned_result.data else []
+            
+            # Mark as owned
+            for project in owned_projects:
+                project['access_role'] = 'owner'
+                project['is_owner'] = True
+            
+            if not include_collaborations:
+                return owned_projects
+            
+            # Get collaborated projects
+            collab_query = self.client.table('project_collaborators').select(
+                'project_id, role, can_edit, can_delete, created_at'
+            ).eq('user_id', user_id)
+            collab_result = collab_query.execute()
+            
+            if collab_result.data:
+                # Get project details for collaborated projects
+                project_ids = [c['project_id'] for c in collab_result.data]
+                
+                if project_ids:
+                    projects_query = self.client.table('projects').select('*').in_('project_id', project_ids)
+                    projects_result = projects_query.execute()
+                    
+                    if projects_result.data:
+                        # Add collaboration info to projects
+                        collab_dict = {c['project_id']: c for c in collab_result.data}
+                        
+                        for project in projects_result.data:
+                            collab_info = collab_dict.get(project['project_id'])
+                            if collab_info:
+                                project['access_role'] = collab_info['role']
+                                project['is_owner'] = False
+                                project['can_edit'] = collab_info['can_edit']
+                                project['can_delete'] = collab_info['can_delete']
+                                project['collaboration_since'] = collab_info['created_at']
+                        
+                        owned_projects.extend(projects_result.data)
+            
+            return owned_projects
+            
         except Exception as e:
             st.error(f"Error fetching projects: {str(e)}")
             return []
+    
+    def get_project_collaborators(self, project_id: str) -> List[Dict]:
+        """Get all collaborators for a project with their user info"""
+        try:
+            # Get collaborators with user details
+            result = self.client.table('project_collaborators').select(
+                '*, users(user_id, username, email, full_name)'
+            ).eq('project_id', project_id).execute()
+            
+            if result.data:
+                # Flatten the nested user data
+                collaborators = []
+                for collab in result.data:
+                    user_info = collab.get('users', {})
+                    collaborators.append({
+                        'collaborator_id': collab['collaborator_id'],
+                        'user_id': collab['user_id'],
+                        'username': user_info.get('username', 'Unknown'),
+                        'email': user_info.get('email', ''),
+                        'full_name': user_info.get('full_name', user_info.get('username', 'Unknown')),
+                        'role': collab['role'],
+                        'can_edit': collab['can_edit'],
+                        'can_delete': collab['can_delete'],
+                        'created_at': collab['created_at']
+                    })
+                return collaborators
+            
+            return []
+            
+        except Exception as e:
+            st.error(f"Error fetching collaborators: {str(e)}")
+            return []
+    
+    def remove_collaborator(self, project_id: str, user_id: str, requesting_user_id: str) -> bool:
+        """Remove a collaborator from a project (owner only)"""
+        try:
+            # Verify requesting user is the owner
+            project = self.client.table('projects').select('owner_id').eq('project_id', project_id).execute()
+            
+            if not project.data or project.data[0]['owner_id'] != requesting_user_id:
+                st.error("Only the project owner can remove collaborators")
+                return False
+            
+            # Remove collaborator
+            self.client.table('project_collaborators').delete().eq(
+                'project_id', project_id
+            ).eq('user_id', user_id).execute()
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error removing collaborator: {str(e)}")
+            return False
     
     def update_project_progress(self, project_id: str, workflow_state: str = None,
                                current_page: int = None, completion_percentage: int = None):
