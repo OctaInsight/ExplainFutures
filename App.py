@@ -148,7 +148,7 @@ with col_left:
             st.info("📧 Password reset: Please contact support at sales@octainsight.com")
 
     
-       if st.button("🚀 Launch Demo Session", type="secondary", use_container_width=True):
+if st.button("🚀 Launch Demo Session", type="secondary", use_container_width=True):
         with st.spinner("Starting demo session..."):
             if login_user("demo", "demo123"):
                 st.success("✅ Demo session started!")
