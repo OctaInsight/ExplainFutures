@@ -601,6 +601,44 @@ class SupabaseManager:
         except Exception as e:
             st.error(f"Error permanently deleting project: {str(e)}")
             return False
+    
+    def rename_project(self, project_id: str, new_name: str, user_id: str) -> bool:
+        """Rename a project (owner only)"""
+        try:
+            # Verify ownership
+            project = self.client.table('projects').select('owner_id, project_name').eq('project_id', project_id).execute()
+            
+            if not project.data:
+                st.error("Project not found")
+                return False
+            
+            if project.data[0]['owner_id'] != user_id:
+                st.error("Only the project owner can rename this project")
+                return False
+            
+            old_name = project.data[0].get('project_name', 'Unknown')
+            
+            # Validate new name
+            if not new_name or len(new_name.strip()) == 0:
+                st.error("Project name cannot be empty")
+                return False
+            
+            if len(new_name) > 200:
+                st.error("Project name is too long (max 200 characters)")
+                return False
+            
+            # Update project name
+            self.client.table('projects').update({
+                'project_name': new_name.strip(),
+                'updated_at': datetime.now().isoformat()
+            }).eq('project_id', project_id).execute()
+            
+            st.success(f"✅ Project renamed from '{old_name}' to '{new_name}'")
+            return True
+            
+        except Exception as e:
+            st.error(f"Error renaming project: {str(e)}")
+            return False
 
 
 # Singleton pattern with caching
