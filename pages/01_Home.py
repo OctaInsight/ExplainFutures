@@ -15,6 +15,7 @@ st.set_page_config(
     layout="wide"
 )
 
+
 # Import database manager
 try:
     from core.database.supabase_manager import get_db_manager
@@ -428,17 +429,23 @@ def show_project_card(project, db):
             st.markdown("---")
             
             if is_owner:
-                col_menu1, col_menu2 = st.columns(2)
+                col_menu1, col_menu2, col_menu3 = st.columns(3)
                 
                 with col_menu1:
-                    if st.button("Share", key=f"share_card_{project['project_id']}", use_container_width=True):
-                        st.session_state[f"show_share_{project['project_id']}"] = True
+                    if st.button("✏️ Rename", key=f"rename_card_{project['project_id']}", use_container_width=True):
+                        st.session_state[f"show_rename_{project['project_id']}"] = True
                         st.session_state[f"show_menu_{project['project_id']}"] = False
                         st.rerun()
                 
                 with col_menu2:
+                    if st.button("👥 Share", key=f"share_card_{project['project_id']}", use_container_width=True):
+                        st.session_state[f"show_share_{project['project_id']}"] = True
+                        st.session_state[f"show_menu_{project['project_id']}"] = False
+                        st.rerun()
+                
+                with col_menu3:
                     if not is_demo:
-                        if st.button("Delete", key=f"delete_card_{project['project_id']}", use_container_width=True):
+                        if st.button("🗑️ Delete", key=f"delete_card_{project['project_id']}", use_container_width=True):
                             if st.session_state.get(f"confirm_delete_{project['project_id']}"):
                                 db.delete_project(project['project_id'], st.session_state.user_id)
                                 st.success("Project deleted")
@@ -449,7 +456,7 @@ def show_project_card(project, db):
                                 st.warning("⚠️ Click again to confirm")
                 
                 # Show collaborators management
-                if st.button("Manage Access", key=f"manage_collab_card_{project['project_id']}", use_container_width=True):
+                if st.button("🔐 Manage Access", key=f"manage_collab_card_{project['project_id']}", use_container_width=True):
                     st.session_state[f"show_collaborators_{project['project_id']}"] = True
                     st.session_state[f"show_menu_{project['project_id']}"] = False
                     st.rerun()
@@ -458,6 +465,37 @@ def show_project_card(project, db):
                 st.caption(f"Access: {project.get('access_role', 'collaborator').title()}")
                 if project.get('can_edit'):
                     st.caption("✓ Can edit")
+        
+        # Rename dialog
+        if st.session_state.get(f"show_rename_{project['project_id']}", False):
+            st.markdown("---")
+            st.markdown("**✏️ Rename Project**")
+            
+            with st.form(key=f"rename_form_card_{project['project_id']}"):
+                new_name = st.text_input(
+                    "New project name",
+                    value=project['project_name'],
+                    max_chars=200,
+                    placeholder="Enter new project name"
+                )
+                
+                col_r1, col_r2 = st.columns(2)
+                
+                with col_r1:
+                    rename_btn = st.form_submit_button("Rename", type="primary", use_container_width=True)
+                
+                with col_r2:
+                    cancel_rename = st.form_submit_button("Cancel", use_container_width=True)
+                
+                if rename_btn:
+                    if db.rename_project(project['project_id'], new_name, st.session_state.user_id):
+                        time.sleep(1)
+                        st.session_state[f"show_rename_{project['project_id']}"] = False
+                        st.rerun()
+                
+                if cancel_rename:
+                    st.session_state[f"show_rename_{project['project_id']}"] = False
+                    st.rerun()
         
         # Collaborators management dialog
         if st.session_state.get(f"show_collaborators_{project['project_id']}", False):
@@ -571,10 +609,10 @@ def show_project_row(project, db):
         
         # Actions
         if is_owner:
-            col_act1, col_act2, col_act3, col_act4 = st.columns(4)
+            col_act1, col_act2, col_act3, col_act4, col_act5 = st.columns(5)
         else:
-            col_act1, col_act2 = st.columns([1, 3])
-            col_act3 = col_act4 = None
+            col_act1, col_act2 = st.columns([1, 4])
+            col_act3 = col_act4 = col_act5 = None
         
         with col_act1:
             if st.button("Open Project", key=f"open_list_{project['project_id']}", type="primary"):
@@ -588,18 +626,23 @@ def show_project_row(project, db):
         
         if is_owner:
             with col_act2:
-                if st.button("Manage Access", key=f"manage_access_{project['project_id']}"):
-                    st.session_state[f"show_manage_access_{project['project_id']}"] = True
+                if st.button("✏️ Rename", key=f"rename_list_{project['project_id']}"):
+                    st.session_state[f"show_rename_{project['project_id']}"] = True
                     st.rerun()
             
             with col_act3:
-                if st.button("Share", key=f"share_{project['project_id']}"):
-                    st.session_state[f"show_share_{project['project_id']}"] = True
+                if st.button("🔐 Manage Access", key=f"manage_access_{project['project_id']}"):
+                    st.session_state[f"show_manage_access_{project['project_id']}"] = True
                     st.rerun()
             
             with col_act4:
+                if st.button("👥 Share", key=f"share_{project['project_id']}"):
+                    st.session_state[f"show_share_{project['project_id']}"] = True
+                    st.rerun()
+            
+            with col_act5:
                 if not is_demo:
-                    if st.button("Delete", key=f"delete_{project['project_id']}"):
+                    if st.button("🗑️ Delete", key=f"delete_{project['project_id']}"):
                         if st.session_state.get(f"confirm_delete_{project['project_id']}"):
                             db.delete_project(project['project_id'], st.session_state.user_id)
                             st.success("Project deleted")
@@ -608,6 +651,38 @@ def show_project_row(project, db):
                         else:
                             st.session_state[f"confirm_delete_{project['project_id']}"] = True
                             st.warning("⚠️ Click again to confirm deletion")
+        
+        # Rename dialog
+        if st.session_state.get(f"show_rename_{project['project_id']}", False):
+            st.markdown("---")
+            st.markdown("#### ✏️ Rename Project")
+            
+            with st.form(key=f"rename_form_list_{project['project_id']}"):
+                new_name = st.text_input(
+                    "New project name",
+                    value=project['project_name'],
+                    max_chars=200,
+                    placeholder="Enter new project name",
+                    help="Choose a descriptive name for your project"
+                )
+                
+                col_rename1, col_rename2 = st.columns(2)
+                
+                with col_rename1:
+                    rename_button = st.form_submit_button("Rename Project", type="primary", use_container_width=True)
+                
+                with col_rename2:
+                    cancel_rename = st.form_submit_button("Cancel", use_container_width=True)
+                
+                if rename_button:
+                    if db.rename_project(project['project_id'], new_name, st.session_state.user_id):
+                        time.sleep(1)
+                        st.session_state[f"show_rename_{project['project_id']}"] = False
+                        st.rerun()
+                
+                if cancel_rename:
+                    st.session_state[f"show_rename_{project['project_id']}"] = False
+                    st.rerun()
         
         # Manage Access dialog
         if st.session_state.get(f"show_manage_access_{project['project_id']}", False):
