@@ -1,6 +1,8 @@
 """
-Page 2: Data Import & Diagnostics (COMPLETE FIXED)
-Fixed: Health report shows combined data from database + new upload
+Page 2: Data Import & Diagnostics (WITH TIME-SERIES DATABASE SAVE)
+✅ Saves time-series data to database (source='original')
+✅ Shows combined health report from database + new upload
+✅ Updates all progress indicators
 """
 
 import streamlit as st
@@ -194,7 +196,7 @@ def get_comprehensive_health_report():
             'missing_values_detail': missing_values_detail,
             'issues_list': issues,
             'parameters_analyzed': [p['parameter_name'] for p in parameters],
-            'time_metadata': {},  # Will be populated if available
+            'time_metadata': {},
             'outliers_detail': {},
             'coverage_detail': {},
             'duplicate_timestamps': 0,
@@ -640,6 +642,40 @@ def process_data(df, time_column, value_columns, datetime_format):
         status.empty()
         return
     
+    # ============================================================
+    # 🆕 NEW: Save time-series data to database
+    # ============================================================
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        status.text("Saving time-series data to database...")
+        progress_bar.progress(0.70)
+        
+        try:
+            # Save the actual data points to database
+            success = db.save_timeseries_data(
+                project_id=st.session_state.current_project_id,
+                df_long=df_long,
+                data_source='original',  # Mark as original/raw data
+                batch_size=1000  # Insert 1000 records at a time
+            )
+            
+            if success:
+                # Get summary of what was saved
+                summary = db.get_timeseries_summary(
+                    project_id=st.session_state.current_project_id,
+                    data_source='original'
+                )
+                st.success(f"✅ Saved {summary['total_records']:,} data points to database")
+            else:
+                st.warning("⚠️ Could not save time-series data to database")
+                
+        except Exception as e:
+            st.warning(f"Could not save time-series data: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
+    # ============================================================
+    # END NEW CODE
+    # ============================================================
+    
     # Save parameters
     status.text("Saving parameters...")
     progress_bar.progress(0.75)
@@ -714,7 +750,6 @@ def process_data(df, time_column, value_columns, datetime_format):
             st.warning(f"Could not save health report: {str(e)}")
     
     # CRITICAL: Reload comprehensive health report from database
-    # This ensures we show ALL data (old + new) in the health report tab
     comprehensive_report = get_comprehensive_health_report()
     if comprehensive_report:
         st.session_state.health_report = comprehensive_report
@@ -746,7 +781,6 @@ def process_data(df, time_column, value_columns, datetime_format):
     col2.metric("Data Points", len(df_long))
     col3.metric("Time Range", f"{time_metadata['time_span']} days")
     
-    # ALWAYS show navigation buttons after successful processing
     show_next_steps_after_upload()
 
 
@@ -758,7 +792,6 @@ def render_health_report_section():
         try:
             st.info("📊 Loading comprehensive health report...")
             
-            # Get comprehensive report (combines all parameters from database)
             comprehensive_report = get_comprehensive_health_report()
             
             if not comprehensive_report:
@@ -768,7 +801,6 @@ def render_health_report_section():
             
             st.success("✅ Loaded comprehensive health report")
             
-            # Display the comprehensive report
             render_comprehensive_health_report(comprehensive_report)
             return
             
