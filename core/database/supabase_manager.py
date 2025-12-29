@@ -886,6 +886,216 @@ class SupabaseManager:
                 'parameters': [],
                 'has_data': False
             }
+    
+    # ========================================================================
+    # HEALTH REPORT MANAGEMENT
+    # ========================================================================
+    
+    def save_health_report(self, project_id: str, health_data: Dict[str, Any]) -> bool:
+        """Save or update health report for a project"""
+        try:
+            # Calculate data hash from parameters
+            import hashlib
+            parameters = self.get_project_parameters(project_id)
+            param_string = json.dumps(sorted([p['parameter_name'] for p in parameters]))
+            data_hash = hashlib.md5(param_string.encode()).hexdigest()
+            
+            report_data = {
+                'project_id': project_id,
+                'health_score': health_data.get('health_score', 0),
+                'health_category': health_data.get('health_category', 'poor'),
+                'total_parameters': health_data.get('total_parameters', 0),
+                'total_data_points': health_data.get('total_data_points', 0),
+                'total_missing_values': health_data.get('total_missing_values', 0),
+                'missing_percentage': health_data.get('missing_percentage', 0),
+                'critical_issues': health_data.get('critical_issues', 0),
+                'warnings': health_data.get('warnings', 0),
+                'duplicate_timestamps': health_data.get('duplicate_timestamps', 0),
+                'outlier_count': health_data.get('outlier_count', 0),
+                'missing_values_detail': json.dumps(health_data.get('missing_values_detail', {})),
+                'outliers_detail': json.dumps(health_data.get('outliers_detail', {})),
+                'coverage_detail': json.dumps(health_data.get('coverage_detail', {})),
+                'issues_list': json.dumps(health_data.get('issues_list', [])),
+                'time_metadata': json.dumps(health_data.get('time_metadata', {})),
+                'parameters_analyzed': health_data.get('parameters_analyzed', []),
+                'data_hash': data_hash,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            # Check if report exists
+            existing = self.client.table('health_reports').select('report_id').eq(
+                'project_id', project_id
+            ).order('created_at', desc=True).limit(1).execute()
+            
+            if existing.data:
+                # Update existing report
+                self.client.table('health_reports').update(report_data).eq(
+                    'report_id', existing.data[0]['report_id']
+                ).execute()
+            else:
+                # Create new report
+                self.client.table('health_reports').insert(report_data).execute()
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error saving health report: {str(e)}")
+            return False
+    
+    def get_health_report(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Get the latest health report for a project"""
+        try:
+            result = self.client.table('health_reports').select('*').eq(
+                'project_id', project_id
+            ).order('created_at', desc=True).limit(1).execute()
+            
+            if result.data:
+                report = result.data[0]
+                
+                # Parse JSON fields
+                report['missing_values_detail'] = json.loads(report.get('missing_values_detail', '{}'))
+                report['outliers_detail'] = json.loads(report.get('outliers_detail', '{}'))
+                report['coverage_detail'] = json.loads(report.get('coverage_detail', '{}'))
+                report['issues_list'] = json.loads(report.get('issues_list', '[]'))
+                report['time_metadata'] = json.loads(report.get('time_metadata', '{}'))
+                
+                return report
+            
+            return None
+            
+        except Exception as e:
+            st.error(f"Error fetching health report: {str(e)}")
+            return None
+    
+    def needs_health_report_update(self, project_id: str) -> bool:
+        """Check if health report needs to be regenerated"""
+        try:
+            # Get latest report
+            report = self.get_health_report(project_id)
+            
+            if not report:
+                return True  # No report exists
+            
+            # Get current parameters
+            parameters = self.get_project_parameters(project_id)
+            current_params = sorted([p['parameter_name'] for p in parameters])
+            
+            # Get parameters from report
+            report_params = sorted(report.get('parameters_analyzed', []))
+            
+            # Check if parameters have changed
+            if current_params != report_params:
+                return True  # New parameters added or removed
+            
+            # Check if data hash is different
+            import hashlib
+            param_string = json.dumps(current_params)
+            current_hash = hashlib.md5(param_string.encode()).hexdigest()
+            
+            if current_hash != report.get('data_hash'):
+                return True  # Data has changed
+            
+            return False  # Report is up to date
+            
+        except Exception as e:
+            st.error(f"Error checking report status: {str(e)}")
+            return True  # On error, assume update needed
+    
+    def generate_health_report_from_parameters(self, project_id: str) -> Dict[str, Any]:
+        """Generate a complete health report from database parameters"""
+        try:
+            parameters = self.get_project_parameters(project_id)
+            
+            if not parameters:
+                return {
+                    'success': False,
+                    'message': 'No parameters to analyze'
+                }
+            
+            # Calculate health metrics
+            health_score = 100
+            issues = []
+            critical_issues = 0
+            warnings = 0
+            
+            # Missing values analysis
+            missing_values_detail = {}
+            total_missing = 0
+            total_count = 0
+            
+            for param in parameters:
+                param_name = param['parameter_name']
+                missing_count = param.get('missing_count', 0)
+                param_total = param.get('total_count', 0)
+                
+                total_missing += missing_count
+                total_count += param_total
+                
+                if param_total > 0:
+                    missing_pct = missing_count / param_total
+                    
+                    missing_values_detail[param_name] = {
+                        'count': missing_count,
+                        'percentage': missing_pct,
+                        'total': param_total
+                    }
+                    
+                    if missing_pct > 0.20:
+                        health_score -= 15
+                        issues.append(f"⚠️ {param_name}: {missing_pct*100:.1f}% missing (critical)")
+                        critical_issues += 1
+                    elif missing_pct > 0.05:
+                        health_score -= 5
+                        issues.append(f"⚠️ {param_name}: {missing_pct*100:.1f}% missing")
+                        warnings += 1
+            
+            # Calculate overall metrics
+            overall_missing_pct = total_missing / total_count if total_count > 0 else 0
+            
+            # Determine category
+            health_score = max(0, min(100, health_score))
+            
+            if health_score >= 85:
+                category = "excellent"
+            elif health_score >= 70:
+                category = "good"
+            elif health_score >= 50:
+                category = "fair"
+            else:
+                category = "poor"
+            
+            # Build health report
+            health_report = {
+                'success': True,
+                'health_score': health_score,
+                'health_category': category,
+                'total_parameters': len(parameters),
+                'total_data_points': total_count,
+                'total_missing_values': total_missing,
+                'missing_percentage': overall_missing_pct,
+                'critical_issues': critical_issues,
+                'warnings': warnings,
+                'duplicate_timestamps': 0,  # Would need time series data to calculate
+                'outlier_count': 0,  # Would need raw data to calculate
+                'missing_values_detail': missing_values_detail,
+                'outliers_detail': {},
+                'coverage_detail': {},
+                'issues_list': issues,
+                'time_metadata': {},
+                'parameters_analyzed': [p['parameter_name'] for p in parameters]
+            }
+            
+            # Save to database
+            self.save_health_report(project_id, health_report)
+            
+            return health_report
+            
+        except Exception as e:
+            st.error(f"Error generating health report: {str(e)}")
+            return {
+                'success': False,
+                'message': str(e)
+            }
 
 
 # Singleton pattern with caching
