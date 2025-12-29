@@ -484,6 +484,16 @@ def process_data(df, time_column, value_columns, datetime_format):
     # Update project progress (7% for step 1 of 13)
     update_project_progress(stage="data_imported", page=2, percentage=7)
     
+    # Mark step 1 as complete in database
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        db.update_step_completion(
+            project_id=st.session_state.current_project_id,
+            step_key='data_loaded',
+            completed=True
+        )
+        # Also update session state for immediate UI feedback
+        st.session_state.data_loaded = True
+    
     progress_bar.progress(1.0)
     status.text("Complete!")
     
@@ -511,13 +521,161 @@ def process_data(df, time_column, value_columns, datetime_format):
             st.rerun()
 
 
+def render_database_health_report(project_data):
+    """Render health report based on database data only"""
+    
+    st.header("Data Health Report (from Database)")
+    
+    parameters = project_data['parameters']
+    
+    # Summary metrics
+    st.markdown("### 📊 Project Summary")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("Total Parameters", project_data['variable_count'])
+    
+    with col2:
+        st.metric("Total Data Points", project_data['total_count'])
+    
+    with col3:
+        missing_pct = project_data['overall_missing_pct'] * 100
+        st.metric("Missing Data", f"{missing_pct:.1f}%")
+    
+    st.markdown("---")
+    
+    # Parameters table
+    st.subheader("📋 Parameters Overview")
+    
+    param_table = []
+    for param in parameters:
+        param_table.append({
+            "Parameter": param['parameter_name'],
+            "Type": param.get('data_type', 'numeric'),
+            "Min": f"{param.get('min_value', 0):.2f}" if param.get('min_value') is not None else "N/A",
+            "Max": f"{param.get('max_value', 0):.2f}" if param.get('max_value') is not None else "N/A",
+            "Mean": f"{param.get('mean_value', 0):.2f}" if param.get('mean_value') is not None else "N/A",
+            "Missing": param.get('missing_count', 0),
+            "Total": param.get('total_count', 0),
+            "Missing %": f"{(param.get('missing_count', 0) / param.get('total_count', 1) * 100):.1f}%"
+        })
+    
+    param_df = pd.DataFrame(param_table)
+    st.dataframe(param_df, use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    
+    # Check for duplicates
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        duplicates = db.check_duplicate_parameters(st.session_state.current_project_id)
+        
+        if duplicates:
+            st.warning(f"⚠️ Found {len(duplicates)} duplicate parameter(s)")
+            
+            with st.expander("🔍 Manage Duplicate Parameters"):
+                for param_name, param_list in duplicates.items():
+                    st.markdown(f"### Parameter: **{param_name}**")
+                    st.caption(f"Found {len(param_list)} instances")
+                    
+                    for i, param in enumerate(param_list):
+                        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                        
+                        with col1:
+                            st.text(f"Instance {i+1}: {param['parameter_id'][:8]}...")
+                            st.caption(f"Updated: {param['updated_at'][:10]}")
+                        
+                        with col2:
+                            if st.button("Keep", key=f"keep_{param['parameter_id']}"):
+                                if db.merge_parameters([p['parameter_id'] for p in param_list], param['parameter_id']):
+                                    st.success("Merged!")
+                                    time.sleep(1)
+                                    st.rerun()
+                        
+                        with col3:
+                            new_name = st.text_input("Rename", key=f"rename_{param['parameter_id']}", placeholder="New name")
+                            if new_name and st.button("✓", key=f"rename_btn_{param['parameter_id']}"):
+                                if db.rename_parameter(param['parameter_id'], new_name):
+                                    st.success("Renamed!")
+                                    time.sleep(1)
+                                    st.rerun()
+                        
+                        with col4:
+                            if st.button("Delete", key=f"delete_{param['parameter_id']}"):
+                                if db.delete_parameter(param['parameter_id']):
+                                    st.success("Deleted!")
+                                    time.sleep(1)
+                                    st.rerun()
+                    
+                    st.markdown("---")
+    
+    st.markdown("---")
+    
+    # Navigation
+    st.header("🎯 What's Next?")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("#### 📊 Visualize Data")
+        if st.button("📊 Go to Visualization", use_container_width=True, type="primary"):
+            update_project_progress(stage="exploration", page=4, percentage=14)
+            st.switch_page("pages/04_Exploration_and_Visualization.py")
+    
+    with col2:
+        st.markdown("#### 🧹 Clean Data")
+        if st.button("🧹 Go to Data Cleaning", use_container_width=True):
+            update_project_progress(stage="preprocessing", page=3, percentage=7)
+            st.switch_page("pages/03_Preprocessing.py")
+    
+    with col3:
+        st.markdown("#### 📁 Upload New Data")
+        if st.button("📁 Upload More Data", use_container_width=True):
+            st.session_state.active_view = 'upload'
+            st.rerun()
+
+
 def render_health_report_section():
     """Render the data health report section"""
     
-    if not st.session_state.data_loaded:
-        st.info("📤 Upload and process data first to see the health report")
-        return
+    # First, try to load step completion from database
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        step_completion = db.get_step_completion(st.session_state.current_project_id)
+        # Update session state with database values
+        for key, value in step_completion.items():
+            st.session_state[key] = value
     
+    # Check if data is loaded in session state OR if we have data in database
+    has_session_data = st.session_state.get('data_loaded', False)
+    
+    if not has_session_data:
+        # Try to load data from database
+        if DB_AVAILABLE and st.session_state.get('current_project_id'):
+            st.info("📊 Loading data from database...")
+            
+            project_data = db.load_project_data_for_health_report(st.session_state.current_project_id)
+            
+            if not project_data.get('has_data', False):
+                st.warning("⚠️ No data found in database")
+                st.info("📤 Please upload and process data first to see the health report")
+                
+                # Button to go back to upload
+                if st.button("📤 Go to Upload Data", type="primary", use_container_width=True):
+                    st.session_state.active_view = 'upload'
+                    st.rerun()
+                return
+            
+            # We have data from database - show summary
+            st.success(f"✅ Loaded {project_data['variable_count']} parameters from database")
+            
+            # Display database-based health report
+            render_database_health_report(project_data)
+            return
+        else:
+            st.info("📤 Upload and process data first to see the health report")
+            return
+    
+    # If we have session state data, use the original health report
     if st.session_state.health_report is None:
         st.warning("⚠️ No health report available")
         return
