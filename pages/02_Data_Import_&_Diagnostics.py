@@ -1,6 +1,6 @@
 """
 Page 2: Data Import & Diagnostics (WITH TIME-SERIES DATABASE SAVE)
-✅ Saves time-series data to database (source='original')
+✅ Saves time-series data to database (source='raw')
 ✅ Shows combined health report from database + new upload
 ✅ Updates all progress indicators
 """
@@ -654,7 +654,7 @@ def process_data(df, time_column, value_columns, datetime_format):
             success = db.save_timeseries_data(
                 project_id=st.session_state.current_project_id,
                 df_long=df_long,
-                data_source='original',  # Mark as original/raw data
+                data_source='raw',  # Mark as raw/raw data
                 batch_size=1000  # Insert 1000 records at a time
             )
             
@@ -662,7 +662,7 @@ def process_data(df, time_column, value_columns, datetime_format):
                 # Get summary of what was saved
                 summary = db.get_timeseries_summary(
                     project_id=st.session_state.current_project_id,
-                    data_source='original'
+                    data_source='raw'
                 )
                 st.success(f"✅ Saved {summary['total_records']:,} data points to database")
             else:
