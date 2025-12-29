@@ -906,59 +906,83 @@ class SupabaseManager:
     # HEALTH REPORT MANAGEMENT
     # ========================================================================
     
-    def save_health_report(self, project_id: str, health_data: Dict[str, Any]) -> bool:
-        """Save or update health report for a project"""
-        try:
-            # Calculate data hash from parameters
-            import hashlib
-            parameters = self.get_project_parameters(project_id)
-            param_string = json.dumps(sorted([p['parameter_name'] for p in parameters]))
-            data_hash = hashlib.md5(param_string.encode()).hexdigest()
-            
-            # Convert timestamps in time_metadata before serialization
-            time_metadata = self.convert_timestamps_to_serializable(health_data.get('time_metadata', {}))
-            
-            report_data = {
-                'project_id': project_id,
-                'health_score': health_data.get('health_score', 0),
-                'health_category': health_data.get('health_category', 'poor'),
-                'total_parameters': health_data.get('total_parameters', 0),
-                'total_data_points': health_data.get('total_data_points', 0),
-                'total_missing_values': health_data.get('total_missing_values', 0),
-                'missing_percentage': health_data.get('missing_percentage', 0),
-                'critical_issues': health_data.get('critical_issues', 0),
-                'warnings': health_data.get('warnings', 0),
-                'duplicate_timestamps': health_data.get('duplicate_timestamps', 0),
-                'outlier_count': health_data.get('outlier_count', 0),
-                'missing_values_detail': json.dumps(health_data.get('missing_values_detail', {})),
-                'outliers_detail': json.dumps(health_data.get('outliers_detail', {})),
-                'coverage_detail': json.dumps(health_data.get('coverage_detail', {})),
-                'issues_list': json.dumps(health_data.get('issues_list', [])),
-                'time_metadata': json.dumps(time_metadata),
-                'parameters_analyzed': health_data.get('parameters_analyzed', []),
-                'data_hash': data_hash,
-                'updated_at': datetime.now().isoformat()
-            }
-            
-            # Check if report exists
-            existing = self.client.table('health_reports').select('report_id').eq(
-                'project_id', project_id
-            ).order('created_at', desc=True).limit(1).execute()
-            
-            if existing.data:
-                # Update existing report
-                self.client.table('health_reports').update(report_data).eq(
-                    'report_id', existing.data[0]['report_id']
-                ).execute()
-            else:
-                # Create new report
-                self.client.table('health_reports').insert(report_data).execute()
-            
-            return True
-            
-        except Exception as e:
-            st.error(f"Error saving health report: {str(e)}")
-            return False
+def save_health_report(self, project_id: str, health_data: Dict[str, Any]) -> bool:
+    """Save or update health report for a project"""
+    try:
+        # Calculate data hash from parameters
+        import hashlib
+        parameters = self.get_project_parameters(project_id)
+        param_string = json.dumps(sorted([p['parameter_name'] for p in parameters]))
+        data_hash = hashlib.md5(param_string.encode()).hexdigest()
+
+        # --------------------------------------------------------------------
+        # FIX: Convert ALL potential Timestamp/datetime objects before json.dumps
+        # Insert this block HERE (after data_hash, before report_data)
+        # --------------------------------------------------------------------
+        missing_values_detail = self.convert_timestamps_to_serializable(
+            health_data.get('missing_values_detail', {})
+        )
+        outliers_detail = self.convert_timestamps_to_serializable(
+            health_data.get('outliers_detail', {})
+        )
+        coverage_detail = self.convert_timestamps_to_serializable(
+            health_data.get('coverage_detail', {})
+        )
+        issues_list = self.convert_timestamps_to_serializable(
+            health_data.get('issues_list', [])
+        )
+        time_metadata = self.convert_timestamps_to_serializable(
+            health_data.get('time_metadata', {})
+        )
+        parameters_analyzed = self.convert_timestamps_to_serializable(
+            health_data.get('parameters_analyzed', [])
+        )
+
+        report_data = {
+            'project_id': project_id,
+            'health_score': float(health_data.get('health_score', 0) or 0),
+            'health_category': health_data.get('health_category', 'poor'),
+            'total_parameters': int(health_data.get('total_parameters', 0) or 0),
+            'total_data_points': int(health_data.get('total_data_points', 0) or 0),
+            'total_missing_values': int(health_data.get('total_missing_values', 0) or 0),
+            'missing_percentage': float(health_data.get('missing_percentage', 0) or 0),
+            'critical_issues': int(health_data.get('critical_issues', 0) or 0),
+            'warnings': int(health_data.get('warnings', 0) or 0),
+            'duplicate_timestamps': int(health_data.get('duplicate_timestamps', 0) or 0),
+            'outlier_count': int(health_data.get('outlier_count', 0) or 0),
+
+            # JSON fields (now safe)
+            'missing_values_detail': json.dumps(missing_values_detail),
+            'outliers_detail': json.dumps(outliers_detail),
+            'coverage_detail': json.dumps(coverage_detail),
+            'issues_list': json.dumps(issues_list),
+            'time_metadata': json.dumps(time_metadata),
+
+            # If your DB column is json/jsonb, passing list is OK.
+            # If it is text, store json.dumps(parameters_analyzed) instead.
+            'parameters_analyzed': parameters_analyzed,
+
+            'data_hash': data_hash,
+            'updated_at': datetime.now().isoformat()
+        }
+
+        # Check if report exists
+        existing = self.client.table('health_reports').select('report_id').eq(
+            'project_id', project_id
+        ).order('created_at', desc=True).limit(1).execute()
+
+        if existing.data:
+            self.client.table('health_reports').update(report_data).eq(
+                'report_id', existing.data[0]['report_id']
+            ).execute()
+        else:
+            self.client.table('health_reports').insert(report_data).execute()
+
+        return True
+
+    except Exception as e:
+        st.error(f"Error saving health report: {str(e)}")
+        return False
     
     def get_health_report(self, project_id: str) -> Optional[Dict[str, Any]]:
         """Get the latest health report for a project"""
