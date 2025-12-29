@@ -175,6 +175,19 @@ def render_app_sidebar():
     This function should be called at the top of every page AFTER st.set_page_config()
     """
     
+    # Load step completion from database if available
+    if st.session_state.get('current_project_id'):
+        try:
+            from core.database.supabase_manager import get_db_manager
+            db = get_db_manager()
+            step_completion = db.get_step_completion(st.session_state.current_project_id)
+            
+            # Update session state with database values
+            for key, value in step_completion.items():
+                st.session_state[key] = value
+        except:
+            pass  # If database fails, continue with existing session state
+    
     # === WORKFLOW PROGRESS FLOWCHART (FIRST - ABOVE LOGO) ===
     render_workflow_flowchart()
     
