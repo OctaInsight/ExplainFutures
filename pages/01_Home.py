@@ -407,16 +407,26 @@ def show_project_card(project, db):
         
         with col_btn1:
             if st.button("Open", key=f"open_{project['project_id']}", use_container_width=True):
+                # Set project ID first
                 st.session_state.current_project_id = project['project_id']
                 
-                # Update last accessed
-                db.update_project_progress(
-                    project_id=project['project_id'],
-                    current_page=project.get('current_page', 2)
-                )
+                # Load ALL project data from database
+                from core.utils.project_loader import load_project_on_open
                 
-                # Navigate to Data Import page
-                st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
+                with st.spinner("🔄 Loading project data..."):
+                    success = load_project_on_open(project['project_id'], db)
+                
+                if success:
+                    # Update last accessed
+                    db.update_project_progress(
+                        project_id=project['project_id'],
+                        current_page=project.get('current_page', 2)
+                    )
+                    
+                    # Navigate to Data Import page
+                    st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
+                else:
+                    st.error("Failed to load project data")
         
         with col_btn2:
             if st.button("⋯", key=f"menu_{project['project_id']}", use_container_width=True):
@@ -615,13 +625,24 @@ def show_project_row(project, db):
         
         with col_act1:
             if st.button("Open Project", key=f"open_list_{project['project_id']}", type="primary"):
+                # Set project ID first
                 st.session_state.current_project_id = project['project_id']
-                db.update_project_progress(
-                    project_id=project['project_id'],
-                    current_page=project.get('current_page', 2)
-                )
-                # Navigate to Data Import page
-                st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
+                
+                # Load ALL project data from database
+                from core.utils.project_loader import load_project_on_open
+                
+                with st.spinner("🔄 Loading project data..."):
+                    success = load_project_on_open(project['project_id'], db)
+                
+                if success:
+                    db.update_project_progress(
+                        project_id=project['project_id'],
+                        current_page=project.get('current_page', 2)
+                    )
+                    # Navigate to Data Import page
+                    st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
+                else:
+                    st.error("Failed to load project data")
         
         if is_owner:
             with col_act2:
