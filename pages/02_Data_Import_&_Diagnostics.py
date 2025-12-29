@@ -1,8 +1,7 @@
 """
-Page 2: Data Import & Diagnostics (WITH TIME-SERIES DATABASE SAVE)
-✅ Saves time-series data to database (source='raw')
-✅ Shows combined health report from database + new upload
-✅ Updates all progress indicators
+Page 2: Data Import & Diagnostics (FIXED - Boolean error corrected)
+✅ Saves with data_source='raw'
+✅ Fixed: DataFrame boolean check error
 """
 
 import streamlit as st
@@ -12,23 +11,18 @@ import sys
 import time
 from pathlib import Path
 
-
-# Page configuration - MUST be first Streamlit command
 st.set_page_config(
     page_title="Upload & Data Diagnostics",
     page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
-
-# Authentication check
 if not st.session_state.get('authenticated', False):
     st.warning("⚠️ Please log in to continue")
     time.sleep(1)
     st.switch_page("App.py")
     st.stop()
 
-# Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
@@ -43,14 +37,10 @@ from core.io.loaders import load_file_smart, convert_to_long_format, preview_dat
 from core.io.validators import parse_time_column, validate_time_series, check_numeric_columns, detect_and_report_issues
 from core.database.supabase_manager import get_db_manager
 
-# Initialize
 initialize_session_state()
 config = get_config()
-
-# Render shared sidebar
 render_app_sidebar()
 
-# Get database manager
 try:
     db = get_db_manager()
     DB_AVAILABLE = True
@@ -64,40 +54,35 @@ st.markdown("---")
 
 
 def calculate_data_health_score(health_report):
-    """Calculate overall data health score (0-100) - FIXED VERSION"""
+    """Calculate health score"""
     score = 100
     issues = []
     
-    # Missing values penalty
     if health_report.get("missing_values"):
         for var, info in health_report["missing_values"].items():
             missing_pct = info.get("percentage", 0)
-            
             if missing_pct > 0.20:
                 score -= 15
-                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing data (critical)")
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing (critical)")
             elif missing_pct > 0.05:
                 score -= 5
-                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing data")
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing")
     
-    # Outliers check
     if health_report.get("outliers"):
         try:
             outlier_count = sum(info.get("count", 0) for info in health_report["outliers"].values())
             if outlier_count > 0:
                 score -= 5
-                issues.append(f"📊 {outlier_count} outliers detected")
+                issues.append(f"📊 {outlier_count} outliers")
         except:
             pass
     
-    # Time series issues
     if "time_metadata" in health_report:
         time_meta = health_report["time_metadata"]
         if time_meta.get("duplicate_count", 0) > 0:
             score -= 10
-            issues.append(f"⏰ {time_meta['duplicate_count']} duplicate timestamps")
+            issues.append(f"⏰ {time_meta['duplicate_count']} duplicates")
     
-    # Warnings - FIXED: Handle both list and int
     warnings_data = health_report.get("warnings")
     if warnings_data:
         if isinstance(warnings_data, list):
@@ -122,21 +107,16 @@ def calculate_data_health_score(health_report):
 
 
 def get_comprehensive_health_report():
-    """
-    Get comprehensive health report combining database data + session data
-    This ensures the health report shows ALL data, not just the latest upload
-    """
+    """Get comprehensive health report from database"""
     if not DB_AVAILABLE or not st.session_state.get('current_project_id'):
         return None
     
     try:
-        # Get all parameters from database (includes old + new)
         parameters = db.get_project_parameters(st.session_state.current_project_id)
         
         if not parameters:
             return None
         
-        # Calculate comprehensive statistics
         total_missing = 0
         total_count = 0
         missing_values_detail = {}
@@ -151,26 +131,23 @@ def get_comprehensive_health_report():
             
             if param_total > 0:
                 missing_pct = missing_count / param_total
-                
                 missing_values_detail[param_name] = {
                     'count': missing_count,
                     'percentage': missing_pct,
                     'total': param_total
                 }
         
-        # Calculate overall health score
         health_score = 100
         issues = []
         
-        # Missing values penalty
         for var, info in missing_values_detail.items():
             missing_pct = info['percentage']
             if missing_pct > 0.20:
                 health_score -= 15
-                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing data (critical)")
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing (critical)")
             elif missing_pct > 0.05:
                 health_score -= 5
-                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing data")
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing")
         
         health_score = max(0, min(100, health_score))
         
@@ -183,7 +160,6 @@ def get_comprehensive_health_report():
         else:
             category = "poor"
         
-        # Build comprehensive report
         comprehensive_report = {
             'health_score': health_score,
             'health_category': category,
@@ -203,7 +179,6 @@ def get_comprehensive_health_report():
             'outlier_count': 0
         }
         
-        # Try to get time metadata from latest health report in database
         db_health_report = db.get_health_report(st.session_state.current_project_id)
         if db_health_report:
             comprehensive_report['time_metadata'] = db_health_report.get('time_metadata', {})
@@ -214,12 +189,12 @@ def get_comprehensive_health_report():
         return comprehensive_report
         
     except Exception as e:
-        st.error(f"Error generating comprehensive report: {str(e)}")
+        st.error(f"Error: {str(e)}")
         return None
 
 
 def update_project_progress(stage: str = "data_import", page: int = 2, percentage: int = 7):
-    """Update project progress in database and session state"""
+    """Update progress"""
     if not DB_AVAILABLE or not st.session_state.get('current_project_id'):
         return
     
@@ -232,16 +207,14 @@ def update_project_progress(stage: str = "data_import", page: int = 2, percentag
         )
         st.session_state.data_loaded = True
     except Exception as e:
-        st.warning(f"Could not update progress: {str(e)}")
+        st.warning(f"Progress update failed: {str(e)}")
 
 
 def show_next_steps_after_upload():
-    """Show navigation options after data is successfully uploaded and processed"""
-    
+    """Show next steps"""
     st.markdown("---")
     st.header("🎯 What's Next?")
     
-    # Get COMPREHENSIVE health score (all data from database)
     health_score = 100
     comprehensive_report = get_comprehensive_health_report()
     
@@ -253,21 +226,19 @@ def show_next_steps_after_upload():
         except:
             health_score = 75
     
-    # Recommendations
     if health_score >= 85:
-        st.success("**Excellent Data Quality! ✨** Your data is ready for analysis.")
+        st.success("**Excellent Data Quality! ✨**")
         primary_action = "visualize"
     elif health_score >= 70:
-        st.info("**Good Data Quality 👍** Minor issues detected.")
+        st.info("**Good Data Quality 👍**")
         primary_action = "either"
     elif health_score >= 50:
-        st.warning("**Fair Data Quality ⚠️** Consider cleaning the data first.")
+        st.warning("**Fair Data Quality ⚠️** Consider cleaning")
         primary_action = "clean"
     else:
-        st.error("**Poor Data Quality 🔴** Data cleaning strongly recommended.")
+        st.error("**Poor Data Quality 🔴** Cleaning recommended")
         primary_action = "clean"
     
-    # Action buttons
     col1, col2, col3 = st.columns(3)
     
     with col1:
@@ -275,10 +246,9 @@ def show_next_steps_after_upload():
         if health_score >= 70:
             st.success("✅ Recommended")
         
-        if st.button("📊 Go to Visualization", 
+        if st.button("📊 Visualization", 
                      use_container_width=True, 
-                     type="primary" if primary_action == "visualize" else "secondary",
-                     key="nav_viz_upload"):
+                     type="primary" if primary_action == "visualize" else "secondary"):
             if DB_AVAILABLE and st.session_state.get('current_project_id'):
                 db.update_project_progress(
                     project_id=st.session_state.current_project_id,
@@ -293,10 +263,9 @@ def show_next_steps_after_upload():
         if health_score < 70:
             st.warning("⚠️ Recommended")
         
-        if st.button("🧹 Go to Data Cleaning", 
+        if st.button("🧹 Data Cleaning", 
                      use_container_width=True,
-                     type="primary" if primary_action == "clean" else "secondary",
-                     key="nav_clean_upload"):
+                     type="primary" if primary_action == "clean" else "secondary"):
             if DB_AVAILABLE and st.session_state.get('current_project_id'):
                 db.update_project_progress(
                     project_id=st.session_state.current_project_id,
@@ -307,30 +276,24 @@ def show_next_steps_after_upload():
             st.switch_page("pages/03_Preprocessing.py")
     
     with col3:
-        st.markdown("#### 📋 Data Health Report")
-        st.info("💡 Switch to **Data Health Report** tab above to see full analysis")
+        st.markdown("#### 📋 Health Report")
+        st.info("💡 Switch to **Data Health Report** tab")
 
 
 def load_data_from_database_if_available():
-    """
-    Load project data from database if available
-    This populates session state with parameters and health report
-    """
+    """Load from database"""
     if not DB_AVAILABLE or not st.session_state.get('current_project_id'):
         return False
     
     try:
-        # Get parameters
         parameters = db.get_project_parameters(st.session_state.current_project_id)
         
         if not parameters:
             return False
         
-        # Store parameters in session state
         st.session_state.project_parameters = parameters
         st.session_state.value_columns = [p['parameter_name'] for p in parameters]
         
-        # Get comprehensive health report
         comprehensive_report = get_comprehensive_health_report()
         
         if comprehensive_report:
@@ -340,30 +303,36 @@ def load_data_from_database_if_available():
         return True
         
     except Exception as e:
-        st.warning(f"Could not load data from database: {str(e)}")
+        st.warning(f"Load failed: {str(e)}")
         return False
 
 
 def main():
-    """Main page function"""
+    """Main function"""
     
-    # Check if project is selected
     if not st.session_state.get('current_project_id'):
-        st.warning("⚠️ Please select a project first")
+        st.warning("⚠️ Please select a project")
         if st.button("← Go to Home"):
             st.switch_page("pages/01_Home.py")
         st.stop()
     
-    # CRITICAL: Load data from database if not in session state
-    if not st.session_state.get('data_loaded') and not st.session_state.get('df_long'):
-        # Try to load from database
+    # FIXED: Check if df_long exists properly
+    df_long_exists = False
+    if 'df_long' in st.session_state and st.session_state.df_long is not None:
+        try:
+            # Check if it's a DataFrame and not empty
+            if isinstance(st.session_state.df_long, pd.DataFrame) and len(st.session_state.df_long) > 0:
+                df_long_exists = True
+        except:
+            pass
+    
+    if not st.session_state.get('data_loaded') and not df_long_exists:
         data_loaded = load_data_from_database_if_available()
         
         if data_loaded:
             params_count = len(st.session_state.get('project_parameters', []))
-            st.info(f"📊 Project data loaded from database: {params_count} parameters")
+            st.info(f"📊 Loaded from database: {params_count} parameters")
     
-    # Create tabs
     tab1, tab2 = st.tabs(["📤 Upload Data", "🔍 Data Health Report"])
     
     with tab1:
@@ -374,11 +343,9 @@ def main():
 
 
 def render_upload_section():
-    """Render the file upload section"""
-    
+    """Upload section"""
     st.header("Step 1: Upload Your Data File")
     
-    # Show data status if exists in database
     if st.session_state.get('data_loaded') and st.session_state.get('value_columns'):
         with st.expander("✅ Current Project Data", expanded=False):
             st.success(f"📊 {len(st.session_state.value_columns)} parameters loaded")
@@ -389,109 +356,72 @@ def render_upload_section():
                 for var in st.session_state.value_columns[:10]:
                     st.text(f"  • {var}")
                 if len(st.session_state.value_columns) > 10:
-                    st.caption(f"  ... and {len(st.session_state.value_columns) - 10} more")
+                    st.caption(f"  ... +{len(st.session_state.value_columns) - 10} more")
             
             with col2:
                 if st.session_state.get('health_report'):
                     health = st.session_state.health_report
-                    st.caption("**Health Status:**")
-                    st.text(f"  • Score: {health.get('health_score', 'N/A')}/100")
-                    st.text(f"  • Category: {health.get('health_category', 'N/A')}")
-                    st.text(f"  • Data points: {health.get('total_data_points', 'N/A')}")
+                    st.caption("**Health:**")
+                    st.text(f"  Score: {health.get('health_score', 'N/A')}/100")
+                    st.text(f"  Category: {health.get('health_category', 'N/A')}")
     
-    # Show previously uploaded files
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
         try:
             uploaded_files = db.get_uploaded_files(st.session_state.current_project_id)
             if uploaded_files:
-                with st.expander(f"📂 Previously Uploaded Files ({len(uploaded_files)})"):
+                with st.expander(f"📂 Previous Uploads ({len(uploaded_files)})"):
                     for file_info in uploaded_files[:5]:
-                        st.caption(f"📄 {file_info['filename']} - {file_info['file_size']/1024:.1f} KB - {file_info['uploaded_at'][:10]}")
+                        st.caption(f"📄 {file_info['filename']} - {file_info['uploaded_at'][:10]}")
         except:
             pass
     
-    # File uploader
     uploaded_file = st.file_uploader(
         "Choose a file",
-        type=config["accepted_file_types"],
-        help=f"Supported formats: {', '.join(config['accepted_file_types'])}"
+        type=config["accepted_file_types"]
     )
     
     if uploaded_file is None:
-        st.info("👆 Upload a CSV, TXT, or Excel file to get started")
-        with st.expander("📋 Expected Data Format"):
-            st.markdown("""
-            Your file should have:
-            - **One time/date column** (any standard datetime format)
-            - **One or more numeric columns** (variables to analyze)
-            
-            Example CSV:
-            ```
-            Date,Temperature,Humidity,Pressure
-            2023-01-01,22.5,65.2,1013.2
-            2023-01-02,23.1,68.5,1012.8
-            2023-01-03,21.8,70.1,1014.3
-            ```
-            """)
+        st.info("👆 Upload CSV, TXT, or Excel")
         
-        # Show navigation even if no new upload (if data exists in database)
         if st.session_state.get('data_loaded') and st.session_state.get('value_columns'):
             st.markdown("---")
             show_next_steps_after_upload()
-        
         return
     
-    # Store file info
     st.session_state.uploaded_file_name = uploaded_file.name
     st.session_state.upload_timestamp = datetime.now()
     
-    st.success(f"✅ File uploaded: **{uploaded_file.name}**")
+    st.success(f"✅ File: **{uploaded_file.name}**")
     st.caption(f"Size: {uploaded_file.size / 1024:.1f} KB")
     
-    # Excel sheet selection
     sheet_name = None
     if uploaded_file.name.endswith(('.xlsx', '.xls')):
-        st.markdown("### Excel File Options")
         sheet_names, error = get_excel_sheet_names(uploaded_file.getvalue())
-        
         if error:
-            display_error("Could not read Excel file", error)
+            display_error("Excel read failed", error)
             return
-        
         if len(sheet_names) > 1:
-            sheet_name = st.selectbox("Select sheet to load", sheet_names)
+            sheet_name = st.selectbox("Sheet", sheet_names)
         else:
             sheet_name = sheet_names[0]
-            st.info(f"Loading sheet: **{sheet_name}**")
     
-    # CSV/TXT options
     delimiter = None
     decimal = "."
     
     if uploaded_file.name.endswith(('.csv', '.txt')):
-        with st.expander("⚙️ Advanced Options (CSV/TXT)"):
+        with st.expander("⚙️ Options"):
             col1, col2 = st.columns(2)
             with col1:
-                delimiter_option = st.selectbox(
-                    "Delimiter",
-                    ["Auto-detect", "Comma (,)", "Semicolon (;)", "Tab", "Pipe (|)"]
-                )
-                if delimiter_option != "Auto-detect":
-                    delimiter_map = {
-                        "Comma (,)": ",",
-                        "Semicolon (;)": ";",
-                        "Tab": "\t",
-                        "Pipe (|)": "|"
-                    }
-                    delimiter = delimiter_map[delimiter_option]
+                delim_opt = st.selectbox("Delimiter", ["Auto", ",", ";", "Tab", "|"])
+                if delim_opt != "Auto":
+                    delimiter = "\t" if delim_opt == "Tab" else delim_opt
             with col2:
-                decimal = st.selectbox("Decimal separator", [".", ","])
+                decimal = st.selectbox("Decimal", [".", ","])
     
     st.markdown("---")
     
-    # Load file button
     if st.button("📊 Load File", type="primary", use_container_width=True):
-        with st.spinner("Loading file..."):
+        with st.spinner("Loading..."):
             df_raw, error, metadata = load_file_smart(
                 uploaded_file,
                 delimiter=delimiter,
@@ -500,13 +430,12 @@ def render_upload_section():
             )
         
         if error:
-            display_error("Failed to load file", error)
+            display_error("Load failed", error)
             return
         
         st.session_state.df_raw = df_raw
         st.session_state.file_metadata = metadata
         
-        # Save to database
         if DB_AVAILABLE and st.session_state.get('current_project_id'):
             try:
                 db.save_uploaded_file(
@@ -516,29 +445,25 @@ def render_upload_section():
                     file_type=uploaded_file.type,
                     metadata=metadata
                 )
-                st.success(f"✅ File information saved to database")
             except:
                 pass
         
-        display_success(f"File loaded successfully! {metadata['rows']} rows × {metadata['columns']} columns")
+        display_success(f"Loaded! {metadata['rows']} × {metadata['columns']}")
         
-        with st.expander("👀 Preview Raw Data"):
+        with st.expander("👀 Preview"):
             preview_dataframe(df_raw)
     
-    # If data loaded, show configuration
     if st.session_state.get('df_raw') is not None:
         st.markdown("---")
         render_data_configuration()
 
 
 def render_data_configuration():
-    """Render data configuration section"""
-    
+    """Configure data"""
     st.header("Step 2: Configure Your Data")
     
     df = st.session_state.df_raw
     
-    # Detect columns
     datetime_candidates = detect_datetime_columns(df)
     numeric_candidates = detect_numeric_columns(df)
     
@@ -552,29 +477,23 @@ def render_data_configuration():
             df.columns.tolist(),
             index=df.columns.tolist().index(default_time) if default_time in df.columns else 0
         )
-        sample_values = df[time_column].dropna().head(5)
-        st.caption("Sample values:")
-        for val in sample_values:
-            st.caption(f"  • {val}")
-        datetime_format = st.selectbox("Datetime format", ["auto"] + config["datetime_formats"])
+        datetime_format = st.selectbox("Format", ["auto"] + config["datetime_formats"])
     
     with col2:
-        st.markdown("#### 📊 Variables (Value Columns)")
-        if numeric_candidates:
-            st.info(f"Detected {len(numeric_candidates)} numeric columns")
+        st.markdown("#### 📊 Variables")
         default_vars = [col for col in numeric_candidates if col != time_column]
         value_columns = st.multiselect(
-            "Select variables to analyze",
+            "Select variables",
             [col for col in df.columns if col != time_column],
-            default=default_vars[:10] if len(default_vars) > 10 else default_vars
+            default=default_vars[:10]
         )
         if value_columns:
-            st.success(f"✅ Selected {len(value_columns)} variables")
+            st.success(f"✅ {len(value_columns)} selected")
     
     st.markdown("---")
     
     if not value_columns:
-        st.warning("⚠️ Please select at least one variable to continue")
+        st.warning("⚠️ Select at least one variable")
         return
     
     if st.button("⚡ Process Data", type="primary", use_container_width=True):
@@ -582,13 +501,12 @@ def render_data_configuration():
 
 
 def process_data(df, time_column, value_columns, datetime_format):
-    """Process and validate data"""
+    """Process data"""
     
     progress_bar = st.progress(0)
     status = st.empty()
     
-    # Parse time
-    status.text("Parsing time column...")
+    status.text("Parsing time...")
     progress_bar.progress(0.20)
     
     if datetime_format == "auto":
@@ -597,7 +515,7 @@ def process_data(df, time_column, value_columns, datetime_format):
     parsed_time, error = parse_time_column(df, time_column, datetime_format)
     
     if error:
-        display_error("Failed to parse time column", error)
+        display_error("Time parse failed", error)
         progress_bar.empty()
         status.empty()
         return
@@ -605,23 +523,22 @@ def process_data(df, time_column, value_columns, datetime_format):
     is_valid, error, time_metadata = validate_time_series(parsed_time)
     
     if not is_valid:
-        display_error("Time column validation failed", error)
+        display_error("Time validation failed", error)
         progress_bar.empty()
         status.empty()
         return
     
     df[time_column] = parsed_time
     
-    # Validate numeric columns
     status.text("Validating variables...")
     progress_bar.progress(0.40)
     
     valid_cols, invalid_cols, conversion_info = check_numeric_columns(df, value_columns)
     
     if invalid_cols:
-        st.warning(f"⚠️ Some columns could not be used: {', '.join(invalid_cols)}")
+        st.warning(f"⚠️ Skipped: {', '.join(invalid_cols)}")
         if not valid_cols:
-            display_error("No valid numeric columns found")
+            display_error("No valid columns")
             progress_bar.empty()
             status.empty()
             return
@@ -630,53 +547,42 @@ def process_data(df, time_column, value_columns, datetime_format):
     for col in value_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    # Convert to long format
-    status.text("Converting to standard format...")
+    status.text("Converting format...")
     progress_bar.progress(0.60)
     
     df_long, error = convert_to_long_format(df, time_column, value_columns)
     
     if error:
-        display_error("Failed to convert data", error)
+        display_error("Conversion failed", error)
         progress_bar.empty()
         status.empty()
         return
     
-    # ============================================================
-    # 🆕 NEW: Save time-series data to database
-    # ============================================================
+    # Save with data_source='raw'
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
-        status.text("Saving time-series data to database...")
+        status.text("Saving to database...")
         progress_bar.progress(0.70)
         
         try:
-            # Save the actual data points to database
             success = db.save_timeseries_data(
                 project_id=st.session_state.current_project_id,
                 df_long=df_long,
-                data_source='raw',  # Mark as raw/raw data
-                batch_size=1000  # Insert 1000 records at a time
+                data_source='raw',
+                batch_size=1000
             )
             
             if success:
-                # Get summary of what was saved
                 summary = db.get_timeseries_summary(
                     project_id=st.session_state.current_project_id,
                     data_source='raw'
                 )
-                st.success(f"✅ Saved {summary['total_records']:,} data points to database")
+                st.success(f"✅ Saved {summary['total_records']:,} data points (source='raw')")
             else:
-                st.warning("⚠️ Could not save time-series data to database")
+                st.warning("⚠️ Save failed")
                 
         except Exception as e:
-            st.warning(f"Could not save time-series data: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
-    # ============================================================
-    # END NEW CODE
-    # ============================================================
+            st.warning(f"Save error: {str(e)}")
     
-    # Save parameters
     status.text("Saving parameters...")
     progress_bar.progress(0.75)
     
@@ -698,9 +604,8 @@ def process_data(df, time_column, value_columns, datetime_format):
             db.save_parameters(st.session_state.current_project_id, parameters)
             st.success("✅ Parameters saved")
         except Exception as e:
-            st.warning(f"Could not save parameters: {str(e)}")
+            st.warning(f"Param save error: {str(e)}")
     
-    # Generate health report
     status.text("Generating health report...")
     progress_bar.progress(0.90)
     
@@ -708,13 +613,11 @@ def process_data(df, time_column, value_columns, datetime_format):
     health_report["time_metadata"] = time_metadata
     health_report["conversion_info"] = conversion_info
     
-    # Store in session
     st.session_state.df_long = df_long
     st.session_state.df_clean = df_long.copy()
     st.session_state.time_column = time_column
     st.session_state.value_columns = value_columns
     
-    # Save health report
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
         try:
             status.text("Saving health report...")
@@ -730,7 +633,7 @@ def process_data(df, time_column, value_columns, datetime_format):
                 'total_missing_values': sum(info.get('count', 0) for info in health_report.get('missing_values', {}).values()),
                 'missing_percentage': sum(info.get('count', 0) for info in health_report.get('missing_values', {}).values()) / len(df_long) if len(df_long) > 0 else 0,
                 'critical_issues': len([i for i in issues if 'critical' in i.lower()]),
-                'warnings': len([i for i in issues if 'warning' in i.lower() or '⚠️' in i]),
+                'warnings': len([i for i in issues if 'warning' in i.lower()]),
                 'duplicate_timestamps': time_metadata.get('duplicate_count', 0),
                 'outlier_count': sum(info.get('count', 0) for info in health_report.get('outliers', {}).values()),
                 'missing_values_detail': health_report.get('missing_values', {}),
@@ -747,18 +650,15 @@ def process_data(df, time_column, value_columns, datetime_format):
             db.save_health_report(st.session_state.current_project_id, health_data)
             st.success("✅ Health report saved")
         except Exception as e:
-            st.warning(f"Could not save health report: {str(e)}")
+            st.warning(f"Health save error: {str(e)}")
     
-    # CRITICAL: Reload comprehensive health report from database
     comprehensive_report = get_comprehensive_health_report()
     if comprehensive_report:
         st.session_state.health_report = comprehensive_report
         st.session_state.data_loaded = True
     
-    # Update progress
     update_project_progress(stage="data_imported", page=2, percentage=7)
     
-    # Mark complete
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
         try:
             db.update_step_completion(
@@ -774,7 +674,7 @@ def process_data(df, time_column, value_columns, datetime_format):
     
     st.balloons()
     
-    display_success("🎉 Data processed successfully!")
+    display_success("🎉 Data processed!")
     
     col1, col2, col3 = st.columns(3)
     col1.metric("Variables", len(value_columns))
@@ -785,41 +685,30 @@ def process_data(df, time_column, value_columns, datetime_format):
 
 
 def render_health_report_section():
-    """Render health report section"""
+    """Health report section"""
     
-    # ALWAYS get comprehensive report (all data from database)
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
         try:
-            st.info("📊 Loading comprehensive health report...")
-            
             comprehensive_report = get_comprehensive_health_report()
             
             if not comprehensive_report:
-                st.warning("⚠️ No data found")
-                st.info("📤 Upload data first. Switch to **Upload Data** tab.")
+                st.warning("⚠️ No data")
+                st.info("📤 Upload data first")
                 return
-            
-            st.success("✅ Loaded comprehensive health report")
             
             render_comprehensive_health_report(comprehensive_report)
             return
             
         except Exception as e:
-            st.error(f"Error loading health report: {str(e)}")
-            import traceback
-            st.code(traceback.format_exc())
+            st.error(f"Error: {str(e)}")
     
-    st.info("📤 Upload data first. Switch to **Upload Data** tab.")
+    st.info("📤 Upload data first")
 
 
 def render_comprehensive_health_report(health_report):
-    """Render comprehensive health report (ALL data from database)"""
+    """Render health report"""
     
     st.header("📊 Data Health Report")
-    st.caption("Comprehensive analysis of all project data")
-    
-    # Health Score
-    st.markdown("### Overall Data Health")
     
     col1, col2, col3 = st.columns([1, 2, 1])
     
@@ -841,13 +730,13 @@ def render_comprehensive_health_report(health_report):
     with col2:
         issues = health_report.get('issues_list', [])
         if issues:
-            st.markdown("**Issues Detected:**")
+            st.markdown("**Issues:**")
             for issue in issues[:5]:
                 st.caption(issue)
             if len(issues) > 5:
-                st.caption(f"... and {len(issues) - 5} more")
+                st.caption(f"... +{len(issues) - 5}")
         else:
-            st.success("✅ No significant issues!")
+            st.success("✅ No issues!")
     
     with col3:
         st.metric("Parameters", health_report.get('total_parameters', 0))
@@ -855,7 +744,6 @@ def render_comprehensive_health_report(health_report):
     
     st.markdown("---")
     
-    # Missing Values
     st.subheader("❓ Missing Values")
     
     missing_detail = health_report.get('missing_values_detail', {})
@@ -864,71 +752,31 @@ def render_comprehensive_health_report(health_report):
         missing_data = []
         for var, info in missing_detail.items():
             missing_count = info.get('count', 0)
-            total_count = info.get('total', info.get('total_count', 0))
+            total_count = info.get('total', 0)
             
             if total_count > 0:
                 missing_pct = missing_count / total_count
             else:
                 missing_pct = info.get('percentage', 0)
             
-            status = "🔴 Critical" if missing_pct > 0.20 else "🟡 Warning" if missing_pct > 0.05 else "🟢 Good"
+            status = "🔴" if missing_pct > 0.20 else "🟡" if missing_pct > 0.05 else "🟢"
             
             missing_data.append({
                 "Variable": var,
-                "Missing Count": missing_count,
+                "Missing": missing_count,
                 "Total": total_count,
                 "Missing %": f"{missing_pct*100:.1f}%",
                 "Status": status
             })
         
-        missing_df = pd.DataFrame(missing_data)
-        st.dataframe(missing_df, use_container_width=True, hide_index=True)
-        
-        overall_pct = health_report.get('missing_percentage', 0)
-        
-        if overall_pct > 0.20:
-            st.error(f"⚠️ Overall: {overall_pct*100:.1f}%")
-        elif overall_pct > 0.05:
-            st.warning(f"ℹ️ Overall: {overall_pct*100:.1f}%")
-        else:
-            st.success(f"✅ Overall: {overall_pct*100:.1f}%")
+        st.dataframe(pd.DataFrame(missing_data), use_container_width=True, hide_index=True)
     else:
         st.success("✅ No missing values!")
     
     st.markdown("---")
     
-    # Time metadata
-    time_meta = health_report.get('time_metadata', {})
-    if time_meta:
-        st.subheader("⏰ Time Series Info")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if 'min_time' in time_meta:
-                st.metric("Start Date", str(time_meta['min_time'])[:10])
-            if 'max_time' in time_meta:
-                st.metric("End Date", str(time_meta['max_time'])[:10])
-        
-        with col2:
-            if 'time_span' in time_meta:
-                st.metric("Time Span", f"{time_meta['time_span']} days")
-            if 'estimated_frequency' in time_meta:
-                st.metric("Frequency", time_meta['estimated_frequency'])
-        
-        with col3:
-            dup_count = time_meta.get('duplicate_count', 0)
-            if dup_count > 0:
-                st.metric("Duplicates", dup_count, delta="Warning", delta_color="inverse")
-            else:
-                st.metric("Duplicates", "0", delta="Good")
-    
-    st.markdown("---")
-    
-    # Parameters table
-    st.subheader("📋 Parameters Overview")
-    
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        st.subheader("📋 Parameters")
         try:
             parameters = db.get_project_parameters(st.session_state.current_project_id)
             
@@ -936,7 +784,6 @@ def render_comprehensive_health_report(health_report):
             for param in parameters:
                 param_table.append({
                     "Parameter": param.get('parameter_name', 'Unknown'),
-                    "Type": param.get('data_type', 'numeric'),
                     "Min": f"{param.get('min_value', 0):.2f}" if param.get('min_value') is not None else "N/A",
                     "Max": f"{param.get('max_value', 0):.2f}" if param.get('max_value') is not None else "N/A",
                     "Mean": f"{param.get('mean_value', 0):.2f}" if param.get('mean_value') is not None else "N/A",
@@ -944,81 +791,14 @@ def render_comprehensive_health_report(health_report):
                     "Total": f"{param.get('total_count', 0):,}"
                 })
             
-            param_df = pd.DataFrame(param_table)
-            st.dataframe(param_df, use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(param_table), use_container_width=True, hide_index=True)
         except Exception as e:
-            st.warning(f"Could not load parameters: {str(e)}")
-    
-    st.markdown("---")
-    
-    # Navigation
-    render_health_report_navigation(health_report.get('health_score', 100))
-
-
-def render_health_report_navigation(health_score):
-    """Render navigation at bottom of health report"""
-    
-    st.header("🎯 What's Next?")
-    
-    if health_score >= 85:
-        st.success("**Excellent Data Quality! ✨**")
-        primary_action = "visualize"
-    elif health_score >= 70:
-        st.info("**Good Data Quality 👍**")
-        primary_action = "either"
-    elif health_score >= 50:
-        st.warning("**Fair Data Quality ⚠️**")
-        primary_action = "clean"
-    else:
-        st.error("**Poor Data Quality 🔴**")
-        primary_action = "clean"
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("#### 📊 Visualize")
-        if health_score >= 70:
-            st.success("✅ Recommended")
-        
-        if st.button("📊 Go to Visualization", 
-                     use_container_width=True, 
-                     type="primary" if primary_action == "visualize" else "secondary",
-                     key="nav_viz_health"):
-            if DB_AVAILABLE and st.session_state.get('current_project_id'):
-                db.update_project_progress(
-                    project_id=st.session_state.current_project_id,
-                    workflow_state="exploration",
-                    current_page=4,
-                    completion_percentage=14
-                )
-            st.switch_page("pages/04_Exploration_and_Visualization.py")
-    
-    with col2:
-        st.markdown("#### 🧹 Clean Data")
-        if health_score < 70:
-            st.warning("⚠️ Recommended")
-        
-        if st.button("🧹 Go to Cleaning", 
-                     use_container_width=True,
-                     type="primary" if primary_action == "clean" else "secondary",
-                     key="nav_clean_health"):
-            if DB_AVAILABLE and st.session_state.get('current_project_id'):
-                db.update_project_progress(
-                    project_id=st.session_state.current_project_id,
-                    workflow_state="preprocessing",
-                    current_page=3,
-                    completion_percentage=7
-                )
-            st.switch_page("pages/03_Preprocessing.py")
-    
-    with col3:
-        st.markdown("#### 📁 Upload More")
-        st.info("💡 Switch to **Upload Data** tab")
+            st.warning(f"Load error: {str(e)}")
 
 
 if __name__ == "__main__":
     if not DB_AVAILABLE:
-        st.error("❌ Database not available")
+        st.error("❌ Database unavailable")
         st.stop()
     
     main()
