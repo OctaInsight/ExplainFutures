@@ -145,6 +145,14 @@ def main():
     
     # Load project data if not already loaded
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        import sys
+        from pathlib import Path
+        
+        # Add project root to path if not already there
+        project_root = Path(__file__).parent.parent
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
+        
         from core.utils.project_loader import ensure_project_data_loaded
         ensure_project_data_loaded(st.session_state.current_project_id, db)
     
