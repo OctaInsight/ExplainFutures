@@ -981,11 +981,6 @@ class SupabaseManager:
                 'project_id', project_id
             ).order('created_at', desc=True).limit(1).execute()
             
-            # Debug: Log the data types
-            st.write("Debug - Data types being sent:")
-            for key, value in report_data.items():
-                st.write(f"  {key}: {type(value).__name__} = {repr(value)[:100]}")
-            
             if existing.data:
                 # Update existing report
                 self.client.table('health_reports').update(report_data).eq(
