@@ -1,6 +1,6 @@
 """
-Page 2: Data Import & Diagnostics (FINAL FIXED VERSION)
-Fixed: Data loading from database + Navigation buttons always show
+Page 2: Data Import & Diagnostics (COMPLETE FIXED)
+Fixed: Health report shows combined data from database + new upload
 """
 
 import streamlit as st
@@ -119,6 +119,103 @@ def calculate_data_health_score(health_report):
     return score, category, issues
 
 
+def get_comprehensive_health_report():
+    """
+    Get comprehensive health report combining database data + session data
+    This ensures the health report shows ALL data, not just the latest upload
+    """
+    if not DB_AVAILABLE or not st.session_state.get('current_project_id'):
+        return None
+    
+    try:
+        # Get all parameters from database (includes old + new)
+        parameters = db.get_project_parameters(st.session_state.current_project_id)
+        
+        if not parameters:
+            return None
+        
+        # Calculate comprehensive statistics
+        total_missing = 0
+        total_count = 0
+        missing_values_detail = {}
+        
+        for param in parameters:
+            param_name = param['parameter_name']
+            missing_count = param.get('missing_count', 0)
+            param_total = param.get('total_count', 0)
+            
+            total_missing += missing_count
+            total_count += param_total
+            
+            if param_total > 0:
+                missing_pct = missing_count / param_total
+                
+                missing_values_detail[param_name] = {
+                    'count': missing_count,
+                    'percentage': missing_pct,
+                    'total': param_total
+                }
+        
+        # Calculate overall health score
+        health_score = 100
+        issues = []
+        
+        # Missing values penalty
+        for var, info in missing_values_detail.items():
+            missing_pct = info['percentage']
+            if missing_pct > 0.20:
+                health_score -= 15
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing data (critical)")
+            elif missing_pct > 0.05:
+                health_score -= 5
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing data")
+        
+        health_score = max(0, min(100, health_score))
+        
+        if health_score >= 85:
+            category = "excellent"
+        elif health_score >= 70:
+            category = "good"
+        elif health_score >= 50:
+            category = "fair"
+        else:
+            category = "poor"
+        
+        # Build comprehensive report
+        comprehensive_report = {
+            'health_score': health_score,
+            'health_category': category,
+            'total_parameters': len(parameters),
+            'total_data_points': total_count,
+            'total_missing_values': total_missing,
+            'missing_percentage': total_missing / total_count if total_count > 0 else 0,
+            'critical_issues': len([i for i in issues if 'critical' in i.lower()]),
+            'warnings': len([i for i in issues if 'warning' in i.lower()]),
+            'missing_values_detail': missing_values_detail,
+            'issues_list': issues,
+            'parameters_analyzed': [p['parameter_name'] for p in parameters],
+            'time_metadata': {},  # Will be populated if available
+            'outliers_detail': {},
+            'coverage_detail': {},
+            'duplicate_timestamps': 0,
+            'outlier_count': 0
+        }
+        
+        # Try to get time metadata from latest health report in database
+        db_health_report = db.get_health_report(st.session_state.current_project_id)
+        if db_health_report:
+            comprehensive_report['time_metadata'] = db_health_report.get('time_metadata', {})
+            comprehensive_report['duplicate_timestamps'] = db_health_report.get('duplicate_timestamps', 0)
+            comprehensive_report['outliers_detail'] = db_health_report.get('outliers_detail', {})
+            comprehensive_report['outlier_count'] = db_health_report.get('outlier_count', 0)
+        
+        return comprehensive_report
+        
+    except Exception as e:
+        st.error(f"Error generating comprehensive report: {str(e)}")
+        return None
+
+
 def update_project_progress(stage: str = "data_import", page: int = 2, percentage: int = 7):
     """Update project progress in database and session state"""
     if not DB_AVAILABLE or not st.session_state.get('current_project_id'):
@@ -142,9 +239,13 @@ def show_next_steps_after_upload():
     st.markdown("---")
     st.header("🎯 What's Next?")
     
-    # Get health score
+    # Get COMPREHENSIVE health score (all data from database)
     health_score = 100
-    if st.session_state.get('health_report'):
+    comprehensive_report = get_comprehensive_health_report()
+    
+    if comprehensive_report:
+        health_score = comprehensive_report['health_score']
+    elif st.session_state.get('health_report'):
         try:
             health_score, _, _ = calculate_data_health_score(st.session_state.health_report)
         except:
@@ -227,11 +328,11 @@ def load_data_from_database_if_available():
         st.session_state.project_parameters = parameters
         st.session_state.value_columns = [p['parameter_name'] for p in parameters]
         
-        # Try to get health report
-        health_report = db.get_health_report(st.session_state.current_project_id)
+        # Get comprehensive health report
+        comprehensive_report = get_comprehensive_health_report()
         
-        if health_report:
-            st.session_state.health_report = health_report
+        if comprehensive_report:
+            st.session_state.health_report = comprehensive_report
             st.session_state.data_loaded = True
         
         return True
@@ -576,9 +677,6 @@ def process_data(df, time_column, value_columns, datetime_format):
     st.session_state.df_clean = df_long.copy()
     st.session_state.time_column = time_column
     st.session_state.value_columns = value_columns
-    st.session_state.health_report = health_report
-    st.session_state.data_loaded = True
-    st.session_state.preprocessing_applied = False
     
     # Save health report
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
@@ -615,6 +713,13 @@ def process_data(df, time_column, value_columns, datetime_format):
         except Exception as e:
             st.warning(f"Could not save health report: {str(e)}")
     
+    # CRITICAL: Reload comprehensive health report from database
+    # This ensures we show ALL data (old + new) in the health report tab
+    comprehensive_report = get_comprehensive_health_report()
+    if comprehensive_report:
+        st.session_state.health_report = comprehensive_report
+        st.session_state.data_loaded = True
+    
     # Update progress
     update_project_progress(stage="data_imported", page=2, percentage=7)
     
@@ -648,48 +753,23 @@ def process_data(df, time_column, value_columns, datetime_format):
 def render_health_report_section():
     """Render health report section"""
     
-    # Try to load from session state first
-    if st.session_state.get('health_report') is not None:
-        # Check if we have df_long in session (means fresh upload)
-        if st.session_state.get('df_long') is not None:
-            render_session_health_report()
-        else:
-            # Have health report but no df_long - from database
-            render_database_health_report_full(st.session_state.health_report)
-        return
-    
-    # Try database
+    # ALWAYS get comprehensive report (all data from database)
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
         try:
-            st.info("📊 Checking for health report...")
+            st.info("📊 Loading comprehensive health report...")
             
-            # Try to load existing report
-            health_report = db.get_health_report(st.session_state.current_project_id)
+            # Get comprehensive report (combines all parameters from database)
+            comprehensive_report = get_comprehensive_health_report()
             
-            if not health_report:
-                # No report - try to generate from parameters
-                needs_update = db.needs_health_report_update(st.session_state.current_project_id)
-                
-                if needs_update:
-                    with st.spinner("🔄 Generating from database..."):
-                        health_report = db.generate_health_report_from_parameters(st.session_state.current_project_id)
-                    
-                    if not health_report.get('success'):
-                        st.warning("⚠️ " + health_report.get('message', 'No health report'))
-                        st.info("📤 Upload data first. Switch to **Upload Data** tab.")
-                        return
-                    
-                    st.success("✅ Generated!")
-                else:
-                    st.warning("⚠️ No data found")
-                    st.info("📤 Upload data first. Switch to **Upload Data** tab.")
-                    return
-            else:
-                st.success("✅ Loaded from database")
+            if not comprehensive_report:
+                st.warning("⚠️ No data found")
+                st.info("📤 Upload data first. Switch to **Upload Data** tab.")
+                return
             
-            # Store and display
-            st.session_state.health_report = health_report
-            render_database_health_report_full(health_report)
+            st.success("✅ Loaded comprehensive health report")
+            
+            # Display the comprehensive report
+            render_comprehensive_health_report(comprehensive_report)
             return
             
         except Exception as e:
@@ -700,10 +780,11 @@ def render_health_report_section():
     st.info("📤 Upload data first. Switch to **Upload Data** tab.")
 
 
-def render_database_health_report_full(health_report):
-    """Render complete health report from database"""
+def render_comprehensive_health_report(health_report):
+    """Render comprehensive health report (ALL data from database)"""
     
     st.header("📊 Data Health Report")
+    st.caption("Comprehensive analysis of all project data")
     
     # Health Score
     st.markdown("### Overall Data Health")
@@ -840,47 +921,6 @@ def render_database_health_report_full(health_report):
     
     # Navigation
     render_health_report_navigation(health_report.get('health_score', 100))
-
-
-def render_session_health_report():
-    """Render health report from session state (just after upload)"""
-    
-    try:
-        health = st.session_state.health_report
-        df_long = st.session_state.get('df_long')
-        
-        if df_long is None:
-            st.warning("⚠️ Data not available")
-            return
-        
-        health_score, health_category, issues = calculate_data_health_score(health)
-        
-        # Build report dict
-        report_dict = {
-            'health_score': health_score,
-            'health_category': health_category,
-            'total_parameters': len(st.session_state.get('value_columns', [])),
-            'total_data_points': len(df_long),
-            'total_missing_values': sum(info.get('count', 0) for info in health.get('missing_values', {}).values()),
-            'missing_percentage': sum(info.get('count', 0) for info in health.get('missing_values', {}).values()) / len(df_long) if len(df_long) > 0 else 0,
-            'critical_issues': len([i for i in issues if 'critical' in i.lower()]),
-            'warnings': len([i for i in issues if 'warning' in i.lower()]),
-            'duplicate_timestamps': health.get('time_metadata', {}).get('duplicate_count', 0),
-            'outlier_count': sum(info.get('count', 0) for info in health.get('outliers', {}).values()),
-            'missing_values_detail': health.get('missing_values', {}),
-            'outliers_detail': health.get('outliers', {}),
-            'coverage_detail': health.get('coverage', {}),
-            'issues_list': issues,
-            'time_metadata': health.get('time_metadata', {}),
-            'parameters_analyzed': st.session_state.get('value_columns', [])
-        }
-        
-        render_database_health_report_full(report_dict)
-    
-    except Exception as e:
-        st.error(f"Error rendering health report: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
 
 
 def render_health_report_navigation(health_score):
