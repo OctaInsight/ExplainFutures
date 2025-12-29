@@ -69,7 +69,7 @@ def calculate_data_health_score(health_report):
     # Missing values penalty
     if health_report.get("missing_values"):
         for var, info in health_report["missing_values"].items():
-            missing_pct = info["percentage"]
+            missing_pct = info.get("percentage", 0)
             
             if missing_pct > 0.20:
                 score -= 15
@@ -80,7 +80,7 @@ def calculate_data_health_score(health_report):
     
     # Outliers check
     if health_report.get("outliers"):
-        outlier_count = sum(info["count"] for info in health_report["outliers"].values())
+        outlier_count = sum(info.get("count", 0) for info in health_report["outliers"].values())
         if outlier_count > 0:
             score -= 5
             issues.append(f"📊 {outlier_count} outliers detected")
@@ -92,11 +92,24 @@ def calculate_data_health_score(health_report):
             score -= 10
             issues.append(f"⏰ {time_meta['duplicate_count']} duplicate timestamps")
     
-    # Warnings
-    if health_report.get("warnings"):
-        score -= len(health_report["warnings"]) * 5
-        for warning in health_report["warnings"]:
-            issues.append(f"⚠️ {warning}")
+    # Warnings - FIXED: Handle both list and int types
+    warnings_data = health_report.get("warnings")
+    if warnings_data:
+        # Check if it's a list
+        if isinstance(warnings_data, list):
+            score -= len(warnings_data) * 5
+            for warning in warnings_data:
+                issues.append(f"⚠️ {warning}")
+        # Or if it's just a count (integer)
+        elif isinstance(warnings_data, int):
+            score -= warnings_data * 5
+        # Or if it's something else, try to convert
+        else:
+            try:
+                warning_count = int(warnings_data)
+                score -= warning_count * 5
+            except:
+                pass  # Skip if can't convert
     
     score = max(0, min(100, score))
     
