@@ -36,6 +36,43 @@ def display_info(message: str):
 
 
 # ============================================================================
+# Color Functions (ADDED)
+# ============================================================================
+
+def get_color_for_index(index: int) -> str:
+    """
+    Get a color from a predefined palette based on index
+    
+    Args:
+        index: Integer index (will wrap around if exceeds palette size)
+    
+    Returns:
+        Hex color string
+    """
+    # Define a nice color palette
+    colors = [
+        "#1f77b4",  # Blue
+        "#ff7f0e",  # Orange
+        "#2ca02c",  # Green
+        "#d62728",  # Red
+        "#9467bd",  # Purple
+        "#8c564b",  # Brown
+        "#e377c2",  # Pink
+        "#7f7f7f",  # Gray
+        "#bcbd22",  # Olive
+        "#17becf",  # Cyan
+        "#aec7e8",  # Light Blue
+        "#ffbb78",  # Light Orange
+        "#98df8a",  # Light Green
+        "#ff9896",  # Light Red
+        "#c5b0d5",  # Light Purple
+    ]
+    
+    # Wrap around if index exceeds palette size
+    return colors[index % len(colors)]
+
+
+# ============================================================================
 # Data Detection Functions
 # ============================================================================
 
