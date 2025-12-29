@@ -639,6 +639,164 @@ class SupabaseManager:
         except Exception as e:
             st.error(f"Error renaming project: {str(e)}")
             return False
+    
+    # ========================================================================
+    # FILE UPLOAD MANAGEMENT
+    # ========================================================================
+    
+    def save_uploaded_file(self, project_id: str, filename: str, file_size: int, 
+                          file_type: str, metadata: dict = None) -> Optional[Dict]:
+        """Save uploaded file information to database"""
+        try:
+            result = self.client.table('uploaded_files').insert({
+                'project_id': project_id,
+                'filename': filename,
+                'file_size': file_size,
+                'file_type': file_type,
+                'metadata': json.dumps(metadata) if metadata else None,
+                'uploaded_at': datetime.now().isoformat()
+            }).execute()
+            
+            return result.data[0] if result.data else None
+            
+        except Exception as e:
+            st.error(f"Error saving file info: {str(e)}")
+            return None
+    
+    def get_uploaded_files(self, project_id: str) -> List[Dict]:
+        """Get all uploaded files for a project"""
+        try:
+            result = self.client.table('uploaded_files').select('*').eq(
+                'project_id', project_id
+            ).order('uploaded_at', desc=True).execute()
+            
+            return result.data if result.data else []
+            
+        except Exception as e:
+            st.error(f"Error fetching uploaded files: {str(e)}")
+            return []
+    
+    # ========================================================================
+    # PARAMETER MANAGEMENT
+    # ========================================================================
+    
+    def save_parameters(self, project_id: str, parameters: List[Dict]) -> bool:
+        """Save or update parameters for a project"""
+        try:
+            for param in parameters:
+                # Check if parameter already exists
+                existing = self.client.table('parameters').select('parameter_id').eq(
+                    'project_id', project_id
+                ).eq('parameter_name', param['name']).execute()
+                
+                param_data = {
+                    'project_id': project_id,
+                    'parameter_name': param['name'],
+                    'data_type': param.get('data_type', 'numeric'),
+                    'unit': param.get('unit'),
+                    'description': param.get('description'),
+                    'min_value': param.get('min_value'),
+                    'max_value': param.get('max_value'),
+                    'mean_value': param.get('mean_value'),
+                    'std_value': param.get('std_value'),
+                    'missing_count': param.get('missing_count', 0),
+                    'total_count': param.get('total_count', 0),
+                    'updated_at': datetime.now().isoformat()
+                }
+                
+                if existing.data:
+                    # Update existing parameter
+                    self.client.table('parameters').update(param_data).eq(
+                        'parameter_id', existing.data[0]['parameter_id']
+                    ).execute()
+                else:
+                    # Insert new parameter
+                    param_data['created_at'] = datetime.now().isoformat()
+                    self.client.table('parameters').insert(param_data).execute()
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error saving parameters: {str(e)}")
+            return False
+    
+    def get_project_parameters(self, project_id: str) -> List[Dict]:
+        """Get all parameters for a project"""
+        try:
+            result = self.client.table('parameters').select('*').eq(
+                'project_id', project_id
+            ).order('parameter_name').execute()
+            
+            return result.data if result.data else []
+            
+        except Exception as e:
+            st.error(f"Error fetching parameters: {str(e)}")
+            return []
+    
+    def check_duplicate_parameters(self, project_id: str) -> Dict[str, List[Dict]]:
+        """Check for duplicate parameter names in a project"""
+        try:
+            # Get all parameters
+            params = self.get_project_parameters(project_id)
+            
+            # Group by parameter name
+            duplicates = {}
+            param_groups = {}
+            
+            for param in params:
+                name = param['parameter_name']
+                if name not in param_groups:
+                    param_groups[name] = []
+                param_groups[name].append(param)
+            
+            # Find duplicates (count > 1)
+            for name, group in param_groups.items():
+                if len(group) > 1:
+                    duplicates[name] = group
+            
+            return duplicates
+            
+        except Exception as e:
+            st.error(f"Error checking duplicates: {str(e)}")
+            return {}
+    
+    def merge_parameters(self, parameter_ids: List[str], keep_id: str) -> bool:
+        """Merge duplicate parameters (keep one, delete others)"""
+        try:
+            # Delete all except the one to keep
+            for param_id in parameter_ids:
+                if param_id != keep_id:
+                    self.client.table('parameters').delete().eq('parameter_id', param_id).execute()
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error merging parameters: {str(e)}")
+            return False
+    
+    def rename_parameter(self, parameter_id: str, new_name: str) -> bool:
+        """Rename a parameter"""
+        try:
+            self.client.table('parameters').update({
+                'parameter_name': new_name,
+                'updated_at': datetime.now().isoformat()
+            }).eq('parameter_id', parameter_id).execute()
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error renaming parameter: {str(e)}")
+            return False
+    
+    def delete_parameter(self, parameter_id: str) -> bool:
+        """Delete a parameter"""
+        try:
+            self.client.table('parameters').delete().eq('parameter_id', parameter_id).execute()
+            return True
+            
+        except Exception as e:
+            st.error(f"Error deleting parameter: {str(e)}")
+            return False
 
 
 # Singleton pattern with caching
