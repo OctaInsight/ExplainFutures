@@ -1,6 +1,6 @@
 """
 Page 3: Data Cleaning and Preprocessing - FIXED
-Fixed: sorted() error on line 296
+Fixed: None check before accessing df_long
 """
 
 import streamlit as st
@@ -107,7 +107,7 @@ def load_data_from_database():
         st.session_state.df_clean = df_long.copy()
         st.session_state.data_loaded = True
         
-        # FIXED: Convert to list properly
+        # Convert to list properly
         variables = list(df_long['variable'].unique())
         variables.sort()
         st.session_state.value_columns = variables
@@ -223,7 +223,9 @@ def main():
             st.switch_page("pages/01_Home.py")
         st.stop()
     
-    # Load data from database
+    # ============================================================
+    # CRITICAL: Load data first, check success before continuing
+    # ============================================================
     if not st.session_state.get('data_loaded'):
         if not DB_AVAILABLE:
             st.error("❌ Database not available")
@@ -245,11 +247,28 @@ def main():
             st.success(f"✅ Loaded {len(st.session_state.df_long):,} data points")
             st.info(f"📊 {len(st.session_state.value_columns)} variables")
     
-    # Work with session state data
+    # ============================================================
+    # NOW we know data is loaded, safe to access
+    # ============================================================
+    
+    # FIXED: Check if df_long exists before accessing
+    if st.session_state.df_long is None:
+        st.error("❌ Data not loaded properly")
+        if st.button("🔄 Reload Page"):
+            st.session_state.data_loaded = False
+            st.rerun()
+        st.stop()
+    
     df_long = st.session_state.df_long
-    # FIXED: Convert to list properly
-    variables = list(df_long['variable'].unique())
-    variables.sort()
+    
+    # Get variables from session state (already loaded)
+    variables = st.session_state.get('value_columns', [])
+    
+    if not variables:
+        # Fallback: extract from df_long
+        variables = list(df_long['variable'].unique())
+        variables.sort()
+        st.session_state.value_columns = variables
     
     # Show unsaved changes warning
     if check_for_unsaved_changes():
