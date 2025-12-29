@@ -976,6 +976,19 @@ class SupabaseManager:
                 'updated_at': datetime.now().isoformat()
             }
             
+            # Add optional fields if they exist
+            if 'conversion_info' in health_data:
+                conversion_info = self.convert_timestamps_to_serializable(health_data['conversion_info'])
+                report_data['conversion_info'] = json.dumps(conversion_info)
+            
+            if 'warnings_list' in health_data:
+                warnings_list_data = self.convert_timestamps_to_serializable(health_data['warnings_list'])
+                report_data['warnings_list'] = json.dumps(warnings_list_data)
+            
+            if 'raw_health_report' in health_data:
+                raw_report = self.convert_timestamps_to_serializable(health_data['raw_health_report'])
+                report_data['raw_health_report'] = json.dumps(raw_report)
+            
             # Check if report exists
             existing = self.client.table('health_reports').select('report_id').eq(
                 'project_id', project_id
@@ -1014,6 +1027,16 @@ class SupabaseManager:
                 report['coverage_detail'] = json.loads(report.get('coverage_detail', '{}'))
                 report['issues_list'] = json.loads(report.get('issues_list', '[]'))
                 report['time_metadata'] = json.loads(report.get('time_metadata', '{}'))
+                
+                # Parse optional new fields
+                if report.get('conversion_info'):
+                    report['conversion_info'] = json.loads(report['conversion_info'])
+                
+                if report.get('warnings_list'):
+                    report['warnings_list'] = json.loads(report['warnings_list'])
+                
+                if report.get('raw_health_report'):
+                    report['raw_health_report'] = json.loads(report['raw_health_report'])
                 
                 return report
             
