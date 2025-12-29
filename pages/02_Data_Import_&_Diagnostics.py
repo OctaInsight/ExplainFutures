@@ -630,7 +630,7 @@ def render_database_health_report_full(health_report):
     
     st.markdown("---")
     
-    # Missing Values
+    # Missing Values - FIXED VERSION
     st.subheader("❓ Missing Values")
     
     missing_detail = health_report.get('missing_values_detail', {})
@@ -638,13 +638,22 @@ def render_database_health_report_full(health_report):
     if missing_detail:
         missing_data = []
         for var, info in missing_detail.items():
-            missing_pct = info['percentage']
+            # FIXED: Use .get() with fallback values
+            missing_count = info.get('count', 0)
+            total_count = info.get('total', info.get('total_count', 0))  # Try both keys
+            
+            # Calculate percentage safely
+            if total_count > 0:
+                missing_pct = missing_count / total_count
+            else:
+                missing_pct = info.get('percentage', 0)
+            
             status = "🔴 Critical" if missing_pct > 0.20 else "🟡 Warning" if missing_pct > 0.05 else "🟢 Good"
             
             missing_data.append({
                 "Variable": var,
-                "Missing Count": info['count'],
-                "Total": info['total'],
+                "Missing Count": missing_count,
+                "Total": total_count,  # ✅ Now safely retrieved
                 "Missing %": f"{missing_pct*100:.1f}%",
                 "Status": status
             })
