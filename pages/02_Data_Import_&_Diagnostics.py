@@ -143,41 +143,14 @@ def main():
             st.switch_page("pages/01_Home.py")
         st.stop()
     
-    # Initialize active view if not set
-    if 'active_view' not in st.session_state:
-        st.session_state.active_view = 'upload'
+    # Create tabs for Upload Data and Health Report
+    tab1, tab2 = st.tabs(["📤 Upload Data", "🔍 Data Health Report"])
     
-    # Check if we should switch to health report
-    if st.session_state.get('switch_to_health_report', False):
-        st.session_state.active_view = 'health'
-        st.session_state.switch_to_health_report = False
-    
-    # Create navigation tabs
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("📤 Upload Data", 
-                    type="primary" if st.session_state.active_view == 'upload' else "secondary",
-                    use_container_width=True,
-                    key="nav_upload"):
-            st.session_state.active_view = 'upload'
-            st.rerun()
-    
-    with col2:
-        if st.button("🔍 Data Health Report", 
-                    type="primary" if st.session_state.active_view == 'health' else "secondary",
-                    use_container_width=True,
-                    key="nav_health"):
-            st.session_state.active_view = 'health'
-            st.rerun()
-    
-    st.markdown("---")
-    
-    # Show the active view
-    if st.session_state.active_view == 'health':
-        render_health_report_section()
-    else:
+    with tab1:
         render_upload_section()
+    
+    with tab2:
+        render_health_report_section()
 
 
 def render_upload_section():
@@ -546,16 +519,7 @@ def process_data(df, time_column, value_columns, datetime_format):
     col3.metric("Time Range", f"{time_metadata['time_span']} days")
     
     st.markdown("---")
-    
-    # Navigation button to switch to health report tab
-    col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
-    
-    with col_nav2:
-        if st.button("📊 View Data Health Report →", type="primary", use_container_width=True, key="goto_health_report"):
-            # Force switch to health report tab by storing in session state
-            # We'll check this in the main function to switch tabs
-            st.session_state.switch_to_health_report = True
-            st.rerun()
+    st.info("📊 Switch to the **Data Health Report** tab above to view the analysis")
 
 
 def render_duplicate_management(duplicates):
@@ -763,11 +727,7 @@ def render_database_health_report_full(health_report):
     with col3:
         st.markdown("#### 📁 Upload New Data")
         
-        if st.button("📁 Upload More Data", 
-                     use_container_width=True,
-                     key="nav_upload"):
-            st.session_state.active_view = 'upload'
-            st.rerun()
+        st.info("💡 Switch to **Upload Data** tab to upload more files")
 
 
 def render_database_health_report(project_data):
@@ -879,9 +839,7 @@ def render_database_health_report(project_data):
     
     with col3:
         st.markdown("#### 📁 Upload New Data")
-        if st.button("📁 Upload More Data", use_container_width=True):
-            st.session_state.active_view = 'upload'
-            st.rerun()
+        st.info("💡 Switch to **Upload Data** tab to upload more files")
 
 
 def render_health_report_section():
@@ -910,11 +868,7 @@ def render_health_report_section():
             
             if not health_report.get('success'):
                 st.warning("⚠️ " + health_report.get('message', 'Could not generate health report'))
-                st.info("📤 Please upload and process data first")
-                
-                if st.button("📤 Go to Upload Data", type="primary", use_container_width=True):
-                    st.session_state.active_view = 'upload'
-                    st.rerun()
+                st.info("📤 Please upload and process data first. Switch to the **Upload Data** tab above.")
                 return
             
             st.success("✅ Health report generated from database!")
@@ -924,11 +878,7 @@ def render_health_report_section():
             
             if not health_report:
                 st.warning("⚠️ No data found")
-                st.info("📤 Please upload and process data first")
-                
-                if st.button("📤 Go to Upload Data", type="primary", use_container_width=True):
-                    st.session_state.active_view = 'upload'
-                    st.rerun()
+                st.info("📤 Please upload and process data first. Switch to the **Upload Data** tab above.")
                 return
             
             st.success("✅ Loaded existing health report from database")
@@ -939,11 +889,7 @@ def render_health_report_section():
     
     # If we have session state data, use the original health report
     if not has_session_data:
-        st.info("📤 Upload and process data first to see the health report")
-        
-        if st.button("📤 Go to Upload Data", type="primary", use_container_width=True):
-            st.session_state.active_view = 'upload'
-            st.rerun()
+        st.info("📤 Upload and process data first to see the health report. Switch to the **Upload Data** tab above.")
         return
     
     if st.session_state.health_report is None:
@@ -1079,13 +1025,7 @@ def render_health_report_section():
     with col3:
         st.markdown("#### 📁 Upload New Data")
         
-        if st.button("📁 Upload Different File", 
-                     use_container_width=True):
-            st.session_state.data_loaded = False
-            st.session_state.df_raw = None
-            st.session_state.df_long = None
-            st.session_state.health_report = None
-            st.rerun()
+        st.info("💡 Switch to **Upload Data** tab to upload more files")
 
 
 if __name__ == "__main__":
