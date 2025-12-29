@@ -112,7 +112,7 @@ def calculate_data_health_score(health_report):
     return score, category, issues
 
 
-def update_project_progress(stage: str = "data_import", page: int = 2, percentage: int = 10):
+def update_project_progress(stage: str = "data_import", page: int = 2, percentage: int = 7):
     """Update project progress in database and session state"""
     if not DB_AVAILABLE or not st.session_state.get('current_project_id'):
         return
@@ -143,14 +143,41 @@ def main():
             st.switch_page("pages/01_Home.py")
         st.stop()
     
-    # Create tabs
-    tab1, tab2 = st.tabs(["📤 Upload Data", "🔍 Data Health Report"])
+    # Initialize active view if not set
+    if 'active_view' not in st.session_state:
+        st.session_state.active_view = 'upload'
     
-    with tab1:
-        render_upload_section()
+    # Check if we should switch to health report
+    if st.session_state.get('switch_to_health_report', False):
+        st.session_state.active_view = 'health'
+        st.session_state.switch_to_health_report = False
     
-    with tab2:
+    # Create navigation tabs
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("📤 Upload Data", 
+                    type="primary" if st.session_state.active_view == 'upload' else "secondary",
+                    use_container_width=True,
+                    key="nav_upload"):
+            st.session_state.active_view = 'upload'
+            st.rerun()
+    
+    with col2:
+        if st.button("🔍 Data Health Report", 
+                    type="primary" if st.session_state.active_view == 'health' else "secondary",
+                    use_container_width=True,
+                    key="nav_health"):
+            st.session_state.active_view = 'health'
+            st.rerun()
+    
+    st.markdown("---")
+    
+    # Show the active view
+    if st.session_state.active_view == 'health':
         render_health_report_section()
+    else:
+        render_upload_section()
 
 
 def render_upload_section():
@@ -454,8 +481,8 @@ def process_data(df, time_column, value_columns, datetime_format):
     st.session_state.data_loaded = True
     st.session_state.preprocessing_applied = False
     
-    # Update project progress
-    update_project_progress(stage="data_imported", page=2, percentage=15)
+    # Update project progress (7% for step 1 of 13)
+    update_project_progress(stage="data_imported", page=2, percentage=7)
     
     progress_bar.progress(1.0)
     status.text("Complete!")
@@ -473,10 +500,15 @@ def process_data(df, time_column, value_columns, datetime_format):
     
     st.markdown("---")
     
-    # Navigation button
-    if st.button("📊 View Data Health Report →", type="primary", use_container_width=True):
-        st.session_state.active_tab = "health_report"
-        st.rerun()
+    # Navigation button to switch to health report tab
+    col_nav1, col_nav2, col_nav3 = st.columns([1, 2, 1])
+    
+    with col_nav2:
+        if st.button("📊 View Data Health Report →", type="primary", use_container_width=True, key="goto_health_report"):
+            # Force switch to health report tab by storing in session state
+            # We'll check this in the main function to switch tabs
+            st.session_state.switch_to_health_report = True
+            st.rerun()
 
 
 def render_health_report_section():
@@ -639,7 +671,7 @@ def render_health_report_section():
         if st.button("📊 Go to Visualization", 
                      use_container_width=True, 
                      type="primary" if primary_action == "visualize" else "secondary"):
-            update_project_progress(stage="exploration", page=4, percentage=20)
+            update_project_progress(stage="exploration", page=4, percentage=14)
             st.switch_page("pages/04_Exploration_and_Visualization.py")
     
     with col2:
@@ -650,7 +682,7 @@ def render_health_report_section():
         if st.button("🧹 Go to Data Cleaning", 
                      use_container_width=True,
                      type="primary" if primary_action == "clean" else "secondary"):
-            update_project_progress(stage="preprocessing", page=3, percentage=15)
+            update_project_progress(stage="preprocessing", page=3, percentage=7)
             st.switch_page("pages/03_Preprocessing.py")
     
     with col3:
