@@ -935,25 +935,44 @@ class SupabaseManager:
                 health_data.get('parameters_analyzed', [])
             )
             
+            # Helper function to ensure native Python types (not numpy)
+            def to_python_int(value):
+                """Convert to native Python int, handling numpy types"""
+                if value is None:
+                    return 0
+                # Handle numpy types
+                if hasattr(value, 'item'):
+                    value = value.item()
+                return int(float(value))
+            
+            def to_python_float(value):
+                """Convert to native Python float, handling numpy types"""
+                if value is None:
+                    return 0.0
+                # Handle numpy types
+                if hasattr(value, 'item'):
+                    value = value.item()
+                return float(value)
+            
             report_data = {
-                'project_id': project_id,
-                'health_score': float(health_data.get('health_score', 0) or 0),
-                'health_category': health_data.get('health_category', 'poor'),
-                'total_parameters': int(health_data.get('total_parameters', 0) or 0),
-                'total_data_points': int(health_data.get('total_data_points', 0) or 0),
-                'total_missing_values': int(health_data.get('total_missing_values', 0) or 0),
-                'missing_percentage': float(health_data.get('missing_percentage', 0) or 0),
-                'critical_issues': int(health_data.get('critical_issues', 0) or 0),
-                'warnings': int(health_data.get('warnings', 0) or 0),
-                'duplicate_timestamps': int(health_data.get('duplicate_timestamps', 0) or 0),
-                'outlier_count': int(health_data.get('outlier_count', 0) or 0),
+                'project_id': str(project_id),
+                'health_score': to_python_int(health_data.get('health_score', 0)),
+                'health_category': str(health_data.get('health_category', 'poor')),
+                'total_parameters': to_python_int(health_data.get('total_parameters', 0)),
+                'total_data_points': to_python_int(health_data.get('total_data_points', 0)),
+                'total_missing_values': to_python_int(health_data.get('total_missing_values', 0)),
+                'missing_percentage': to_python_float(health_data.get('missing_percentage', 0)),
+                'critical_issues': to_python_int(health_data.get('critical_issues', 0)),
+                'warnings': to_python_int(health_data.get('warnings', 0)),
+                'duplicate_timestamps': to_python_int(health_data.get('duplicate_timestamps', 0)),
+                'outlier_count': to_python_int(health_data.get('outlier_count', 0)),
                 'missing_values_detail': json.dumps(missing_values_detail),
                 'outliers_detail': json.dumps(outliers_detail),
                 'coverage_detail': json.dumps(coverage_detail),
                 'issues_list': json.dumps(issues_list),
                 'time_metadata': json.dumps(time_metadata),
                 'parameters_analyzed': parameters_analyzed,
-                'data_hash': data_hash,
+                'data_hash': str(data_hash),
                 'updated_at': datetime.now().isoformat()
             }
             
@@ -961,6 +980,11 @@ class SupabaseManager:
             existing = self.client.table('health_reports').select('report_id').eq(
                 'project_id', project_id
             ).order('created_at', desc=True).limit(1).execute()
+            
+            # Debug: Log the data types
+            st.write("Debug - Data types being sent:")
+            for key, value in report_data.items():
+                st.write(f"  {key}: {type(value).__name__} = {repr(value)[:100]}")
             
             if existing.data:
                 # Update existing report
