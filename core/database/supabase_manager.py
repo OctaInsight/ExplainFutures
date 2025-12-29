@@ -1,5 +1,5 @@
 """
-ExplainFutures - Supabase Database Manager (PLAINTEXT PASSWORD VERSION)
+ExplainFutures - Supabase Database Manager (WITH TIME-SERIES DATA STORAGE)
 ⚠️ WARNING: This version uses plaintext passwords - NOT RECOMMENDED for production!
 """
 
@@ -10,10 +10,11 @@ import uuid
 from datetime import datetime, timedelta
 import json
 import pandas as pd
+import numpy as np
 
 
 class SupabaseManager:
-    """Simplified Supabase manager with plaintext password authentication"""
+    """Supabase manager with time-series data storage capabilities"""
     
     def __init__(self):
         """Initialize Supabase client from Streamlit secrets"""
@@ -50,6 +51,207 @@ class SupabaseManager:
             return [self.convert_timestamps_to_serializable(item) for item in obj]
         else:
             return obj
+    
+    # ========================================================================
+    # TIME-SERIES DATA MANAGEMENT (NEW)
+    # ========================================================================
+    
+    def save_timeseries_data(self, project_id: str, df_long: pd.DataFrame, 
+                            data_source: str = 'original', 
+                            batch_size: int = 1000) -> bool:
+        """
+        Save time-series data to database in batches
+        
+        Args:
+            project_id: Project ID
+            df_long: DataFrame with columns: timestamp, variable, value
+            data_source: Data source identifier ('original', 'cleaned', etc.)
+            batch_size: Number of records to insert per batch
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # First, delete existing data for this project and source
+            self.client.table('timeseries_data').delete().eq(
+                'project_id', project_id
+            ).eq('data_source', data_source).execute()
+            
+            # Prepare data for insertion
+            records = []
+            
+            # Determine time column name
+            time_col = 'timestamp' if 'timestamp' in df_long.columns else 'time'
+            
+            for _, row in df_long.iterrows():
+                # Convert timestamp to ISO format
+                timestamp = row[time_col]
+                if isinstance(timestamp, pd.Timestamp):
+                    timestamp_str = timestamp.isoformat()
+                else:
+                    timestamp_str = pd.Timestamp(timestamp).isoformat()
+                
+                # Handle NaN values
+                value = row['value']
+                if pd.isna(value):
+                    value = None
+                else:
+                    value = float(value)
+                
+                records.append({
+                    'project_id': str(project_id),
+                    'timestamp': timestamp_str,
+                    'variable': str(row['variable']),
+                    'value': value,
+                    'data_source': data_source
+                })
+            
+            # Insert in batches
+            total_records = len(records)
+            inserted_count = 0
+            
+            for i in range(0, total_records, batch_size):
+                batch = records[i:i + batch_size]
+                self.client.table('timeseries_data').insert(batch).execute()
+                inserted_count += len(batch)
+            
+            st.success(f"✅ Saved {inserted_count:,} data points to database")
+            return True
+            
+        except Exception as e:
+            st.error(f"❌ Error saving time-series data: {str(e)}")
+            import traceback
+            st.error(traceback.format_exc())
+            return False
+    
+    def load_timeseries_data(self, project_id: str, 
+                            data_source: str = 'original',
+                            variables: List[str] = None) -> Optional[pd.DataFrame]:
+        """
+        Load time-series data from database
+        
+        Args:
+            project_id: Project ID
+            data_source: Data source identifier
+            variables: Optional list of specific variables to load
+        
+        Returns:
+            DataFrame in long format with columns: timestamp, variable, value
+        """
+        try:
+            # Build query
+            query = self.client.table('timeseries_data').select(
+                'timestamp, variable, value'
+            ).eq('project_id', project_id).eq('data_source', data_source)
+            
+            # Filter by variables if specified
+            if variables:
+                query = query.in_('variable', variables)
+            
+            # Execute query with pagination
+            all_data = []
+            offset = 0
+            limit = 1000
+            
+            while True:
+                result = query.order('timestamp').range(offset, offset + limit - 1).execute()
+                
+                if not result.data:
+                    break
+                
+                all_data.extend(result.data)
+                
+                if len(result.data) < limit:
+                    break
+                
+                offset += limit
+            
+            if not all_data:
+                return None
+            
+            # Convert to DataFrame
+            df = pd.DataFrame(all_data)
+            
+            # Convert timestamp to datetime
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            
+            # Sort by timestamp and variable
+            df = df.sort_values(['variable', 'timestamp']).reset_index(drop=True)
+            
+            return df
+            
+        except Exception as e:
+            st.error(f"❌ Error loading time-series data: {str(e)}")
+            return None
+    
+    def get_timeseries_summary(self, project_id: str, 
+                              data_source: str = 'original') -> Dict[str, Any]:
+        """
+        Get summary statistics for time-series data
+        
+        Returns:
+            Dictionary with summary statistics
+        """
+        try:
+            # Get count of records
+            count_result = self.client.table('timeseries_data').select(
+                'data_id', count='exact'
+            ).eq('project_id', project_id).eq('data_source', data_source).execute()
+            
+            total_records = count_result.count if hasattr(count_result, 'count') else 0
+            
+            # Get unique variables
+            vars_result = self.client.table('timeseries_data').select(
+                'variable'
+            ).eq('project_id', project_id).eq('data_source', data_source).execute()
+            
+            variables = list(set([r['variable'] for r in vars_result.data])) if vars_result.data else []
+            
+            return {
+                'total_records': total_records,
+                'variable_count': len(variables),
+                'variables': sorted(variables),
+                'data_source': data_source
+            }
+            
+        except Exception as e:
+            st.error(f"Error getting summary: {str(e)}")
+            return {
+                'total_records': 0,
+                'variable_count': 0,
+                'variables': [],
+                'data_source': data_source
+            }
+    
+    def delete_timeseries_data(self, project_id: str, 
+                              data_source: str = None,
+                              variables: List[str] = None) -> bool:
+        """
+        Delete time-series data
+        
+        Args:
+            project_id: Project ID
+            data_source: Optional specific data source to delete
+            variables: Optional specific variables to delete
+        
+        Returns:
+            True if successful
+        """
+        try:
+            query = self.client.table('timeseries_data').delete().eq('project_id', project_id)
+            
+            if data_source:
+                query = query.eq('data_source', data_source)
+            
+            if variables:
+                query = query.in_('variable', variables)
+            
+            query.execute()
+            return True
+            
+        except Exception as e:
+            st.error(f"Error deleting data: {str(e)}")
+            return False
     
     # ========================================================================
     # USER MANAGEMENT
@@ -486,7 +688,7 @@ class SupabaseManager:
     def delete_project(self, project_id: str, user_id: str) -> bool:
         """
         Soft delete project (marks as deleted, doesn't remove from database)
-        Also removes all collaborators when project is deleted
+        Also removes all collaborators and time-series data when project is deleted
         """
         try:
             # Verify ownership
@@ -506,15 +708,20 @@ class SupabaseManager:
                 'updated_at': datetime.now().isoformat()
             }).eq('project_id', project_id).execute()
             
-            # Remove all collaborators when project is deleted
+            # Remove all collaborators
             try:
                 self.client.table('project_collaborators').delete().eq('project_id', project_id).execute()
             except Exception as e:
                 st.warning(f"Note: Could not remove collaborators: {str(e)}")
             
-            # Update user's project count (only count active projects)
+            # Delete time-series data (CASCADE will handle this automatically if FK is set)
             try:
-                # Count active projects
+                self.delete_timeseries_data(project_id)
+            except Exception as e:
+                st.warning(f"Note: Could not delete time-series data: {str(e)}")
+            
+            # Update user's project count
+            try:
                 active_projects = self.client.table('projects').select(
                     'project_id', count='exact'
                 ).eq('owner_id', user_id).eq('status', 'active').execute()
@@ -597,7 +804,10 @@ class SupabaseManager:
                 st.error("Unauthorized")
                 return False
             
-            # Delete all related data first
+            # Delete time-series data first
+            self.delete_timeseries_data(project_id)
+            
+            # Delete collaborators
             self.client.table('project_collaborators').delete().eq('project_id', project_id).execute()
             
             # Finally delete the project
