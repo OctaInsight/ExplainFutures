@@ -797,6 +797,95 @@ class SupabaseManager:
         except Exception as e:
             st.error(f"Error deleting parameter: {str(e)}")
             return False
+    
+    # ========================================================================
+    # PROJECT STEP TRACKING
+    # ========================================================================
+    
+    def update_step_completion(self, project_id: str, step_key: str, completed: bool = True) -> bool:
+        """Update completion status of a specific workflow step"""
+        try:
+            # Get current step completion data
+            result = self.client.table('projects').select('step_completion').eq('project_id', project_id).execute()
+            
+            if not result.data:
+                return False
+            
+            # Get existing completion data or initialize empty dict
+            step_completion = result.data[0].get('step_completion', {})
+            if step_completion is None:
+                step_completion = {}
+            
+            # Update the specific step
+            step_completion[step_key] = completed
+            
+            # Save back to database
+            self.client.table('projects').update({
+                'step_completion': step_completion,
+                'updated_at': datetime.now().isoformat()
+            }).eq('project_id', project_id).execute()
+            
+            return True
+            
+        except Exception as e:
+            st.error(f"Error updating step completion: {str(e)}")
+            return False
+    
+    def get_step_completion(self, project_id: str) -> Dict[str, bool]:
+        """Get completion status of all workflow steps"""
+        try:
+            result = self.client.table('projects').select('step_completion').eq('project_id', project_id).execute()
+            
+            if result.data and result.data[0].get('step_completion'):
+                return result.data[0]['step_completion']
+            
+            return {}
+            
+        except Exception as e:
+            st.error(f"Error fetching step completion: {str(e)}")
+            return {}
+    
+    def load_project_data_for_health_report(self, project_id: str) -> Dict[str, Any]:
+        """Load all project data needed for health report from database"""
+        try:
+            # Get parameters
+            parameters = self.get_project_parameters(project_id)
+            
+            if not parameters:
+                return {
+                    'success': False,
+                    'message': 'No parameters found. Please upload data first.',
+                    'parameters': [],
+                    'has_data': False
+                }
+            
+            # Convert parameters to DataFrame-like structure for health report
+            # This simulates what would be in session state
+            param_summary = {
+                'parameters': parameters,
+                'variable_count': len(parameters),
+                'has_data': True,
+                'success': True
+            }
+            
+            # Calculate aggregate statistics
+            total_missing = sum(p.get('missing_count', 0) for p in parameters)
+            total_count = sum(p.get('total_count', 0) for p in parameters)
+            
+            param_summary['total_missing'] = total_missing
+            param_summary['total_count'] = total_count
+            param_summary['overall_missing_pct'] = total_missing / total_count if total_count > 0 else 0
+            
+            return param_summary
+            
+        except Exception as e:
+            st.error(f"Error loading project data: {str(e)}")
+            return {
+                'success': False,
+                'message': str(e),
+                'parameters': [],
+                'has_data': False
+            }
 
 
 # Singleton pattern with caching
