@@ -1,6 +1,10 @@
 """
-Page 3: Data Cleaning - FIXED
-Fixed: Properly checks if df_long is actually loaded (not just the flag)
+Page 3: Data Cleaning - COMPLETE WITH ALL FEATURES
+✅ Missing Values Treatment
+✅ Outlier Detection & Treatment
+✅ Data Transformations
+✅ Before/After Comparisons
+✅ Save to Database
 """
 
 import streamlit as st
@@ -107,12 +111,10 @@ def load_data_from_database():
         if df_long is None or len(df_long) == 0:
             return False
         
-        # Store in session
         st.session_state.df_long = df_long
         st.session_state.df_clean = df_long.copy()
         st.session_state.data_loaded = True
         
-        # Get variables
         variables = list(df_long['variable'].unique())
         variables.sort()
         st.session_state.value_columns = variables
@@ -165,7 +167,7 @@ def plot_comparison(df_original, df_modified, original_variable, new_variable, o
         ))
         
         fig.update_layout(
-            title=f"Before vs After: {original_variable} → {new_variable}",
+            title=f"Before vs After: {original_variable} → {new_variable}<br><sub>{operation_type}</sub>",
             xaxis_title="Time",
             yaxis_title="Value",
             hovermode='x unified',
@@ -190,8 +192,7 @@ def main():
             st.switch_page("pages/01_Home.py")
         st.stop()
     
-    # FIXED: Check if df_long actually exists AND is not None
-    # Don't just trust the data_loaded flag
+    # Check if df_long actually exists AND is not None
     needs_loading = (
         not st.session_state.get('data_loaded') or 
         st.session_state.get('df_long') is None
@@ -227,7 +228,6 @@ def main():
             
             st.success(f"✅ Loaded {len(st.session_state.df_long):,} data points")
     
-    # Now we know data is loaded
     df_long = st.session_state.df_long
     variables = st.session_state.get('value_columns', [])
     
@@ -241,9 +241,10 @@ def main():
     st.markdown("---")
     
     # Tabs
-    tab1, tab2, tab3 = st.tabs([
+    tab1, tab2, tab3, tab4 = st.tabs([
         "🔍 Missing Values",
-        "📊 Outliers", 
+        "📊 Outliers",
+        "🔄 Transformations",
         "📋 Summary & Save"
     ])
     
@@ -251,10 +252,12 @@ def main():
         handle_missing_values(df_long, variables)
     
     with tab2:
-        st.header("📊 Outlier Detection")
-        st.info("Coming soon - outlier detection and treatment")
+        handle_outliers(df_long, variables)
     
     with tab3:
+        handle_transformations(df_long, variables)
+    
+    with tab4:
         show_summary()
 
 
@@ -352,7 +355,7 @@ def handle_missing_values(df_long, variables):
             
             with col1:
                 options = [f"{o} → {n}" for o, n in zip(orig_vars, new_cols)]
-                idx = st.selectbox("Select", range(len(options)), format_func=lambda i: options[i])
+                idx = st.selectbox("Select", range(len(options)), format_func=lambda i: options[i], key="missing_compare")
                 
                 orig = orig_vars[idx]
                 cleaned = new_cols[idx]
@@ -406,6 +409,326 @@ def apply_missing_treatment(df, variables, method, suffix):
             cleaned_data['value'] = cleaned_data['value'].fillna(median_val)
         
         df_copy = pd.concat([df_copy, cleaned_data], ignore_index=True)
+    
+    return df_copy, new_columns
+
+
+def handle_outliers(df_long, variables):
+    """Detect and handle outliers"""
+    
+    st.header("Outlier Detection and Treatment")
+    st.subheader("📊 Outlier Detection Summary (IQR Method)")
+    
+    outlier_summary = []
+    for var in variables:
+        var_data = df_long[df_long['variable'] == var]['value'].dropna()
+        
+        if len(var_data) > 4:
+            Q1 = var_data.quantile(0.25)
+            Q3 = var_data.quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 3 * IQR
+            upper_bound = Q3 + 3 * IQR
+            
+            outliers = ((var_data < lower_bound) | (var_data > upper_bound)).sum()
+            outlier_pct = (outliers / len(var_data)) * 100
+            
+            outlier_summary.append({
+                "Variable": var,
+                "Outliers": outliers,
+                "Outlier %": f"{outlier_pct:.1f}%",
+                "Lower Bound": f"{lower_bound:.2f}",
+                "Upper Bound": f"{upper_bound:.2f}"
+            })
+    
+    if outlier_summary:
+        st.dataframe(pd.DataFrame(outlier_summary), use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    st.subheader("⚙️ Select Treatment Method")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        method = st.selectbox(
+            "Outlier treatment",
+            [
+                "None - Keep as is",
+                "Remove - Delete outlier rows",
+                "Cap - Clip to bounds",
+                "Transform - Log transformation",
+                "Winsorize - Replace with percentile values"
+            ],
+            key="outlier_method"
+        )
+    
+    with col2:
+        apply_to = st.multiselect(
+            "Apply to variables",
+            variables,
+            default=[],
+            key="outlier_vars"
+        )
+    
+    if method != "None - Keep as is":
+        suffix = st.text_input("Suffix for treated columns", value="_outlier_treated", key="outlier_suffix")
+    else:
+        suffix = "_outlier_treated"
+    
+    if st.button("✨ Apply Outlier Treatment", type="primary", key="apply_outlier_btn"):
+        if method != "None - Keep as is" and apply_to:
+            with st.spinner("Applying treatment..."):
+                df_modified, new_cols = apply_outlier_treatment(
+                    st.session_state.df_clean.copy(),
+                    apply_to,
+                    method,
+                    suffix
+                )
+                
+                add_to_cleaning_history("Outliers", method, apply_to, {"new_columns": new_cols})
+                
+                st.session_state.df_clean = df_modified
+                st.session_state.last_treatment = {
+                    'type': 'outlier',
+                    'method': method,
+                    'variables': apply_to,
+                    'new_columns': new_cols
+                }
+                
+                st.success(f"✅ Applied {method} to {len(apply_to)} variable(s)")
+                st.info(f"📝 Created: {', '.join(new_cols)}")
+                st.rerun()
+    
+    # Show comparison
+    if st.session_state.get('last_treatment', {}).get('type') == 'outlier':
+        st.markdown("---")
+        st.subheader("📈 Before/After Comparison")
+        
+        treatment = st.session_state.last_treatment
+        new_cols = treatment.get('new_columns', [])
+        orig_vars = treatment.get('variables', [])
+        
+        if new_cols and orig_vars:
+            col1, col2 = st.columns([1, 3])
+            
+            with col1:
+                options = [f"{o} → {n}" for o, n in zip(orig_vars, new_cols)]
+                idx = st.selectbox("Select", range(len(options)), format_func=lambda i: options[i], key="outlier_compare")
+                
+                orig = orig_vars[idx]
+                cleaned = new_cols[idx]
+            
+            with col2:
+                fig = plot_comparison(
+                    st.session_state.df_long,
+                    st.session_state.df_clean,
+                    orig,
+                    cleaned,
+                    "Outlier Treatment"
+                )
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+
+
+def apply_outlier_treatment(df, variables, method, suffix):
+    """Apply outlier treatment"""
+    df_copy = df.copy()
+    new_columns = []
+    
+    for var in variables:
+        new_var_name = f"{var}{suffix}"
+        new_columns.append(new_var_name)
+        
+        mask = df_copy['variable'] == var
+        original_data = df_copy[mask].copy()
+        treated_data = original_data.copy(deep=True)
+        treated_data['variable'] = new_var_name
+        
+        var_data = treated_data['value'].dropna()
+        
+        if len(var_data) > 4:
+            Q1 = var_data.quantile(0.25)
+            Q3 = var_data.quantile(0.75)
+            IQR = Q3 - Q1
+            lower_bound = Q1 - 3 * IQR
+            upper_bound = Q3 + 3 * IQR
+            
+            is_outlier = (treated_data['value'] < lower_bound) | (treated_data['value'] > upper_bound)
+            
+            if "Remove" in method:
+                treated_data = treated_data[~is_outlier]
+            elif "Cap" in method:
+                treated_data.loc[treated_data['value'] < lower_bound, 'value'] = lower_bound
+                treated_data.loc[treated_data['value'] > upper_bound, 'value'] = upper_bound
+            elif "Transform" in method:
+                min_val = treated_data['value'].min()
+                if pd.notna(min_val):
+                    if min_val <= 0:
+                        treated_data['value'] = np.log1p(treated_data['value'] - min_val + 1)
+                    else:
+                        treated_data['value'] = np.log(treated_data['value'])
+            elif "Winsorize" in method:
+                p05 = var_data.quantile(0.05)
+                p95 = var_data.quantile(0.95)
+                treated_data.loc[treated_data['value'] < p05, 'value'] = p05
+                treated_data.loc[treated_data['value'] > p95, 'value'] = p95
+        
+        df_copy = pd.concat([df_copy, treated_data], ignore_index=True)
+    
+    return df_copy, new_columns
+
+
+def handle_transformations(df_long, variables):
+    """Apply data transformations"""
+    
+    st.header("Data Transformations")
+    st.subheader("⚙️ Available Transformations")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        transformation = st.selectbox(
+            "Select transformation",
+            [
+                "None",
+                "Log - Natural logarithm",
+                "Log10 - Base 10 logarithm",
+                "Square Root",
+                "Standardize - Z-score normalization",
+                "Min-Max - Scale to 0-1"
+            ],
+            key="transform_type"
+        )
+    
+    with col2:
+        apply_to = st.multiselect(
+            "Apply to variables",
+            variables,
+            default=[],
+            key="transform_vars"
+        )
+    
+    if transformation != "None":
+        suffix = st.text_input(
+            "Suffix for transformed columns",
+            value=f"_{transformation.split('-')[0].strip().lower()}",
+            key="transform_suffix"
+        )
+    else:
+        suffix = "_transformed"
+    
+    if st.button("✨ Apply Transformation", type="primary", key="apply_transform_btn"):
+        if transformation != "None" and apply_to:
+            with st.spinner("Applying transformation..."):
+                df_modified, new_cols = apply_transformation(
+                    st.session_state.df_clean.copy(),
+                    apply_to,
+                    transformation,
+                    suffix
+                )
+                
+                add_to_cleaning_history("Transformation", transformation, apply_to, {"new_columns": new_cols})
+                
+                st.session_state.df_clean = df_modified
+                st.session_state.last_treatment = {
+                    'type': 'transform',
+                    'method': transformation,
+                    'variables': apply_to,
+                    'new_columns': new_cols
+                }
+                
+                st.success(f"✅ Created {len(new_cols)} transformed column(s)")
+                st.info(f"📝 New columns: {', '.join(new_cols)}")
+                st.rerun()
+    
+    # Show comparison
+    if st.session_state.get('last_treatment', {}).get('type') == 'transform':
+        st.markdown("---")
+        st.subheader("📈 Original vs Transformed")
+        
+        treatment = st.session_state.last_treatment
+        new_cols = treatment.get('new_columns', [])
+        orig_vars = treatment.get('variables', [])
+        
+        if new_cols and orig_vars:
+            col1, col2 = st.columns([1, 3])
+            
+            with col1:
+                options = [f"{o} → {n}" for o, n in zip(orig_vars, new_cols)]
+                idx = st.selectbox("Select", range(len(options)), format_func=lambda i: options[i], key="transform_compare")
+                
+                orig = orig_vars[idx]
+                transformed = new_cols[idx]
+            
+            with col2:
+                fig = plot_comparison(
+                    st.session_state.df_long,
+                    st.session_state.df_clean,
+                    orig,
+                    transformed,
+                    "Data Transformation"
+                )
+                if fig:
+                    st.plotly_chart(fig, use_container_width=True)
+
+
+def apply_transformation(df, variables, transformation, suffix):
+    """Apply transformation"""
+    df_copy = df.copy()
+    new_columns = []
+    
+    for var in variables:
+        new_var_name = f"{var}{suffix}"
+        new_columns.append(new_var_name)
+        
+        mask = df_copy['variable'] == var
+        original_data = df_copy[mask].copy()
+        transformed_data = original_data.copy(deep=True)
+        transformed_data['variable'] = new_var_name
+        
+        values = transformed_data['value'].dropna()
+        
+        if "Log -" in transformation:
+            min_val = values.min()
+            if pd.notna(min_val) and min_val <= 0:
+                shift_amount = abs(min_val) + 1
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                    np.log1p(transformed_data.loc[transformed_data['value'].notna(), 'value'] + shift_amount)
+            else:
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                    np.log(transformed_data.loc[transformed_data['value'].notna(), 'value'])
+        elif "Log10" in transformation:
+            min_val = values.min()
+            if pd.notna(min_val) and min_val <= 0:
+                shift_amount = abs(min_val) + 1
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                    np.log10(transformed_data.loc[transformed_data['value'].notna(), 'value'] + shift_amount)
+            else:
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                    np.log10(transformed_data.loc[transformed_data['value'].notna(), 'value'])
+        elif "Square Root" in transformation:
+            min_val = values.min()
+            if pd.notna(min_val) and min_val < 0:
+                shift_amount = abs(min_val)
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                    np.sqrt(transformed_data.loc[transformed_data['value'].notna(), 'value'] + shift_amount)
+            else:
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                    np.sqrt(transformed_data.loc[transformed_data['value'].notna(), 'value'])
+        elif "Standardize" in transformation:
+            mean = values.mean()
+            std = values.std()
+            if pd.notna(mean) and pd.notna(std) and std > 0:
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                    (transformed_data.loc[transformed_data['value'].notna(), 'value'] - mean) / std
+        elif "Min-Max" in transformation:
+            min_val = values.min()
+            max_val = values.max()
+            if pd.notna(min_val) and pd.notna(max_val) and max_val > min_val:
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                    (transformed_data.loc[transformed_data['value'].notna(), 'value'] - min_val) / (max_val - min_val)
+        
+        df_copy = pd.concat([df_copy, transformed_data], ignore_index=True)
     
     return df_copy, new_columns
 
