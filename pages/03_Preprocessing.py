@@ -584,6 +584,22 @@ def main():
         st.markdown("---")
 
 
+    # ---------------------------------------------------------------------
+    # 8) VERY BOTTOM: Navigation button to Data Visualization (inside main)
+    # ---------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("### ➡️ Next Step")
+
+    col_spacer, col_next = st.columns([3, 1])
+    with col_next:
+        if st.button(
+            "Go to Data Visualization →",
+            type="primary",
+            use_container_width=True,
+            key="go_to_dataviz_btn"
+        ):
+            st.switch_page("pages/04_Exploration_and_Visualization.py")
+
 # =============================================================================
 # TAB HANDLERS (unchanged except they rely on df_clean and history)
 # =============================================================================
@@ -1190,15 +1206,6 @@ def save_to_database():
             st.error(f"❌ Error: {str(e)}")
             import traceback
             st.code(traceback.format_exc())
-
-st.markdown("---")
-st.markdown("### ➡️ Next Step")
-
-col_next_spacer, col_next = st.columns([3, 1])
-
-with col_next:
-    if st.button("Go to Data Visualization", type="primary", use_container_width=True, key="go_to_dataviz_btn"):
-        st.switch_page("pages/04_Exploration_and_Visualization.py")
 
 
 if __name__ == "__main__":
