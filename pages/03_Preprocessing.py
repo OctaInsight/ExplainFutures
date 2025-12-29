@@ -394,7 +394,7 @@ def plot_comparison_advanced(df_all, var1, var2, title="Data Comparison"):
         st.error(f"Error creating plot: {str(e)}")
         return None
 
-    st.markdown("---")
+
 
 
 def plot_comparison(df_original, df_modified, original_variable, new_variable, operation_type):
@@ -540,7 +540,7 @@ def main():
         show_summary()
 
 
-
+    st.markdown("---")
     # ============================================================
     # FIXED 2: COMPARISON SECTION (Raw vs Cleaned from Database)
     # ============================================================
