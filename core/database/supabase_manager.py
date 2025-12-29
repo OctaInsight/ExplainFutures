@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any
 import uuid
 from datetime import datetime, timedelta
 import json
+import pandas as pd
 
 
 class SupabaseManager:
@@ -35,6 +36,20 @@ class SupabaseManager:
             st.error(f"❌ Database connection failed: {str(e)}")
             st.info("💡 Try updating Supabase: pip install supabase==1.0.4")
             raise
+    
+    def convert_timestamps_to_serializable(self, obj):
+        """
+        Recursively convert pandas Timestamps and datetime objects to ISO format strings
+        for JSON serialization
+        """
+        if isinstance(obj, (pd.Timestamp, datetime)):
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {key: self.convert_timestamps_to_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self.convert_timestamps_to_serializable(item) for item in obj]
+        else:
+            return obj
     
     # ========================================================================
     # USER MANAGEMENT
