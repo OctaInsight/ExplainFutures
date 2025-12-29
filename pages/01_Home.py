@@ -6,15 +6,13 @@ Project selection and management with multi-user support
 import streamlit as st
 from datetime import datetime
 import time
-from pathlib import Path
 
 # Page configuration
 st.set_page_config(
     page_title="Dashboard - ExplainFutures",
-    page_icon=str(Path("assets/logo_small.png")),
+    page_icon="🏠",
     layout="wide"
 )
-
 
 # Import database manager
 try:
@@ -118,6 +116,7 @@ def create_new_project():
                     st.success(f"✅ Project created: {project['project_code']}")
                     st.session_state.current_project_id = project['project_id']
                     time.sleep(1)
+                    # Clear the form and return to project list
                     st.rerun()
                 else:
                     st.error("❌ Failed to create project")
