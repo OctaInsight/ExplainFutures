@@ -521,6 +521,218 @@ def process_data(df, time_column, value_columns, datetime_format):
             st.rerun()
 
 
+def render_duplicate_management(duplicates):
+    """Render duplicate parameter management UI"""
+    st.warning(f"⚠️ Found {len(duplicates)} duplicate parameter(s)")
+    
+    with st.expander("🔍 Manage Duplicate Parameters"):
+        for param_name, param_list in duplicates.items():
+            st.markdown(f"### Parameter: **{param_name}**")
+            st.caption(f"Found {len(param_list)} instances")
+            
+            for i, param in enumerate(param_list):
+                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+                
+                with col1:
+                    st.text(f"Instance {i+1}: {param['parameter_id'][:8]}...")
+                    st.caption(f"Updated: {param['updated_at'][:10]}")
+                
+                with col2:
+                    if st.button("Keep", key=f"keep_{param['parameter_id']}"):
+                        if db.merge_parameters([p['parameter_id'] for p in param_list], param['parameter_id']):
+                            st.success("Merged!")
+                            time.sleep(1)
+                            st.rerun()
+                
+                with col3:
+                    new_name = st.text_input("Rename", key=f"rename_{param['parameter_id']}", placeholder="New name")
+                    if new_name and st.button("✓", key=f"rename_btn_{param['parameter_id']}"):
+                        if db.rename_parameter(param['parameter_id'], new_name):
+                            st.success("Renamed!")
+                            time.sleep(1)
+                            st.rerun()
+                
+                with col4:
+                    if st.button("Delete", key=f"delete_{param['parameter_id']}"):
+                        if db.delete_parameter(param['parameter_id']):
+                            st.success("Deleted!")
+                            time.sleep(1)
+                            st.rerun()
+            
+            st.markdown("---")
+
+
+def render_database_health_report_full(health_report):
+    """Render complete health report from database with full metrics"""
+    
+    st.header("📊 Data Health Report")
+    
+    # Health Score Dashboard
+    st.markdown("### Overall Data Health")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col1:
+        health_score = health_report['health_score']
+        health_category = health_report['health_category']
+        
+        if health_category == "excellent":
+            score_color = "🟢"
+            score_text = "Excellent"
+        elif health_category == "good":
+            score_color = "🟡"
+            score_text = "Good"
+        elif health_category == "fair":
+            score_color = "🟠"
+            score_text = "Fair"
+        else:
+            score_color = "🔴"
+            score_text = "Poor"
+        
+        st.metric("Health Score", f"{health_score}/100")
+        st.markdown(f"### {score_color} {score_text}")
+    
+    with col2:
+        issues = health_report.get('issues_list', [])
+        
+        if issues:
+            st.markdown("**Issues Detected:**")
+            for issue in issues[:5]:
+                st.caption(issue)
+            if len(issues) > 5:
+                st.caption(f"... and {len(issues) - 5} more issues")
+        else:
+            st.success("✅ No significant issues detected!")
+    
+    with col3:
+        st.metric("Parameters", health_report['total_parameters'])
+        st.metric("Data Points", health_report['total_data_points'])
+    
+    st.markdown("---")
+    
+    # Missing Values
+    st.subheader("❓ Missing Values")
+    
+    missing_detail = health_report.get('missing_values_detail', {})
+    
+    if missing_detail:
+        missing_data = []
+        for var, info in missing_detail.items():
+            missing_pct = info['percentage']
+            status = "🔴 Critical" if missing_pct > 0.20 else "🟡 Warning" if missing_pct > 0.05 else "🟢 Good"
+            
+            missing_data.append({
+                "Variable": var,
+                "Missing Count": info['count'],
+                "Total": info['total'],
+                "Missing %": f"{missing_pct*100:.1f}%",
+                "Status": status
+            })
+        
+        missing_df = pd.DataFrame(missing_data)
+        st.dataframe(missing_df, use_container_width=True, hide_index=True)
+        
+        # Overall summary
+        overall_pct = health_report['missing_percentage']
+        
+        if overall_pct > 0.20:
+            st.error(f"⚠️ Overall missing data: {overall_pct*100:.1f}% - Consider data cleaning")
+        elif overall_pct > 0.05:
+            st.warning(f"ℹ️ Overall missing data: {overall_pct*100:.1f}% - Monitor quality")
+        else:
+            st.success(f"✅ Overall missing data: {overall_pct*100:.1f}% - Good quality")
+    else:
+        st.success("✅ No missing values detected!")
+    
+    st.markdown("---")
+    
+    # Parameters table
+    st.subheader("📋 Parameters Overview")
+    
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        parameters = db.get_project_parameters(st.session_state.current_project_id)
+        
+        param_table = []
+        for param in parameters:
+            param_table.append({
+                "Parameter": param['parameter_name'],
+                "Type": param.get('data_type', 'numeric'),
+                "Min": f"{param.get('min_value', 0):.2f}" if param.get('min_value') is not None else "N/A",
+                "Max": f"{param.get('max_value', 0):.2f}" if param.get('max_value') is not None else "N/A",
+                "Mean": f"{param.get('mean_value', 0):.2f}" if param.get('mean_value') is not None else "N/A",
+                "Missing": f"{param.get('missing_count', 0):,}",
+                "Total": f"{param.get('total_count', 0):,}"
+            })
+        
+        param_df = pd.DataFrame(param_table)
+        st.dataframe(param_df, use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    
+    # Check for duplicates
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        duplicates = db.check_duplicate_parameters(st.session_state.current_project_id)
+        
+        if duplicates:
+            render_duplicate_management(duplicates)
+    
+    st.markdown("---")
+    
+    # Navigation
+    st.header("🎯 What's Next?")
+    
+    # Recommendations based on health score
+    if health_score >= 85:
+        st.success("**Excellent Data Quality! ✨** Your data is ready for analysis.")
+        primary_action = "visualize"
+    elif health_score >= 70:
+        st.info("**Good Data Quality 👍** Minor issues detected.")
+        primary_action = "either"
+    elif health_score >= 50:
+        st.warning("**Fair Data Quality ⚠️** Consider cleaning the data first.")
+        primary_action = "clean"
+    else:
+        st.error("**Poor Data Quality 🔴** Data cleaning strongly recommended.")
+        primary_action = "clean"
+    
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("#### 📊 Visualize Data")
+        if health_score >= 70:
+            st.success("✅ Recommended")
+        
+        if st.button("📊 Go to Visualization", 
+                     use_container_width=True, 
+                     type="primary" if primary_action == "visualize" else "secondary",
+                     key="nav_viz"):
+            update_project_progress(stage="exploration", page=4, percentage=14)
+            st.switch_page("pages/04_Exploration_and_Visualization.py")
+    
+    with col2:
+        st.markdown("#### 🧹 Clean Data")
+        if health_score < 70:
+            st.warning("⚠️ Recommended")
+        
+        if st.button("🧹 Go to Data Cleaning", 
+                     use_container_width=True,
+                     type="primary" if primary_action == "clean" else "secondary",
+                     key="nav_clean"):
+            update_project_progress(stage="preprocessing", page=3, percentage=7)
+            st.switch_page("pages/03_Preprocessing.py")
+    
+    with col3:
+        st.markdown("#### 📁 Upload New Data")
+        
+        if st.button("📁 Upload More Data", 
+                     use_container_width=True,
+                     key="nav_upload"):
+            st.session_state.active_view = 'upload'
+            st.rerun()
+
+
 def render_database_health_report(project_data):
     """Render health report based on database data only"""
     
@@ -648,89 +860,73 @@ def render_health_report_section():
     # Check if data is loaded in session state OR if we have data in database
     has_session_data = st.session_state.get('data_loaded', False)
     
-    if not has_session_data:
-        # Try to load data from database
-        if DB_AVAILABLE and st.session_state.get('current_project_id'):
-            st.info("📊 Loading data from database...")
+    if not has_session_data and DB_AVAILABLE and st.session_state.get('current_project_id'):
+        # Try to load or generate health report from database
+        st.info("📊 Checking for existing health report...")
+        
+        # Check if we need to update the report
+        needs_update = db.needs_health_report_update(st.session_state.current_project_id)
+        
+        if needs_update:
+            with st.spinner("🔄 Generating health report from database parameters..."):
+                health_report = db.generate_health_report_from_parameters(st.session_state.current_project_id)
             
-            project_data = db.load_project_data_for_health_report(st.session_state.current_project_id)
-            
-            if not project_data.get('has_data', False):
-                st.warning("⚠️ No data found in database")
-                st.info("📤 Please upload and process data first to see the health report")
+            if not health_report.get('success'):
+                st.warning("⚠️ " + health_report.get('message', 'Could not generate health report'))
+                st.info("📤 Please upload and process data first")
                 
-                # Button to go back to upload
                 if st.button("📤 Go to Upload Data", type="primary", use_container_width=True):
                     st.session_state.active_view = 'upload'
                     st.rerun()
                 return
             
-            # We have data from database - show summary
-            st.success(f"✅ Loaded {project_data['variable_count']} parameters from database")
-            
-            # Display database-based health report
-            render_database_health_report(project_data)
-            return
+            st.success("✅ Health report generated from database!")
         else:
-            st.info("📤 Upload and process data first to see the health report")
-            return
+            # Load existing report
+            health_report = db.get_health_report(st.session_state.current_project_id)
+            
+            if not health_report:
+                st.warning("⚠️ No data found")
+                st.info("📤 Please upload and process data first")
+                
+                if st.button("📤 Go to Upload Data", type="primary", use_container_width=True):
+                    st.session_state.active_view = 'upload'
+                    st.rerun()
+                return
+            
+            st.success("✅ Loaded existing health report from database")
+        
+        # Display the health report
+        render_database_health_report_full(health_report)
+        return
     
     # If we have session state data, use the original health report
+    if not has_session_data:
+        st.info("📤 Upload and process data first to see the health report")
+        
+        if st.button("📤 Go to Upload Data", type="primary", use_container_width=True):
+            st.session_state.active_view = 'upload'
+            st.rerun()
+        return
+    
     if st.session_state.health_report is None:
         st.warning("⚠️ No health report available")
         return
     
     st.header("Data Health Report")
     
-    # Load parameters from database
+    # Load parameters from database for duplicate checking
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
         db_parameters = db.get_project_parameters(st.session_state.current_project_id)
         
         if db_parameters:
-            st.info(f"📊 Loaded {len(db_parameters)} parameters from database")
+            st.info(f"📊 Total parameters in database: {len(db_parameters)}")
             
             # Check for duplicates
             duplicates = db.check_duplicate_parameters(st.session_state.current_project_id)
             
             if duplicates:
-                st.warning(f"⚠️ Found {len(duplicates)} duplicate parameter(s)")
-                
-                with st.expander("🔍 Manage Duplicate Parameters"):
-                    for param_name, param_list in duplicates.items():
-                        st.markdown(f"### Parameter: **{param_name}**")
-                        st.caption(f"Found {len(param_list)} instances")
-                        
-                        for i, param in enumerate(param_list):
-                            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-                            
-                            with col1:
-                                st.text(f"Instance {i+1}: {param['parameter_id'][:8]}...")
-                                st.caption(f"Updated: {param['updated_at'][:10]}")
-                            
-                            with col2:
-                                if st.button("Keep", key=f"keep_{param['parameter_id']}"):
-                                    other_ids = [p['parameter_id'] for p in param_list if p['parameter_id'] != param['parameter_id']]
-                                    if db.merge_parameters(param_list, param['parameter_id']):
-                                        st.success("Merged!")
-                                        time.sleep(1)
-                                        st.rerun()
-                            
-                            with col3:
-                                new_name = st.text_input("Rename", key=f"rename_{param['parameter_id']}", placeholder="New name")
-                                if new_name and st.button("✓", key=f"rename_btn_{param['parameter_id']}"):
-                                    if db.rename_parameter(param['parameter_id'], new_name):
-                                        st.success("Renamed!")
-                                        time.sleep(1)
-                                        st.rerun()
-                            
-                            with col4:
-                                if st.button("Delete", key=f"delete_{param['parameter_id']}"):
-                                    if db.delete_parameter(param['parameter_id']):
-                                        st.success("Deleted!")
-                                        time.sleep(1)
-                                        st.rerun()
-                        
-                        st.markdown("---")
+                render_duplicate_management(duplicates)
     
     # Rest of health report (existing code)
     health = st.session_state.health_report
