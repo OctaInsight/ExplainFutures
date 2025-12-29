@@ -481,6 +481,43 @@ def process_data(df, time_column, value_columns, datetime_format):
     st.session_state.data_loaded = True
     st.session_state.preprocessing_applied = False
     
+    # Step 6: Save health report to database
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        status.text("Saving health report to database...")
+        progress_bar.progress(0.95)
+        
+        # Calculate health score
+        health_score, health_category, issues = calculate_data_health_score(health_report)
+        
+        # Prepare health report data for database
+        health_data = {
+            'health_score': health_score,
+            'health_category': health_category,
+            'total_parameters': len(value_columns),
+            'total_data_points': len(df_long),
+            'total_missing_values': sum(info['count'] for info in health_report.get('missing_values', {}).values()),
+            'missing_percentage': sum(info['count'] for info in health_report.get('missing_values', {}).values()) / len(df_long) if len(df_long) > 0 else 0,
+            'critical_issues': len([i for i in issues if 'critical' in i.lower()]),
+            'warnings': len([i for i in issues if 'warning' in i.lower() or '⚠️' in i]),
+            'duplicate_timestamps': time_metadata.get('duplicate_count', 0),
+            'outlier_count': sum(info['count'] for info in health_report.get('outliers', {}).values()),
+            'missing_values_detail': health_report.get('missing_values', {}),
+            'outliers_detail': health_report.get('outliers', {}),
+            'coverage_detail': health_report.get('coverage', {}),
+            'issues_list': issues,
+            'time_metadata': {
+                'min_time': time_metadata['min_time'].isoformat() if 'min_time' in time_metadata else None,
+                'max_time': time_metadata['max_time'].isoformat() if 'max_time' in time_metadata else None,
+                'time_span': time_metadata.get('time_span', 0),
+                'duplicate_count': time_metadata.get('duplicate_count', 0)
+            },
+            'parameters_analyzed': value_columns
+        }
+        
+        # Save to database
+        if db.save_health_report(st.session_state.current_project_id, health_data):
+            st.success("✅ Health report saved to database")
+    
     # Update project progress (7% for step 1 of 13)
     update_project_progress(stage="data_imported", page=2, percentage=7)
     
