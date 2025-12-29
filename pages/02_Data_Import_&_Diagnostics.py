@@ -462,7 +462,8 @@ def process_data(df, time_column, value_columns, datetime_format):
         # Calculate health score
         health_score, health_category, issues = calculate_data_health_score(health_report)
         
-        # Prepare health report data for database
+        # Prepare COMPLETE health report data for database
+        # Include ALL original health_report fields plus computed ones
         health_data = {
             'health_score': health_score,
             'health_category': health_category,
@@ -474,16 +475,21 @@ def process_data(df, time_column, value_columns, datetime_format):
             'warnings': len([i for i in issues if 'warning' in i.lower() or '⚠️' in i]),
             'duplicate_timestamps': time_metadata.get('duplicate_count', 0),
             'outlier_count': sum(info['count'] for info in health_report.get('outliers', {}).values()),
+            
+            # Full details from original health_report
             'missing_values_detail': health_report.get('missing_values', {}),
             'outliers_detail': health_report.get('outliers', {}),
             'coverage_detail': health_report.get('coverage', {}),
             'issues_list': issues,
-            'time_metadata': {
-                'min_time': time_metadata['min_time'].isoformat() if 'min_time' in time_metadata else None,
-                'max_time': time_metadata['max_time'].isoformat() if 'max_time' in time_metadata else None,
-                'time_span': time_metadata.get('time_span', 0),
-                'duplicate_count': time_metadata.get('duplicate_count', 0)
-            },
+            
+            # Complete time_metadata (keep all fields)
+            'time_metadata': time_metadata,
+            
+            # Additional fields from health_report that might be present
+            'conversion_info': health_report.get('conversion_info', {}),
+            'warnings_list': health_report.get('warnings', []),
+            'raw_health_report': health_report,  # Store the entire original report
+            
             'parameters_analyzed': value_columns
         }
         
@@ -646,6 +652,47 @@ def render_database_health_report_full(health_report):
         st.success("✅ No missing values detected!")
     
     st.markdown("---")
+    
+    # Time Series Information
+    time_meta = health_report.get('time_metadata', {})
+    if time_meta:
+        st.subheader("⏰ Time Series Information")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if 'min_time' in time_meta and time_meta['min_time']:
+                min_time_str = time_meta['min_time']
+                if isinstance(min_time_str, str):
+                    from datetime import datetime
+                    min_time = datetime.fromisoformat(min_time_str.replace('Z', '+00:00'))
+                    st.metric("Start Date", min_time.strftime("%Y-%m-%d"))
+                else:
+                    st.metric("Start Date", str(min_time_str)[:10])
+            
+            if 'max_time' in time_meta and time_meta['max_time']:
+                max_time_str = time_meta['max_time']
+                if isinstance(max_time_str, str):
+                    from datetime import datetime
+                    max_time = datetime.fromisoformat(max_time_str.replace('Z', '+00:00'))
+                    st.metric("End Date", max_time.strftime("%Y-%m-%d"))
+                else:
+                    st.metric("End Date", str(max_time_str)[:10])
+        
+        with col2:
+            if 'time_span' in time_meta:
+                st.metric("Time Span", f"{time_meta['time_span']} days")
+            if 'estimated_frequency' in time_meta:
+                st.metric("Frequency", time_meta['estimated_frequency'])
+        
+        with col3:
+            dup_count = time_meta.get('duplicate_count', 0)
+            if dup_count > 0:
+                st.metric("Duplicate Timestamps", dup_count, delta="Warning", delta_color="inverse")
+            else:
+                st.metric("Duplicate Timestamps", "0", delta="Good", delta_color="normal")
+        
+        st.markdown("---")
     
     # Parameters table
     st.subheader("📋 Parameters Overview")
