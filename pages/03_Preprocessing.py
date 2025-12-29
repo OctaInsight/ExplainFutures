@@ -514,6 +514,31 @@ def main():
 
     st.markdown("---")
 
+
+    # ============================================================
+    # TABS
+    # ============================================================
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🔍 Missing Values",
+        "📊 Outliers",
+        "🔄 Transformations",
+        "📋 Summary"
+    ])
+
+    with tab1:
+        handle_missing_values(df_long, raw_vars)
+
+    with tab2:
+        handle_outliers(df_long, raw_vars)
+
+    with tab3:
+        handle_transformations(df_long, raw_vars)
+
+    with tab4:
+        show_summary()
+
+
+
     # ============================================================
     # FIXED 2: COMPARISON SECTION (Raw vs Cleaned from Database)
     # ============================================================
@@ -555,28 +580,6 @@ def main():
                 st.warning("No data to compare")
 
         st.markdown("---")
-
-    # ============================================================
-    # TABS
-    # ============================================================
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🔍 Missing Values",
-        "📊 Outliers",
-        "🔄 Transformations",
-        "📋 Summary"
-    ])
-
-    with tab1:
-        handle_missing_values(df_long, raw_vars)
-
-    with tab2:
-        handle_outliers(df_long, raw_vars)
-
-    with tab3:
-        handle_transformations(df_long, raw_vars)
-
-    with tab4:
-        show_summary()
 
 
 # =============================================================================
