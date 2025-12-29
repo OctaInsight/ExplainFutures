@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Any
 import uuid
 from datetime import datetime, timedelta
 import json
+import pandas as pd
 
 
 class SupabaseManager:
@@ -35,6 +36,20 @@ class SupabaseManager:
             st.error(f"❌ Database connection failed: {str(e)}")
             st.info("💡 Try updating Supabase: pip install supabase==1.0.4")
             raise
+    
+    def convert_timestamps_to_serializable(self, obj):
+        """
+        Recursively convert pandas Timestamps and datetime objects to ISO format strings
+        for JSON serialization
+        """
+        if isinstance(obj, (pd.Timestamp, datetime)):
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {key: self.convert_timestamps_to_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self.convert_timestamps_to_serializable(item) for item in obj]
+        else:
+            return obj
     
     # ========================================================================
     # USER MANAGEMENT
@@ -900,6 +915,9 @@ class SupabaseManager:
             param_string = json.dumps(sorted([p['parameter_name'] for p in parameters]))
             data_hash = hashlib.md5(param_string.encode()).hexdigest()
             
+            # Convert timestamps in time_metadata before serialization
+            time_metadata = self.convert_timestamps_to_serializable(health_data.get('time_metadata', {}))
+            
             report_data = {
                 'project_id': project_id,
                 'health_score': health_data.get('health_score', 0),
@@ -916,7 +934,7 @@ class SupabaseManager:
                 'outliers_detail': json.dumps(health_data.get('outliers_detail', {})),
                 'coverage_detail': json.dumps(health_data.get('coverage_detail', {})),
                 'issues_list': json.dumps(health_data.get('issues_list', [])),
-                'time_metadata': json.dumps(health_data.get('time_metadata', {})),
+                'time_metadata': json.dumps(time_metadata),
                 'parameters_analyzed': health_data.get('parameters_analyzed', []),
                 'data_hash': data_hash,
                 'updated_at': datetime.now().isoformat()
