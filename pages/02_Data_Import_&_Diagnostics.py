@@ -143,6 +143,11 @@ def main():
             st.switch_page("pages/01_Home.py")
         st.stop()
     
+    # Load project data if not already loaded
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
+        from core.utils.project_loader import ensure_project_data_loaded
+        ensure_project_data_loaded(st.session_state.current_project_id, db)
+    
     # Create tabs for Upload Data and Health Report
     tab1, tab2 = st.tabs(["📤 Upload Data", "🔍 Data Health Report"])
     
@@ -899,10 +904,25 @@ def render_health_report_section():
         for key, value in step_completion.items():
             st.session_state[key] = value
     
-    # Check if data is loaded in session state OR if we have data in database
+    # Check if we have health report in session state (loaded from database or just processed)
+    has_session_health_report = st.session_state.get('health_report') is not None
     has_session_data = st.session_state.get('data_loaded', False)
     
-    if not has_session_data and DB_AVAILABLE and st.session_state.get('current_project_id'):
+    # If we have health report in session state, use it
+    if has_session_health_report:
+        health_report = st.session_state.health_report
+        
+        # Check if it's the full report or database report
+        if 'raw_health_report' in health_report:
+            # It's from database - render database version
+            render_database_health_report_full(health_report)
+        else:
+            # It's the original session state version - render full version
+            render_session_health_report()
+        return
+    
+    # No session state - try to load from database
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
         # Try to load or generate health report from database
         st.info("📊 Checking for existing health report...")
         
@@ -930,14 +950,19 @@ def render_health_report_section():
             
             st.success("✅ Loaded existing health report from database")
         
+        # Store in session state for future use
+        st.session_state.health_report = health_report
+        
         # Display the health report
         render_database_health_report_full(health_report)
         return
     
-    # If we have session state data, use the original health report
-    if not has_session_data:
-        st.info("📤 Upload and process data first to see the health report. Switch to the **Upload Data** tab above.")
-        return
+    # No data available at all
+    st.info("📤 Upload and process data first to see the health report. Switch to the **Upload Data** tab above.")
+
+
+def render_session_health_report():
+    """Render health report from original session state (just after processing)"""
     
     if st.session_state.health_report is None:
         st.warning("⚠️ No health report available")
