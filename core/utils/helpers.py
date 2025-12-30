@@ -1,199 +1,33 @@
+# core/utils/helpers.py
+
 """
 Utility helper functions for ExplainFutures
-Display functions, data detection, and formatting utilities
+Merged helper utilities (display, formatting, validation, detection, misc).
+This file is intended to replace the old core/utils.py module content.
 """
 
-import streamlit as st
-import pandas as pd
-from typing import List
+from __future__ import annotations
 
-
-# ============================================================================
-# Display Functions
-# ============================================================================
-
-def display_error(title: str, message: str = None):
-    """Display error message"""
-    if message:
-        st.error(f"**{title}**\n\n{message}")
-    else:
-        st.error(title)
-
-
-def display_success(message: str):
-    """Display success message"""
-    st.success(message)
-
-
-def display_warning(message: str):
-    """Display warning message"""
-    st.warning(message)
-
-
-def display_info(message: str):
-    """Display info message"""
-    st.info(message)
-
-
-# ============================================================================
-# Color Functions (ADDED)
-# ============================================================================
-
-def get_color_for_index(index: int) -> str:
-    """
-    Get a color from a predefined palette based on index
-    
-    Args:
-        index: Integer index (will wrap around if exceeds palette size)
-    
-    Returns:
-        Hex color string
-    """
-    # Define a nice color palette
-    colors = [
-        "#1f77b4",  # Blue
-        "#ff7f0e",  # Orange
-        "#2ca02c",  # Green
-        "#d62728",  # Red
-        "#9467bd",  # Purple
-        "#8c564b",  # Brown
-        "#e377c2",  # Pink
-        "#7f7f7f",  # Gray
-        "#bcbd22",  # Olive
-        "#17becf",  # Cyan
-        "#aec7e8",  # Light Blue
-        "#ffbb78",  # Light Orange
-        "#98df8a",  # Light Green
-        "#ff9896",  # Light Red
-        "#c5b0d5",  # Light Purple
-    ]
-    
-    # Wrap around if index exceeds palette size
-    return colors[index % len(colors)]
-
-
-# ============================================================================
-# Data Detection Functions
-# ============================================================================
-
-def detect_datetime_columns(df: pd.DataFrame) -> List[str]:
-    """
-    Detect columns that might contain datetime data
-    
-    Returns list of column names that are likely datetime columns
-    """
-    datetime_candidates = []
-    
-    for col in df.columns:
-        # Check if column is already datetime
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            datetime_candidates.append(col)
-            continue
-        
-        # Check if column name suggests it's a date/time
-        col_lower = str(col).lower()
-        if any(keyword in col_lower for keyword in ['date', 'time', 'timestamp', 'day', 'month', 'year']):
-            datetime_candidates.append(col)
-            continue
-        
-        # Try to parse a sample as datetime
-        if df[col].dtype == 'object':
-            sample = df[col].dropna().head(10)
-            if len(sample) > 0:
-                try:
-                    pd.to_datetime(sample, errors='coerce')
-                    if pd.to_datetime(sample, errors='coerce').notna().sum() > len(sample) * 0.5:
-                        datetime_candidates.append(col)
-                except:
-                    pass
-    
-    return datetime_candidates
-
-
-def detect_numeric_columns(df: pd.DataFrame) -> List[str]:
-    """
-    Detect columns that contain numeric data
-    
-    Returns list of column names that are numeric or can be converted to numeric
-    """
-    numeric_candidates = []
-    
-    for col in df.columns:
-        # Check if column is already numeric
-        if pd.api.types.is_numeric_dtype(df[col]):
-            numeric_candidates.append(col)
-            continue
-        
-        # Try to convert to numeric
-        if df[col].dtype == 'object':
-            sample = df[col].dropna().head(100)
-            if len(sample) > 0:
-                try:
-                    converted = pd.to_numeric(sample, errors='coerce')
-                    if converted.notna().sum() > len(sample) * 0.5:
-                        numeric_candidates.append(col)
-                except:
-                    pass
-    
-    return numeric_candidates
-
-
-# ============================================================================
-# Formatting Functions
-# ============================================================================
-
-def format_percentage(value: float, decimals: int = 1) -> str:
-    """
-    Format a float as a percentage string
-    
-    Args:
-        value: Float value (0.0 to 1.0)
-        decimals: Number of decimal places
-    
-    Returns:
-        Formatted percentage string (e.g., "45.2%")
-    """
-    return f"{value * 100:.{decimals}f}%"
-
-
-def format_number(value: float, decimals: int = 2, thousands_sep: bool = True) -> str:
-    """
-    Format a number with optional thousands separator
-    
-    Args:
-        value: Number to format
-        decimals: Number of decimal places
-        thousands_sep: Whether to include thousands separator
-    
-    Returns:
-        Formatted number string
-    """
-    if thousands_sep:
-        return f"{value:,.{decimals}f}"
-    else:
-        return f"{value:.{decimals}f}"
-
-
-"""
-Core Utilities Module
-Common utility functions used across the application
-"""
-
-import streamlit as st
-import pandas as pd
-import numpy as np
-from typing import List, Optional, Dict, Any, Tuple
+import re
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple, Union
 
+import pandas as pd
+import streamlit as st
+
+
+# ============================================================================
+# Section 1: Page / UI Helpers
+# ============================================================================
 
 def setup_page_config(
     title: str = "ExplainFutures",
     icon: str = "🔮",
-    layout: str = "wide"
+    layout: str = "wide",
 ):
     """
-    Configure Streamlit page settings
-    
+    Configure Streamlit page settings.
+
     Args:
         title: Page title
         icon: Page icon/favicon
@@ -203,378 +37,354 @@ def setup_page_config(
         page_title=title,
         page_icon=icon,
         layout=layout,
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="expanded",
     )
 
 
-def format_number(value: float, decimals: int = 2) -> str:
-    """
-    Format number with thousands separators
-    
-    Args:
-        value: Number to format
-        decimals: Number of decimal places
-    
-    Returns:
-        str: Formatted number string
-    """
-    if pd.isna(value):
-        return "N/A"
-    return f"{value:,.{decimals}f}"
-
-
-def format_percentage(value: float, decimals: int = 1) -> str:
-    """
-    Format number as percentage
-    
-    Args:
-        value: Value to format (0.15 = 15%)
-        decimals: Number of decimal places
-    
-    Returns:
-        str: Formatted percentage string
-    """
-    if pd.isna(value):
-        return "N/A"
-    return f"{value * 100:.{decimals}f}%"
-
-
-def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
-    """
-    Safely divide two numbers, returning default if division by zero
-    
-    Args:
-        numerator: Numerator
-        denominator: Denominator
-        default: Default value if denominator is zero
-    
-    Returns:
-        float: Result of division or default
-    """
-    try:
-        if denominator == 0 or pd.isna(denominator):
-            return default
-        return numerator / denominator
-    except:
-        return default
-
-
-def get_color_for_index(index: int, colors: Optional[List[str]] = None) -> str:
-    """
-    Get color from palette by index (with wrapping)
-    
-    Args:
-        index: Color index
-        colors: Optional color palette
-    
-    Returns:
-        str: Color hex code
-    """
-    if colors is None:
-        from core.config import get_config
-        colors = get_config()["default_color_palette"]
-    
-    return colors[index % len(colors)]
-
+# ============================================================================
+# Section 2: Display Functions
+# ============================================================================
 
 def display_error(message: str, details: Optional[str] = None):
     """
-    Display error message with optional details
-    
-    Args:
-        message: Main error message
-        details: Optional detailed error information
+    Display error message with optional details.
+
+    Notes:
+    - Backward compatible with older usage patterns:
+      - display_error("Title", "Message") will still work because the second arg is treated as details.
+      - display_error("Message") is the primary signature.
     """
     st.error(f"❌ {message}")
     if details:
         with st.expander("🔍 Error Details"):
-            st.code(details)
-
-
-def display_warning(message: str):
-    """
-    Display warning message
-    
-    Args:
-        message: Warning message
-    """
-    st.warning(f"⚠️ {message}")
+            st.code(str(details))
 
 
 def display_success(message: str):
-    """
-    Display success message
-    
-    Args:
-        message: Success message
-    """
+    """Display success message."""
     st.success(f"✅ {message}")
 
 
+def display_warning(message: str):
+    """Display warning message."""
+    st.warning(f"⚠️ {message}")
+
+
 def display_info(message: str):
-    """
-    Display info message
-    
-    Args:
-        message: Info message
-    """
+    """Display info message."""
     st.info(f"ℹ️ {message}")
 
+
+# ============================================================================
+# Section 3: Formatting Utilities
+# ============================================================================
+
+def format_number(value: Union[int, float], decimals: int = 2) -> str:
+    """
+    Format a number with thousands separators.
+
+    Args:
+        value: Number to format
+        decimals: Decimal places
+
+    Returns:
+        Formatted string
+    """
+    try:
+        if value is None or pd.isna(value):
+            return "N/A"
+        return f"{float(value):,.{decimals}f}"
+    except Exception:
+        return "N/A"
+
+
+def format_percentage(value: Union[int, float], decimals: int = 1) -> str:
+    """
+    Format a fractional value as percentage (0.15 -> 15.0%).
+
+    Args:
+        value: Fraction (0-1)
+        decimals: Decimal places
+
+    Returns:
+        Formatted percentage string
+    """
+    try:
+        if value is None or pd.isna(value):
+            return "N/A"
+        return f"{float(value) * 100:.{decimals}f}%"
+    except Exception:
+        return "N/A"
+
+
+def format_duration(seconds: float) -> str:
+    """
+    Format duration in seconds to human-readable string.
+    """
+    try:
+        seconds = float(seconds)
+        if seconds < 1:
+            return f"{seconds * 1000:.0f}ms"
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        if seconds < 3600:
+            return f"{seconds / 60:.1f}min"
+        return f"{seconds / 3600:.1f}h"
+    except Exception:
+        return "N/A"
+
+
+# ============================================================================
+# Section 4: Math / Safety
+# ============================================================================
+
+def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> float:
+    """
+    Safely divide two numbers, returning default if division by zero / invalid.
+    """
+    try:
+        if denominator == 0 or denominator is None or pd.isna(denominator):
+            return default
+        return float(numerator) / float(denominator)
+    except Exception:
+        return default
+
+
+# ============================================================================
+# Section 5: Colors
+# ============================================================================
+
+def get_color_for_index(index: int, colors: Optional[List[str]] = None) -> str:
+    """
+    Get color from palette by index (with wrapping).
+    If colors not provided, attempts to read from core.config.get_config().
+    Falls back to a local palette if core.config is unavailable.
+
+    Args:
+        index: Color index
+        colors: Optional palette list
+
+    Returns:
+        Hex color string
+    """
+    if colors is None:
+        try:
+            from core.config import get_config  # type: ignore
+            colors = get_config().get("default_color_palette", None)
+        except Exception:
+            colors = None
+
+    if not colors:
+        colors = [
+            "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+            "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+            "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
+        ]
+
+    return colors[index % len(colors)]
+
+
+# ============================================================================
+# Section 6: Download / Validation Utilities
+# ============================================================================
 
 def create_download_button(
     data: Any,
     filename: str,
     label: str = "📥 Download",
     mime_type: str = "text/csv",
-    key: Optional[str] = None
+    key: Optional[str] = None,
 ):
     """
-    Create a download button for data
-    
-    Args:
-        data: Data to download (bytes, string, or DataFrame)
-        filename: Suggested filename
-        label: Button label
-        mime_type: MIME type of data
-        key: Optional unique key for button
+    Create a download button for bytes/string/DataFrame.
     """
+    payload = data
+    mt = mime_type
+
     if isinstance(data, pd.DataFrame):
-        data = data.to_csv(index=False).encode('utf-8')
-        mime_type = "text/csv"
-    
+        payload = data.to_csv(index=False).encode("utf-8")
+        mt = "text/csv"
+
     st.download_button(
         label=label,
-        data=data,
+        data=payload,
         file_name=filename,
-        mime=mime_type,
-        key=key
+        mime=mt,
+        key=key,
     )
 
 
 def validate_dataframe(
-    df: pd.DataFrame,
+    df: Optional[pd.DataFrame],
     required_columns: Optional[List[str]] = None,
-    min_rows: int = 1
+    min_rows: int = 1,
 ) -> Tuple[bool, Optional[str]]:
     """
-    Validate a DataFrame meets basic requirements
-    
-    Args:
-        df: DataFrame to validate
-        required_columns: List of required column names
-        min_rows: Minimum number of rows required
-    
+    Validate a DataFrame meets basic requirements.
+
     Returns:
-        tuple: (is_valid, error_message)
+        (is_valid, error_message)
     """
     if df is None:
         return False, "DataFrame is None"
-    
+
     if len(df) < min_rows:
         return False, f"DataFrame has only {len(df)} rows, need at least {min_rows}"
-    
+
     if required_columns:
-        missing = [col for col in required_columns if col not in df.columns]
+        missing = [c for c in required_columns if c not in df.columns]
         if missing:
             return False, f"Missing required columns: {', '.join(missing)}"
-    
+
     return True, None
 
 
 def sanitize_column_name(name: str) -> str:
     """
-    Sanitize a column name for consistency
-    
-    Args:
-        name: Original column name
-    
-    Returns:
-        str: Sanitized column name
+    Sanitize a column name for consistency.
     """
-    import re
-    
-    # Strip whitespace
     name = str(name).strip()
-    
-    # Replace multiple spaces with single underscore
-    name = re.sub(r'\s+', '_', name)
-    
-    # Remove special characters except underscore and hyphen
-    name = re.sub(r'[^\w\s-]', '', name)
-    
-    # Replace hyphens with underscores
-    name = name.replace('-', '_')
-    
-    # Remove leading/trailing underscores
-    name = name.strip('_')
-    
+    name = re.sub(r"\s+", "_", name)
+    name = re.sub(r"[^\w\s-]", "", name)
+    name = name.replace("-", "_")
+    name = name.strip("_")
     return name
 
 
 def get_datetime_format_suggestions() -> List[str]:
     """
-    Get list of common datetime format strings
-    
-    Returns:
-        list: List of datetime format strings
+    Get list of common datetime format strings from config if available.
     """
-    from core.config import get_config
-    return get_config()["datetime_formats"]
+    try:
+        from core.config import get_config  # type: ignore
+        return list(get_config().get("datetime_formats", []))
+    except Exception:
+        return [
+            "%Y-%m-%d",
+            "%d/%m/%Y",
+            "%m/%d/%Y",
+            "%Y-%m-%d %H:%M:%S",
+            "%d/%m/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M:%S",
+        ]
 
 
-def format_duration(seconds: float) -> str:
-    """
-    Format duration in seconds to human-readable string
-    
-    Args:
-        seconds: Duration in seconds
-    
-    Returns:
-        str: Formatted duration string
-    """
-    if seconds < 1:
-        return f"{seconds*1000:.0f}ms"
-    elif seconds < 60:
-        return f"{seconds:.1f}s"
-    elif seconds < 3600:
-        minutes = seconds / 60
-        return f"{minutes:.1f}min"
-    else:
-        hours = seconds / 3600
-        return f"{hours:.1f}h"
+# ============================================================================
+# Section 7: Data Detection Utilities
+# ============================================================================
 
+def detect_datetime_columns(df: pd.DataFrame) -> List[str]:
+    """
+    Detect columns that might contain datetime data.
 
-def get_variable_summary(df: pd.DataFrame, variable: str) -> Dict[str, Any]:
+    Heuristics:
+    - dtype is datetime
+    - column name contains datetime keywords
+    - object column parses to datetime for >50% of a small sample
     """
-    Get summary statistics for a variable in long format
-    
-    Args:
-        df: DataFrame in long format with 'variable' and 'value' columns
-        variable: Variable name
-    
-    Returns:
-        dict: Summary statistics
-    """
-    var_data = df[df['variable'] == variable]['value']
-    
-    return {
-        'count': len(var_data),
-        'mean': var_data.mean(),
-        'std': var_data.std(),
-        'min': var_data.min(),
-        'max': var_data.max(),
-        'median': var_data.median(),
-        'missing': var_data.isna().sum(),
-        'missing_pct': var_data.isna().sum() / len(var_data) if len(var_data) > 0 else 0
-    }
+    datetime_candidates: List[str] = []
+
+    if df is None or df.empty:
+        return datetime_candidates
+
+    for col in df.columns:
+        try:
+            # Already datetime dtype
+            if pd.api.types.is_datetime64_any_dtype(df[col]):
+                datetime_candidates.append(col)
+                continue
+
+            col_lower = str(col).lower()
+            if any(k in col_lower for k in ["date", "time", "timestamp", "day", "month", "year"]):
+                datetime_candidates.append(col)
+                continue
+
+            # Try parse sample for object columns
+            if df[col].dtype == "object":
+                sample = df[col].dropna().head(20)
+                if len(sample) == 0:
+                    continue
+                parsed = pd.to_datetime(sample, errors="coerce", utc=False)
+                if parsed.notna().sum() >= max(1, int(0.5 * len(sample))):
+                    datetime_candidates.append(col)
+
+        except Exception:
+            continue
+
+    # De-duplicate preserving order
+    seen = set()
+    out = []
+    for c in datetime_candidates:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
 
 
 def detect_numeric_columns(df: pd.DataFrame) -> List[str]:
     """
-    Detect numeric columns in a DataFrame
-    
-    Args:
-        df: Input DataFrame
-    
-    Returns:
-        list: List of numeric column names
+    Detect columns that contain numeric data or can be converted to numeric.
     """
-    numeric_cols = []
+    numeric_candidates: List[str] = []
+
+    if df is None or df.empty:
+        return numeric_candidates
+
     for col in df.columns:
-        if pd.api.types.is_numeric_dtype(df[col]):
-            numeric_cols.append(col)
-        else:
-            # Try to convert to numeric
-            try:
-                pd.to_numeric(df[col], errors='raise')
-                numeric_cols.append(col)
-            except:
-                pass
-    
-    return numeric_cols
+        try:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                numeric_candidates.append(col)
+                continue
 
+            if df[col].dtype == "object":
+                sample = df[col].dropna().head(50)
+                if len(sample) == 0:
+                    continue
+                converted = pd.to_numeric(sample, errors="coerce")
+                if converted.notna().sum() >= max(1, int(0.6 * len(sample))):
+                    numeric_candidates.append(col)
 
-def detect_datetime_columns(df: pd.DataFrame) -> List[str]:
-    """
-    Detect potential datetime columns in a DataFrame
-    
-    Args:
-        df: Input DataFrame
-    
-    Returns:
-        list: List of potential datetime column names
-    """
-    datetime_cols = []
-    
-    for col in df.columns:
-        # Check if already datetime
-        if pd.api.types.is_datetime64_any_dtype(df[col]):
-            datetime_cols.append(col)
+        except Exception:
             continue
-        
-        # Check column name for time-related keywords
-        col_lower = str(col).lower()
-        time_keywords = ['date', 'time', 'timestamp', 'datetime', 'period', 'year', 'month', 'day']
-        if any(keyword in col_lower for keyword in time_keywords):
-            datetime_cols.append(col)
-            continue
-        
-        # Try to parse as datetime
-        if len(df) > 0:
-            try:
-                pd.to_datetime(df[col].dropna().iloc[:5], errors='raise')
-                datetime_cols.append(col)
-            except:
-                pass
-    
-    return datetime_cols
+
+    # De-duplicate preserving order
+    seen = set()
+    out = []
+    for c in numeric_candidates:
+        if c not in seen:
+            seen.add(c)
+            out.append(c)
+    return out
 
 
-class Timer:
-    """Simple context manager for timing code execution"""
-    
-    def __init__(self, name: str = "Operation"):
-        self.name = name
-        self.start_time = None
-        self.duration = None
-    
-    def __enter__(self):
-        self.start_time = datetime.now()
-        return self
-    
-    def __exit__(self, *args):
-        self.duration = (datetime.now() - self.start_time).total_seconds()
-
-
-def create_progress_tracker(total_steps: int, description: str = "Processing"):
+def get_variable_summary(df_long: pd.DataFrame, variable: str) -> Dict[str, Any]:
     """
-    Create a Streamlit progress tracker
-    
-    Args:
-        total_steps: Total number of steps
-        description: Description text
-    
-    Returns:
-        tuple: (progress_bar, status_text)
+    Get summary statistics for a variable in long format (expects columns: 'variable', 'value').
     """
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    status_text.text(f"{description}... 0%")
-    
-    return progress_bar, status_text
+    if df_long is None or df_long.empty:
+        return {
+            "count": 0,
+            "mean": None,
+            "std": None,
+            "min": None,
+            "max": None,
+            "median": None,
+            "missing": 0,
+            "missing_pct": 0.0,
+        }
 
+    var_data = df_long[df_long["variable"] == variable]["value"]
 
-def update_progress(progress_bar, status_text, current_step: int, total_steps: int, description: str = "Processing"):
-    """
-    Update progress tracker
-    
-    Args:
-        progress_bar: Streamlit progress bar object
-        status_text: Streamlit text object
-        current_step: Current step number
-        total_steps: Total number of steps
-        description: Description text
-    """
-    progress = current_step / total_steps
-    progress_bar.progress(progress)
-    status_text.text(f"{description}... {int(progress * 100)}%")
+    count = len(var_data)
+    missing = int(var_data.isna().sum())
+
+    return {
+        "count": count,
+        "mean": var_data.mean(),
+        "std": var_data.std(),
+        "min": var_data.min(),
+        "max": var_data.max(),
+        "median": var_data.median(),
+        "missing": missing,
+        "missing_pct": (missing / count) if count > 0 else 0.0,
+    }
