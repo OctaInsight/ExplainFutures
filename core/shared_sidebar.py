@@ -42,6 +42,8 @@ def render_workflow_flowchart_from_db():
     Does NOT rely on st.session_state flags.
     """
 
+    import streamlit.components.v1 as components  # <-- add here if you prefer local import
+
     # -------------------------------------------------------------
     # 1) Get done keys from DB
     # -------------------------------------------------------------
@@ -126,7 +128,6 @@ def render_workflow_flowchart_from_db():
             f'background:{fill};border:1.5px solid {border};" title="{tooltip}"></div>'
         )
 
-    # tail from left to center
     left_line_color = get_line_color(left_steps[-1][0])
     left_html_parts.append(f'<div style="width:1px;height:6px;background:{left_line_color};"></div>')
     left_html = "".join(left_html_parts)
@@ -154,7 +155,7 @@ def render_workflow_flowchart_from_db():
     )
 
     line_color_right2 = get_line_color(k2)
-    remaining_height = 96 - 18  # keep alignment logic consistent with your previous layout
+    remaining_height = 96 - 18
     right_html_parts.append(
         f'<div style="width:1px;height:{remaining_height}px;background:{line_color_right2};"></div>'
     )
@@ -178,7 +179,7 @@ def render_workflow_flowchart_from_db():
     center_html = "".join(center_html_parts)
 
     # -------------------------------------------------------------
-    # 7) Render
+    # 7) Render (IMPORTANT: use components.html, not sidebar.markdown)
     # -------------------------------------------------------------
     html = f"""
     <div style="text-align:center;padding:0.3rem 0;margin:0;">
@@ -210,7 +211,9 @@ def render_workflow_flowchart_from_db():
         </div>
     </div>
     """
-    st.sidebar.markdown(html, unsafe_allow_html=True)
+    components.html(html, height=180, scrolling=False)
+
+
 
 
 # =============================================================================
