@@ -1,9 +1,17 @@
 """
-Page 3: Data Cleaning - COMPLETE WITH 3 FIXES + DIRTY-CHECK BANNER
-✅ FIXED 1: Loads ALL data (raw + cleaned) from database
-✅ FIXED 2: Comparison plots with separate raw/cleaned dropdowns + export options
-✅ FIXED 3: Save button visible outside tabs (always visible)
-✅ NEW: Always-visible "Unsaved changes" banner (works across all tabs)
+Page 3: Data Cleaning & Preprocessing
+
+CORE FUNCTIONS: Frozen (no redesign; logic preserved).
+I/O + STATE TRANSITION: Implemented.
+PROGRESS SUBSYSTEM: Added as a dedicated section using the agreed approach:
+- upsert_progress_step(pid, "<step_key>", <percent>)
+- recompute_and_update_project_progress(pid, workflow_state=..., current_page=...)
+
+IMPORTANT:
+- This file assumes SupabaseManager implements:
+    - upsert_progress_step(project_id: str, step_key: str, percent: int)
+    - recompute_and_update_project_progress(project_id: str, workflow_state: str, current_page: int)
+If they are not yet present, you will see an AttributeError; in that case, we add them later in supabase_manager.
 """
 
 import streamlit as st
@@ -53,9 +61,9 @@ if not st.session_state.get('authenticated', False):
     st.stop()
 
 
-# =============================================================================
-# HASHING + DIRTY-STATE TRACKING (NEW)
-# =============================================================================
+#---------------------
+# Section 1: Hashing + Dirty-State Tracking
+#---------------------
 
 def calculate_df_hash_fast(df: pd.DataFrame) -> str | None:
     """
@@ -67,11 +75,9 @@ def calculate_df_hash_fast(df: pd.DataFrame) -> str | None:
         return None
 
     try:
-        # Normalize column order
         cols = list(df.columns)
         df2 = df[sorted(cols)].copy()
 
-        # Normalize row order if typical long-format columns exist
         sort_cols = []
         for c in ["variable", "timestamp", "time", "value"]:
             if c in df2.columns:
@@ -82,18 +88,14 @@ def calculate_df_hash_fast(df: pd.DataFrame) -> str | None:
         else:
             df2 = df2.reset_index(drop=True)
 
-        # Make datetimes consistent
         for c in df2.columns:
             if pd.api.types.is_datetime64_any_dtype(df2[c]):
-                # Convert to ISO-like string to avoid timezone/precision drift
                 df2[c] = df2[c].dt.strftime("%Y-%m-%dT%H:%M:%S.%f")
 
-        # Hash all values (including NaN consistently)
         hv = pd.util.hash_pandas_object(df2, index=True).values
         return hashlib.md5(hv.tobytes()).hexdigest()
 
     except Exception:
-        # Fallback
         try:
             data_str = df.to_csv(index=False)
             return hashlib.md5(data_str.encode()).hexdigest()
@@ -114,12 +116,10 @@ def track_dirty_state():
 
     initial_hash = st.session_state.get("initial_data_hash")
     if initial_hash is None:
-        # If not set yet, initialize it (first time)
         st.session_state.initial_data_hash = current_hash
         st.session_state.has_unsaved_changes = False
         return
 
-    # Dirty if hash differs
     st.session_state.has_unsaved_changes = (current_hash != initial_hash)
 
 
@@ -132,14 +132,12 @@ def render_unsaved_changes_banner():
     """
     track_dirty_state()
 
-    # Only show banner if database is available and a project is active
     if not DB_AVAILABLE or not st.session_state.get("current_project_id"):
         return
 
     has_ops = bool(st.session_state.get("cleaning_history"))
     dirty = st.session_state.get("has_unsaved_changes", False)
 
-    # Banner
     st.markdown("### 🧭 Page Status")
 
     colA, colB, colC = st.columns([3, 1, 1])
@@ -153,23 +151,19 @@ def render_unsaved_changes_banner():
         else:
             st.success("No changes detected since the last database load/save. It is safe to move to another page.")
 
-        # Optional: show quick diagnostics
         st.caption(
             f"Snapshot hash: {st.session_state.get('initial_data_hash')} | "
             f"Current hash: {st.session_state.get('current_data_hash')}"
         )
 
     with colB:
-        # Save button should be available when there are operations OR dirty data
         save_disabled = (not dirty and not has_ops)
         if st.button("💾 Save", type="primary", use_container_width=True, disabled=save_disabled, key="save_btn_banner"):
             save_to_database()
             st.rerun()
 
     with colC:
-        # Discard changes: reload from database
         if st.button("↩️ Discard & Reload", use_container_width=True, key="discard_btn_banner"):
-            # Force reload
             st.session_state.data_loaded = False
             st.session_state.df_long = None
             st.session_state.df_clean = None
@@ -182,9 +176,9 @@ def render_unsaved_changes_banner():
     st.markdown("---")
 
 
-# =============================================================================
-# SESSION INIT
-# =============================================================================
+#---------------------
+# Section 2: Session Initialization
+#---------------------
 
 def initialize_cleaning_history():
     """Initialize session state"""
@@ -212,17 +206,16 @@ def add_to_cleaning_history(operation_type, method, variables, details=None):
         "details": details or {}
     }
     st.session_state.cleaning_history.append(operation)
-    # Mark dirty (hash will be re-evaluated on rerun)
     st.session_state.has_unsaved_changes = True
 
 
-# =============================================================================
-# DATABASE LOAD
-# =============================================================================
+#---------------------
+# Section 3: Database Load (Raw + Cleaned)
+#---------------------
 
 def load_data_from_database():
     """
-    FIXED 1: Load ALL data (raw + cleaned) from database
+    Load ALL data (raw + cleaned) from database
     """
     if not DB_AVAILABLE:
         return False
@@ -232,7 +225,6 @@ def load_data_from_database():
         return False
 
     try:
-        # Load RAW data
         df_raw = db.load_timeseries_data(
             project_id=project_id,
             data_source='raw'
@@ -241,16 +233,13 @@ def load_data_from_database():
         if df_raw is None or len(df_raw) == 0:
             return False
 
-        # Load CLEANED data (if exists)
         df_cleaned = db.load_timeseries_data(
             project_id=project_id,
             data_source='cleaned'
         )
 
-        # Store RAW data
         st.session_state.df_long = df_raw
 
-        # Combine raw + cleaned for working data
         if df_cleaned is not None and len(df_cleaned) > 0:
             st.session_state.df_clean = pd.concat([df_raw, df_cleaned], ignore_index=True)
         else:
@@ -258,17 +247,14 @@ def load_data_from_database():
 
         st.session_state.data_loaded = True
 
-        # Get ALL variables (raw + cleaned)
         all_variables = list(st.session_state.df_clean['variable'].unique())
         all_variables.sort()
         st.session_state.value_columns = all_variables
 
-        # Get ONLY raw variables
         raw_variables = list(df_raw['variable'].unique())
         raw_variables.sort()
         st.session_state.raw_variables = raw_variables
 
-        # Get ONLY cleaned variables
         if df_cleaned is not None and len(df_cleaned) > 0:
             cleaned_variables = list(df_cleaned['variable'].unique())
             cleaned_variables.sort()
@@ -279,7 +265,6 @@ def load_data_from_database():
         time_col = 'timestamp' if 'timestamp' in df_raw.columns else 'time'
         st.session_state.time_column = time_col
 
-        # Snapshot hash of what we loaded from DB
         st.session_state.initial_data_hash = calculate_df_hash_fast(st.session_state.df_clean)
         st.session_state.current_data_hash = st.session_state.initial_data_hash
         st.session_state.has_unsaved_changes = False
@@ -291,14 +276,12 @@ def load_data_from_database():
         return False
 
 
-# =============================================================================
-# EXPORT / PLOTS
-# =============================================================================
+#---------------------
+# Section 4: Export + Plot Utilities
+#---------------------
 
 def export_figure(fig, filename_prefix):
-    """
-    FIXED 2: Export figure as PNG, PDF, HTML
-    """
+    """Export figure as PNG, PDF, HTML"""
     st.markdown("### 📥 Export Options")
 
     col1, col2, col3 = st.columns(3)
@@ -335,9 +318,7 @@ def export_figure(fig, filename_prefix):
 
 
 def plot_comparison_advanced(df_all, var1, var2, title="Data Comparison"):
-    """
-    FIXED 2: Advanced comparison plot with two separate variable selections
-    """
+    """Advanced comparison plot with two separate variable selections"""
     try:
         time_col = 'timestamp' if 'timestamp' in df_all.columns else 'time'
 
@@ -395,10 +376,8 @@ def plot_comparison_advanced(df_all, var1, var2, title="Data Comparison"):
         return None
 
 
-
-
 def plot_comparison(df_original, df_modified, original_variable, new_variable, operation_type):
-    """Create comparison plot (original version for backward compatibility)"""
+    """Create comparison plot (backward compatible)"""
     try:
         time_col = 'timestamp' if 'timestamp' in df_original.columns else 'time'
 
@@ -446,9 +425,9 @@ def plot_comparison(df_original, df_modified, original_variable, new_variable, o
         return None
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
+#---------------------
+# Section 5: Main Page Controller (UI + Navigation)
+#---------------------
 
 def main():
     """Main function"""
@@ -461,7 +440,6 @@ def main():
             st.switch_page("pages/01_Home.py")
         st.stop()
 
-    # Check if df_long actually exists AND is not None
     needs_loading = (
         not st.session_state.get('data_loaded') or
         st.session_state.get('df_long') is None
@@ -504,10 +482,8 @@ def main():
     raw_vars = st.session_state.get('raw_variables', [])
     cleaned_vars = st.session_state.get('cleaned_variables', [])
 
-    # ALWAYS-visible banner (works across tabs)
     render_unsaved_changes_banner()
 
-    # Show metrics
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Variables", len(variables))
     col2.metric("Raw Variables", len(raw_vars))
@@ -516,10 +492,6 @@ def main():
 
     st.markdown("---")
 
-
-    # ============================================================
-    # TABS
-    # ============================================================
     tab1, tab2, tab3, tab4 = st.tabs([
         "🔍 Missing Values",
         "📊 Outliers",
@@ -539,11 +511,8 @@ def main():
     with tab4:
         show_summary()
 
-
     st.markdown("---")
-    # ============================================================
-    # FIXED 2: COMPARISON SECTION (Raw vs Cleaned from Database)
-    # ============================================================
+
     if cleaned_vars:
         st.markdown("### 📊 Compare Raw vs Cleaned Data")
 
@@ -583,10 +552,6 @@ def main():
 
         st.markdown("---")
 
-
-    # ---------------------------------------------------------------------
-    # 8) VERY BOTTOM: Navigation button to Data Visualization (inside main)
-    # ---------------------------------------------------------------------
     st.markdown("---")
     st.markdown("### ➡️ Next Step")
 
@@ -600,9 +565,10 @@ def main():
         ):
             st.switch_page("pages/04_Exploration_and_Visualization.py")
 
-# =============================================================================
-# TAB HANDLERS (unchanged except they rely on df_clean and history)
-# =============================================================================
+
+#---------------------
+# Section 6: Tab Handler - Missing Values (CORE: unchanged)
+#---------------------
 
 def handle_missing_values(df_long, variables):
     """Handle missing values"""
@@ -755,6 +721,10 @@ def apply_missing_treatment(df, variables, method, suffix):
 
     return df_copy, new_columns
 
+
+#---------------------
+# Section 7: Tab Handler - Outliers (CORE: unchanged)
+#---------------------
 
 def handle_outliers(df_long, variables):
     """Detect and handle outliers"""
@@ -921,6 +891,10 @@ def apply_outlier_treatment(df, variables, method, suffix):
     return df_copy, new_columns
 
 
+#---------------------
+# Section 8: Tab Handler - Transformations (CORE: unchanged)
+#---------------------
+
 def handle_transformations(df_long, variables):
     """Apply data transformations"""
 
@@ -1076,6 +1050,10 @@ def apply_transformation(df, variables, transformation, suffix):
     return df_copy, new_columns
 
 
+#---------------------
+# Section 9: Tab Handler - Summary (CORE: unchanged)
+#---------------------
+
 def show_summary():
     """Show summary"""
 
@@ -1116,9 +1094,9 @@ def show_summary():
     st.dataframe(pd.DataFrame(ops_data), use_container_width=True, hide_index=True)
 
 
-# =============================================================================
-# SAVE
-# =============================================================================
+#---------------------
+# Section 10: Save to Database (I/O) + State Transition + Progress (NEW)
+#---------------------
 
 def save_to_database():
     """Save cleaned data to database"""
@@ -1135,26 +1113,56 @@ def save_to_database():
                 st.warning("⚠️ No new cleaned variables to save")
                 return
 
-            cleaned_df = st.session_state.df_clean[
+            time_col = 'timestamp' if 'timestamp' in st.session_state.df_clean.columns else 'time'
+
+            cleaned_df_new = st.session_state.df_clean[
                 st.session_state.df_clean['variable'].isin(new_cleaned_vars)
             ].copy()
 
-            st.info(f"Saving {len(cleaned_df):,} records for {len(new_cleaned_vars)} variables...")
+            # I/O FIX: Merge existing cleaned data from DB with new cleaned variables
+            cleaned_df_existing = None
+            try:
+                cleaned_df_existing = db.load_timeseries_data(
+                    project_id=project_id,
+                    data_source='cleaned'
+                )
+            except Exception:
+                cleaned_df_existing = None
+
+            if cleaned_df_existing is not None and len(cleaned_df_existing) > 0:
+                for col in [time_col, "variable", "value"]:
+                    if col not in cleaned_df_existing.columns:
+                        st.error(f"❌ Existing cleaned data missing required column: {col}")
+                        return
+
+                cleaned_df_to_save = pd.concat([cleaned_df_existing, cleaned_df_new], ignore_index=True)
+                cleaned_df_to_save = cleaned_df_to_save.drop_duplicates(
+                    subset=[time_col, "variable"],
+                    keep="last"
+                )
+            else:
+                cleaned_df_to_save = cleaned_df_new
+
+            st.info(
+                f"Saving cleaned dataset: {len(cleaned_df_new):,} new records, "
+                f"{len(cleaned_df_to_save):,} total cleaned records in DB after merge."
+            )
 
             success = db.save_timeseries_data(
                 project_id=project_id,
-                df_long=cleaned_df,
+                df_long=cleaned_df_to_save,
                 data_source='cleaned',
                 batch_size=1000
             )
 
             if not success:
-                st.error("❌ Failed to save")
+                st.error("❌ Failed to save cleaned data")
                 return
 
+            # Update parameters for ONLY newly created cleaned variables
             cleaned_params = []
             for var in new_cleaned_vars:
-                var_data = cleaned_df[cleaned_df['variable'] == var]['value'].dropna()
+                var_data = cleaned_df_new[cleaned_df_new['variable'] == var]['value'].dropna()
 
                 if len(var_data) > 0:
                     cleaned_params.append({
@@ -1164,20 +1172,29 @@ def save_to_database():
                         'max_value': float(var_data.max()),
                         'mean_value': float(var_data.mean()),
                         'std_value': float(var_data.std()),
-                        'missing_count': int(cleaned_df[cleaned_df['variable'] == var]['value'].isna().sum()),
-                        'total_count': len(cleaned_df[cleaned_df['variable'] == var])
+                        'missing_count': int(cleaned_df_new[cleaned_df_new['variable'] == var]['value'].isna().sum()),
+                        'total_count': len(cleaned_df_new[cleaned_df_new['variable'] == var])
                     })
 
             if cleaned_params:
                 db.save_parameters(project_id, cleaned_params)
 
+            # State transition (existing behavior kept)
             db.update_step_completion(project_id, 'data_cleaned', True)
-            db.update_project_progress(
-                project_id=project_id,
-                workflow_state="preprocessing_complete",
-                current_page=3,
-                completion_percentage=15
-            )
+
+            # Progress subsystem (agreed approach)
+            if DB_AVAILABLE and st.session_state.get("current_project_id"):
+                pid = st.session_state.current_project_id
+
+                # Step contribution for page 3
+                db.upsert_progress_step(pid, "page3_data_cleaning", 7)
+
+                # Recompute total and write back to projects
+                db.recompute_and_update_project_progress(
+                    pid,
+                    workflow_state="preprocessing_complete",
+                    current_page=3
+                )
 
             # Reset dirty tracking AFTER successful save
             st.session_state.data_cleaned = True
@@ -1192,10 +1209,9 @@ def save_to_database():
 
             st.info(f"""
             **✅ Saved:**
-            - {len(cleaned_df):,} cleaned data points
-            - {len(cleaned_params)} parameters updated
-            - Progress: 15%
-            - 2nd workflow dot: GREEN ✨
+            - {len(cleaned_df_new):,} new cleaned data points
+            - {len(cleaned_df_to_save):,} total cleaned data points now stored (merged)
+            - {len(cleaned_params)} parameters updated for new cleaned variables
             """)
 
             time.sleep(1)
