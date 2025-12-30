@@ -473,7 +473,7 @@ class SupabaseManager:
                 .select(
                     "project_id, project_name, project_code, description, owner_id, "
                     "application_name, status, visibility, is_demo_project, "
-                    "workflow_state, current_page, completion_percentage, "
+                    "workflow_state, current_page, completion_percentage, total_parameters, total_scenarios, "
                     "baseline_year, scenario_target_year, tags, created_at, updated_at, last_accessed, team_size"
                 )
                 .eq("owner_id", user_id)
@@ -510,7 +510,7 @@ class SupabaseManager:
                 .select(
                     "project_id, project_name, project_code, description, owner_id, "
                     "application_name, status, visibility, is_demo_project, "
-                    "workflow_state, current_page, completion_percentage, "
+                    "workflow_state, current_page, completion_percentage, total_parameters, total_scenarios, "
                     "baseline_year, scenario_target_year, tags, created_at, updated_at, last_accessed, team_size"
                 )
                 .in_("project_id", ids)
