@@ -30,18 +30,41 @@ def get_logo_base64():
 
 
 # =============================================================================
-# Workflow chart
+# Workflow chart (DB-driven)
 # =============================================================================
-def render_workflow_flowchart():
+def render_workflow_flowchart_from_db():
     """
-    Updated workflow indicator
-    NOTE:
-    - Dot completion is driven by st.session_state flags.
-    - We will set those flags from DB project_progress_steps.step_key
-      in render_app_sidebar() before calling this function.
+    Workflow indicator driven ONLY by DB:
+      - Reads done step keys from project_progress_steps.step_key
+      - Colors dots accordingly
+    Does NOT rely on st.session_state flags.
     """
 
-    # Define steps (these KEYS must match what you write to project_progress_steps.step_key)
+    # -------------------------------------------------------------
+    # 1) Get done keys from DB
+    # -------------------------------------------------------------
+    pid = st.session_state.get("current_project_id")
+    done_keys = set()
+
+    if pid:
+        try:
+            from core.database.supabase_manager import get_db_manager
+            db = get_db_manager()
+
+            res = (
+                db.client.table("project_progress_steps")
+                .select("step_key")
+                .eq("project_id", pid)
+                .execute()
+            )
+
+            done_keys = {r.get("step_key") for r in (res.data or []) if r.get("step_key")}
+        except Exception:
+            done_keys = set()
+
+    # -------------------------------------------------------------
+    # 2) Define steps (MUST match what pages write to step_key)
+    # -------------------------------------------------------------
     left_steps = [
         ("data_loaded", "Data Import & Diagnostics"),
         ("data_cleaned", "Preprocessing"),
@@ -64,113 +87,127 @@ def render_workflow_flowchart():
         ("trajectory_space_done", "Trajectory vs Scenario Space"),
     ]
 
-    # Colors
+    # -------------------------------------------------------------
+    # 3) Styles
+    # -------------------------------------------------------------
     done_fill = "#21c55d"
     done_border = "#0e6537"
     pending_fill = "#d1d5db"
     pending_border = "#6b7280"
 
-    def get_dot_style(key):
-        """Get style for a dot based on completion"""
-        is_done = st.session_state.get(key, False)
-        fill = done_fill if is_done else pending_fill
-        border = done_border if is_done else pending_border
+    def is_done(step_key: str) -> bool:
+        return step_key in done_keys
+
+    def get_dot_style(step_key: str):
+        fill = done_fill if is_done(step_key) else pending_fill
+        border = done_border if is_done(step_key) else pending_border
         return fill, border
 
-    def get_line_color(key):
-        """Get line color based on completion"""
-        is_done = st.session_state.get(key, False)
-        return done_fill if is_done else pending_fill
+    def get_line_color(step_key: str):
+        return done_fill if is_done(step_key) else pending_fill
 
-    # Build left column (8 dots with connecting lines)
+    # -------------------------------------------------------------
+    # 4) Build left column
+    # -------------------------------------------------------------
     left_html_parts = []
     for i, (key, tooltip) in enumerate(left_steps):
-        fill, border = get_dot_style(key)
-        
         if i > 0:
-            # Add connecting line
-            line_color = get_line_color(left_steps[i-1][0])
-            left_html_parts.append(f'<div style="width: 1px; height: 6px; background: {line_color};"></div>')
-        
-        # Add dot
-        left_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill}; border: 1.5px solid {border};" title="{tooltip}"></div>')
-    
-    # Final line from left to center
+            prev_key = left_steps[i - 1][0]
+            line_color = get_line_color(prev_key)
+            left_html_parts.append(
+                f'<div style="width:1px;height:6px;background:{line_color};"></div>'
+            )
+
+        fill, border = get_dot_style(key)
+        left_html_parts.append(
+            f'<div style="width:6px;height:6px;border-radius:50%;'
+            f'background:{fill};border:1.5px solid {border};" title="{tooltip}"></div>'
+        )
+
+    # tail from left to center
     left_line_color = get_line_color(left_steps[-1][0])
-    left_html_parts.append(f'<div style="width: 1px; height: 6px; background: {left_line_color};"></div>')
-    
-    left_html = ''.join(left_html_parts)
+    left_html_parts.append(f'<div style="width:1px;height:6px;background:{left_line_color};"></div>')
+    left_html = "".join(left_html_parts)
 
-    # Build right column (2 dots with connecting line)
+    # -------------------------------------------------------------
+    # 5) Build right column
+    # -------------------------------------------------------------
     right_html_parts = []
-    
-    # First dot
-    fill1, border1 = get_dot_style(right_steps[0][0])
-    right_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill1}; border: 1.5px solid {border1};" title="{right_steps[0][1]}"></div>')
-    
-    # Connecting line between the two right dots
-    line_color_right = get_line_color(right_steps[0][0])
-    right_html_parts.append(f'<div style="width: 1px; height: 6px; background: {line_color_right};"></div>')
-    
-    # Second dot
-    fill2, border2 = get_dot_style(right_steps[1][0])
-    right_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill2}; border: 1.5px solid {border2};" title="{right_steps[1][1]}"></div>')
-    
-    # Long line from second dot to center (to match left column height)
-    line_color_right2 = get_line_color(right_steps[1][0])
-    # Calculate height to match left column: 8 dots + 8 lines = 8*6 + 8*6 = 96px minus the 2 dots and 1 line we already have
-    remaining_height = 96 - 18  # 78px
-    right_html_parts.append(f'<div style="width: 1px; height: {remaining_height}px; background: {line_color_right2};"></div>')
-    
-    right_html = ''.join(right_html_parts)
 
-    # Build center column (3 dots for mapping/completion/final)
+    k1, t1 = right_steps[0]
+    fill1, border1 = get_dot_style(k1)
+    right_html_parts.append(
+        f'<div style="width:6px;height:6px;border-radius:50%;'
+        f'background:{fill1};border:1.5px solid {border1};" title="{t1}"></div>'
+    )
+
+    line_color_right = get_line_color(k1)
+    right_html_parts.append(f'<div style="width:1px;height:6px;background:{line_color_right};"></div>')
+
+    k2, t2 = right_steps[1]
+    fill2, border2 = get_dot_style(k2)
+    right_html_parts.append(
+        f'<div style="width:6px;height:6px;border-radius:50%;'
+        f'background:{fill2};border:1.5px solid {border2};" title="{t2}"></div>'
+    )
+
+    line_color_right2 = get_line_color(k2)
+    remaining_height = 96 - 18  # keep alignment logic consistent with your previous layout
+    right_html_parts.append(
+        f'<div style="width:1px;height:{remaining_height}px;background:{line_color_right2};"></div>'
+    )
+    right_html = "".join(right_html_parts)
+
+    # -------------------------------------------------------------
+    # 6) Build center column
+    # -------------------------------------------------------------
     center_html_parts = []
-    
     for i, (key, tooltip) in enumerate(center_steps):
-        fill, border = get_dot_style(key)
-        
         if i > 0:
-            # Add connecting line between center steps
-            line_color = get_line_color(center_steps[i-1][0])
-            center_html_parts.append(f'<div style="width: 1px; height: 6px; background: {line_color};"></div>')
-        
-        # Add dot
-        center_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill}; border: 1.5px solid {border};" title="{tooltip}"></div>')
-    
-    center_html = ''.join(center_html_parts)
+            prev_key = center_steps[i - 1][0]
+            line_color = get_line_color(prev_key)
+            center_html_parts.append(f'<div style="width:1px;height:6px;background:{line_color};"></div>')
 
-    # Assemble complete flowchart
-    html = f'''
-    <div style="text-align: center; padding: 0.3rem 0; margin: 0;">
-        <div style="font-size: 0.65rem; font-weight: 600; background: linear-gradient(135deg, #0e6537 0%, #21c55d 100%); 
-                    -webkit-background-clip: text; -webkit-text-fill-color: transparent; 
-                    margin-bottom: 0.25rem; letter-spacing: 0.5px;">
+        fill, border = get_dot_style(key)
+        center_html_parts.append(
+            f'<div style="width:6px;height:6px;border-radius:50%;'
+            f'background:{fill};border:1.5px solid {border};" title="{tooltip}"></div>'
+        )
+    center_html = "".join(center_html_parts)
+
+    # -------------------------------------------------------------
+    # 7) Render
+    # -------------------------------------------------------------
+    html = f"""
+    <div style="text-align:center;padding:0.3rem 0;margin:0;">
+        <div style="font-size:0.65rem;font-weight:600;
+                    background:linear-gradient(135deg,#0e6537 0%,#21c55d 100%);
+                    -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+                    margin-bottom:0.25rem;letter-spacing:0.5px;">
             WORKFLOW
         </div>
-        <div style="display: flex; justify-content: center; gap: 1rem; margin: 0.2rem 0;">
-            <!-- Left Column (Historical) -->
-            <div style="display: flex; flex-direction: column; align-items: center; gap: 0;">
+
+        <div style="display:flex;justify-content:center;gap:1rem;margin:0.2rem 0;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:0;">
                 {left_html}
             </div>
-            <!-- Right Column (Scenarios) -->
-            <div style="display: flex; flex-direction: column; align-items: center; gap: 0;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:0;">
                 {right_html}
             </div>
         </div>
-        <!-- Center Column (Mapping + Final) -->
-        <div style="display: flex; justify-content: center; margin-top: 0;">
-            <div style="display: flex; flex-direction: column; align-items: center; gap: 0;">
+
+        <div style="display:flex;justify-content:center;margin-top:0;">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:0;">
                 {center_html}
             </div>
         </div>
-        <div style="font-size: 0.55rem; color: #6b7280; margin-top: 0.15rem;">
-            <span style="color: {done_fill};">●</span> Done 
-            <span style="color: {pending_fill}; margin-left: 0.3rem;">●</span> Pending
+
+        <div style="font-size:0.55rem;color:#6b7280;margin-top:0.15rem;">
+            <span style="color:{done_fill};">●</span> Done
+            <span style="color:{pending_fill};margin-left:0.3rem;">●</span> Pending
         </div>
     </div>
-    '''
-    
+    """
     st.sidebar.markdown(html, unsafe_allow_html=True)
 
 
@@ -184,37 +221,13 @@ def render_app_sidebar():
     """
 
     # -------------------------------------------------------------
-    # A) Pull workflow done-keys from DB and set session_state flags
+    # A) Workflow chart (top) - DB-driven
     # -------------------------------------------------------------
-    pid = st.session_state.get("current_project_id")
-    if pid:
-        try:
-            from core.database.supabase_manager import get_db_manager
-            db = get_db_manager()
-
-            res = (
-                db.client.table("project_progress_steps")
-                .select("step_key")
-                .eq("project_id", pid)
-                .execute()
-            )
-
-            done_keys = {r.get("step_key") for r in (res.data or []) if r.get("step_key")}
-            for k in done_keys:
-                st.session_state[str(k)] = True
-
-        except Exception:
-            # Do not break the app if sidebar DB read fails
-            pass
-
-    # -------------------------------------------------------------
-    # B) Workflow chart (top)
-    # -------------------------------------------------------------
-    render_workflow_flowchart()
+    render_workflow_flowchart_from_db()
     st.sidebar.markdown("---")
 
     # -------------------------------------------------------------
-    # C) Header / Logo
+    # B) Header / Logo
     # -------------------------------------------------------------
     logo_base64 = get_logo_base64()
     if logo_base64:
@@ -252,7 +265,7 @@ def render_app_sidebar():
     st.sidebar.markdown("---")
 
     # -------------------------------------------------------------
-    # D) Auth section
+    # C) Auth section
     # -------------------------------------------------------------
     if st.session_state.get("authenticated", False):
         username = st.session_state.get("username", "User")
@@ -294,7 +307,7 @@ def render_app_sidebar():
     st.sidebar.markdown("---")
 
     # -------------------------------------------------------------
-    # E) Database status
+    # D) Database status
     # -------------------------------------------------------------
     try:
         from core.database.supabase_manager import get_db_manager
@@ -306,7 +319,7 @@ def render_app_sidebar():
     st.sidebar.markdown("---")
 
     # -------------------------------------------------------------
-    # F) Project Status block
+    # E) Project Status block
     # -------------------------------------------------------------
     st.sidebar.markdown(
         """
@@ -338,7 +351,7 @@ def render_app_sidebar():
                 project_name = project.get("project_name", "Unknown")
                 project_code = project.get("project_code", "N/A")
 
-                # ✅ Progress bar linked to projects.completion_percentage
+                # Progress bar linked to projects.completion_percentage
                 progress = int(project.get("completion_percentage") or 0)
                 progress = max(0, min(100, progress))
 
@@ -355,14 +368,14 @@ def render_app_sidebar():
                 st.sidebar.caption("📁 Project not found")
 
         except Exception:
-            # Fallback to session state (does not crash sidebar)
+            # Fallback to session state
             project_name = st.session_state.get("project_name", "Unnamed Project")
             st.sidebar.info(f"**{project_name}**")
     else:
         st.sidebar.caption("📁 No project loaded")
 
     # -------------------------------------------------------------
-    # G) Data status
+    # F) Data status
     # -------------------------------------------------------------
     if st.session_state.get("data_loaded", False):
         st.sidebar.success("✅ Data loaded")
@@ -388,7 +401,7 @@ def render_app_sidebar():
     st.sidebar.markdown("---")
 
     # -------------------------------------------------------------
-    # H) Quick guide
+    # G) Quick guide
     # -------------------------------------------------------------
     with st.sidebar.expander("ℹ️ Quick Guide"):
         st.markdown(
@@ -411,7 +424,7 @@ def render_app_sidebar():
     st.sidebar.markdown("---")
 
     # -------------------------------------------------------------
-    # I) About
+    # H) About
     # -------------------------------------------------------------
     with st.sidebar.expander("📖 About ExplainFutures"):
         st.markdown(
