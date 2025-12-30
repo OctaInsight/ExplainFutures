@@ -1,92 +1,117 @@
 """
-ExplainFutures - Supabase Database Manager
-- Time-series storage + project progress helpers (step-based recompute)
-⚠️ WARNING: plaintext passwords - NOT RECOMMENDED for production!
+ExplainFutures - Supabase Database Manager (APP.PY COMPATIBLE / MINIMAL SCOPE)
+
+Scope of this file (as requested):
+- ONLY the database I/O needed by App.py (login + demo + password reset).
+- Later, we will extend page-by-page for the rest of the application.
+
+Assumptions (based on your schema snippet):
+Tables used:
+- users
+- user_login_history
+- demo_sessions
+
+Notes:
+- Passwords are handled as plaintext to match your current legacy approach (NOT recommended for production).
+- Password reset email sending is NOT implemented here (non-DB). This file only creates/stores reset token+expiry
+  and returns a response that App.py can display.
 """
+
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional
 
 import streamlit as st
 from supabase import create_client, Client
-from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
-import json
-import pandas as pd
-import numpy as np
-import uuid
 
 
 class SupabaseManager:
-    """Supabase manager with time-series data storage capabilities"""
+    """Supabase manager supporting App.py authentication + demo session + password reset token storage."""
 
-    def __init__(self):
-        """Initialize Supabase client from Streamlit secrets"""
+    def __init__(self) -> None:
+        """Initialize Supabase client from Streamlit secrets and test connectivity."""
         try:
             self.url = st.secrets["supabase"]["url"]
             self.key = st.secrets["supabase"]["key"]
-            self.client = create_client(self.url, self.key)
+            self.client: Client = create_client(self.url, self.key)
 
-            # Optional demo IDs (used by App.py demo launcher)
-            # Safe defaults if not provided in secrets
-            self.demo_user_id = None
-            self.demo_project_id = None
-            try:
-                self.demo_user_id = st.secrets.get("app", {}).get("demo_user_id")
-                self.demo_project_id = st.secrets.get("app", {}).get("demo_project_id")
-            except Exception:
-                pass
+            # Optional demo IDs (App.py may rely on them)
+            self.demo_user_id = st.secrets.get("app", {}).get("demo_user_id")
+            self.demo_project_id = st.secrets.get("app", {}).get("demo_project_id")
 
             # Test connection quickly
-            self.client.table("projects").select("project_id").limit(1).execute()
+            self.client.table("users").select("user_id").limit(1).execute()
 
         except Exception as e:
             st.error(f"❌ Database connection failed: {str(e)}")
             raise
 
-    # ------------------------------------------------------------------------
-    # BASIC LOOKUPS (USER / PROJECT)
-    # ------------------------------------------------------------------------
-    def get_project_by_id(self, project_id: str):
-        """Fetch minimal project fields used by the UI (sidebar/home)."""
-        try:
-            res = self.client.table("projects").select(
-                "project_id, project_name, project_code, "
-                "workflow_state, current_page, completion_percentage"
-            ).eq("project_id", project_id).limit(1).execute()
-            return res.data[0] if res.data else None
-        except Exception as e:
-            st.warning(f"get_project_by_id failed: {e}")
-            return None
+    # ---------------------------------------------------------------------
+    # Helpers
+    # ---------------------------------------------------------------------
 
-    def get_user_by_id(self, user_id: str):
-        """Fetch minimal user fields used by the UI."""
+    @staticmethod
+    def _now_iso() -> str:
+        return datetime.now().isoformat()
+
+    @staticmethod
+    def _safe_bool(v: Any, default: bool = False) -> bool:
+        if v is None:
+            return default
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, (int, float)):
+            return bool(v)
+        if isinstance(v, str):
+            return v.strip().lower() in ("1", "true", "yes", "y")
+        return default
+
+    def _log_login_event(
+        self,
+        user_id: Optional[str],
+        successful: bool,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        failure_reason: Optional[str] = None,
+    ) -> None:
+        """Write to user_login_history. Never raises."""
         try:
-            res = self.client.table("users").select(
-                "user_id, username, email, full_name, subscription_tier"
-            ).eq("user_id", user_id).limit(1).execute()
+            payload = {
+                "user_id": user_id,
+                "login_timestamp": self._now_iso(),
+                "ip_address": ip_address,
+                "user_agent": user_agent,
+                "login_successful": successful,
+                "failure_reason": failure_reason,
+            }
+            self.client.table("user_login_history").insert(payload).execute()
+        except Exception:
+            # Logging must never break login UX
+            pass
+
+    # ---------------------------------------------------------------------
+    # Reads used by sidebar / Home later (App.py may call these indirectly)
+    # ---------------------------------------------------------------------
+
+    def get_user_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Minimal user fetch (safe for sidebar, profile headers)."""
+        try:
+            res = (
+                self.client.table("users")
+                .select("user_id, username, email, full_name, subscription_tier, is_active, is_demo_user")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
             return res.data[0] if res.data else None
         except Exception as e:
             st.warning(f"get_user_by_id failed: {e}")
             return None
 
-    def convert_timestamps_to_serializable(self, obj):
-        """
-        Recursively convert pandas Timestamps and datetime objects to ISO format strings
-        for JSON serialization
-        """
-        if isinstance(obj, (pd.Timestamp, datetime)):
-            return obj.isoformat()
-        elif isinstance(obj, dict):
-            return {key: self.convert_timestamps_to_serializable(value) for key, value in obj.items()}
-        elif isinstance(obj, list):
-            return [self.convert_timestamps_to_serializable(item) for item in obj]
-        else:
-            return obj
-
-    # ========================================================================
-    # USER MANAGEMENT (RESTORED - REQUIRED BY App.py)
-    # ========================================================================
-
     def get_user_by_username(self, username: str) -> Optional[Dict[str, Any]]:
-        """Get user by username"""
+        """Fetch user row by username."""
         try:
             res = (
                 self.client.table("users")
@@ -100,16 +125,35 @@ class SupabaseManager:
             st.warning(f"get_user_by_username failed: {e}")
             return None
 
-    def verify_password(self, username: str, password: str) -> bool:
-        """
-        Verify user password (plaintext comparison)
-        ⚠️ WARNING: Insecure - passwords stored in plaintext
-        """
-        user = self.get_user_by_username(username)
-        if not user:
-            return False
+    def get_user_by_email(self, email: str) -> Optional[Dict[str, Any]]:
+        """Fetch user row by email."""
         try:
-            return user.get("password") == password
+            res = (
+                self.client.table("users")
+                .select("*")
+                .eq("email", email)
+                .limit(1)
+                .execute()
+            )
+            return res.data[0] if res.data else None
+        except Exception as e:
+            st.warning(f"get_user_by_email failed: {e}")
+            return None
+
+    # ---------------------------------------------------------------------
+    # App.py: Login
+    # ---------------------------------------------------------------------
+
+    def verify_password(self, user: Dict[str, Any], password: str) -> bool:
+        """
+        Plaintext password verification (legacy).
+        If you later migrate to hashing, only this function needs to change.
+        """
+        try:
+            stored = user.get("password")
+            if stored is None:
+                return False
+            return str(stored) == str(password)
         except Exception:
             return False
 
@@ -117,70 +161,110 @@ class SupabaseManager:
         self,
         username: str,
         password: str,
-        ip_address: str = None,
-        user_agent: str = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Login user (plaintext password verification)
-        Returns user dict if successful, else None.
+        App.py-compatible login:
+        - Fetch user by username
+        - Check is_active
+        - Verify password
+        - Update user login metadata
+        - Log event in user_login_history
+        Returns the user dict on success, else None.
         """
         user = self.get_user_by_username(username)
-
         if not user:
+            self._log_login_event(
+                user_id=None,
+                successful=False,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                failure_reason="user_not_found",
+            )
             return None
 
-        # If you have is_active in schema, respect it. If not present, assume active.
-        if user.get("is_active") is False:
+        if not self._safe_bool(user.get("is_active", True), default=True):
+            self._log_login_event(
+                user_id=user.get("user_id"),
+                successful=False,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                failure_reason="inactive_user",
+            )
             return None
 
-        if not self.verify_password(username, password):
-            # Optional: update failed attempts if columns exist (safe try/except)
+        if not self.verify_password(user, password):
+            # increment failed attempts (best effort)
             try:
-                self.client.table("users").update({
-                    "failed_login_attempts": (user.get("failed_login_attempts") or 0) + 1,
-                    "last_failed_login": datetime.now().isoformat(),
-                    "updated_at": datetime.now().isoformat(),
-                }).eq("user_id", user["user_id"]).execute()
+                failed = int(user.get("failed_login_attempts") or 0) + 1
+                self.client.table("users").update(
+                    {
+                        "failed_login_attempts": failed,
+                        "last_failed_login": self._now_iso(),
+                        "updated_at": self._now_iso(),
+                    }
+                ).eq("user_id", user["user_id"]).execute()
             except Exception:
                 pass
+
+            self._log_login_event(
+                user_id=user.get("user_id"),
+                successful=False,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                failure_reason="invalid_password",
+            )
             return None
 
-        # Update last login fields (safe try/except; depends on your schema)
+        # Successful login: update metadata
         try:
-            self.client.table("users").update({
-                "last_login": datetime.now().isoformat(),
-                "last_login_ip": ip_address,
-                "last_login_user_agent": user_agent,
-                "login_count": (user.get("login_count") or 0) + 1,
-                "failed_login_attempts": 0,
-                "updated_at": datetime.now().isoformat(),
-            }).eq("user_id", user["user_id"]).execute()
+            login_count = int(user.get("login_count") or 0) + 1
+            self.client.table("users").update(
+                {
+                    "last_login": self._now_iso(),
+                    "last_login_ip": ip_address,
+                    "last_login_user_agent": user_agent,
+                    "login_count": login_count,
+                    "failed_login_attempts": 0,
+                    "updated_at": self._now_iso(),
+                }
+            ).eq("user_id", user["user_id"]).execute()
         except Exception:
             pass
 
-        # Optional login history table (safe)
-        try:
-            self.client.table("user_login_history").insert({
-                "user_id": user["user_id"],
-                "login_successful": True,
-                "ip_address": ip_address,
-                "user_agent": user_agent,
-                "created_at": datetime.now().isoformat(),
-            }).execute()
-        except Exception:
-            pass
+        self._log_login_event(
+            user_id=user.get("user_id"),
+            successful=True,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            failure_reason=None,
+        )
 
+        # Return the user row (App.py will store needed fields in session_state)
         return user
 
-    def is_demo_user(self, user_id: str) -> bool:
-        """Check if user is demo user (if demo_user_id configured)."""
-        if not self.demo_user_id:
-            return False
-        return str(user_id) == str(self.demo_user_id)
+    # ---------------------------------------------------------------------
+    # App.py: Demo user
+    # ---------------------------------------------------------------------
 
-    # ========================================================================
-    # DEMO SESSION MANAGEMENT (RESTORED - USED BY App.py "Demo" button)
-    # ========================================================================
+    def is_demo_user(self, user_id: str) -> bool:
+        """
+        App.py uses this to decide demo session behavior.
+        Primary signal is users.is_demo_user (schema includes it).
+        Fallback to secrets demo_user_id if present.
+        """
+        try:
+            u = self.get_user_by_id(user_id)
+            if u and self._safe_bool(u.get("is_demo_user"), default=False):
+                return True
+        except Exception:
+            pass
+
+        if self.demo_user_id and str(user_id) == str(self.demo_user_id):
+            return True
+
+        return False
 
     def create_demo_session(
         self,
@@ -188,351 +272,112 @@ class SupabaseManager:
         project_id: str,
         duration_seconds: int = 1800,
     ) -> Optional[Dict[str, Any]]:
-        """Create a demo session row (if demo_sessions table exists)."""
+        """
+        Insert demo session row and return it.
+        App.py should store session_token / expires_at / session id in session_state.
+        """
         try:
             session_token = str(uuid.uuid4())
-            expires_at = datetime.now() + timedelta(seconds=duration_seconds)
+            expires_at = datetime.now() + timedelta(seconds=int(duration_seconds))
 
-            res = self.client.table("demo_sessions").insert({
-                "user_id": str(user_id),
-                "project_id": str(project_id),
+            payload = {
+                "user_id": user_id,
+                "project_id": project_id,
                 "session_token": session_token,
                 "expires_at": expires_at.isoformat(),
                 "cleanup_required": True,
-                "created_at": datetime.now().isoformat(),
-            }).execute()
-
+            }
+            res = self.client.table("demo_sessions").insert(payload).execute()
             return res.data[0] if res.data else None
         except Exception as e:
-            st.warning(f"create_demo_session failed: {e}")
+            st.warning(f"Failed to create demo session: {e}")
             return None
 
-    def end_demo_session(self, session_id: str):
-        """End demo session and cleanup (if RPC exists)."""
-        try:
-            self.client.rpc("cleanup_demo_session", {"p_session_id": session_id}).execute()
-        except Exception as e:
-            st.warning(f"end_demo_session warning: {e}")
-
-    # ========================================================================
-    # TIME-SERIES DATA MANAGEMENT
-    # ========================================================================
-
-    def save_timeseries_data(
-        self,
-        project_id: str,
-        df_long: pd.DataFrame,
-        data_source: str = "original",
-        batch_size: int = 1000,
-    ) -> bool:
+    def end_demo_session(self, session_id: str) -> None:
         """
-        Save time-series data to database in batches.
-
-        Expected df_long columns:
-          - timestamp OR time
-          - variable
-          - value
+        Best-effort end; if you later create an RPC cleanup function, you can call it here.
+        For now, we mark cleanup_required false and set an optional logout timestamp if present.
         """
         try:
-            # Delete existing for same project+source
-            self.client.table("timeseries_data").delete().eq("project_id", str(project_id)).eq(
-                "data_source", data_source
-            ).execute()
+            # Minimal: disable cleanup_required to indicate session closed
+            self.client.table("demo_sessions").update(
+                {
+                    "cleanup_required": False,
+                }
+            ).eq("session_id", session_id).execute()
+        except Exception:
+            pass
 
-            records = []
+    # ---------------------------------------------------------------------
+    # App.py: Password reset (DB-side only)
+    # ---------------------------------------------------------------------
 
-            time_col = "timestamp" if "timestamp" in df_long.columns else "time"
+    def request_password_reset(self, email: str) -> Dict[str, Any]:
+        """
+        App.py calls this when the user clicks "Restore password".
 
-            for _, row in df_long.iterrows():
-                ts = row[time_col]
-                if isinstance(ts, pd.Timestamp):
-                    ts_str = ts.isoformat()
-                else:
-                    ts_str = pd.Timestamp(ts).isoformat()
+        DB responsibilities here:
+        - Check whether email exists in users.email
+        - If exists: generate token + expiry and store in users.password_reset_token/password_reset_expires
+        - Return a response that App.py can render
 
-                val = row["value"]
-                if pd.isna(val):
-                    val = None
-                else:
-                    val = float(val)
+        Email sending is NOT done here (non-DB). We will implement that later in the app layer.
+        """
+        email = (email or "").strip()
+        if not email:
+            return {
+                "success": False,
+                "message": "Please enter a valid email address.",
+                "email_exists": False,
+            }
 
-                records.append(
-                    {
-                        "project_id": str(project_id),
-                        "timestamp": ts_str,
-                        "variable": str(row["variable"]),
-                        "value": val,
-                        "data_source": data_source,
-                    }
-                )
-
-            total = len(records)
-
-            for i in range(0, total, batch_size):
-                batch = records[i : i + batch_size]
-                self.client.table("timeseries_data").insert(batch).execute()
-
-            return True
-
-        except Exception as e:
-            st.error(f"❌ Error saving time-series data: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
-            return False
-
-    def load_timeseries_data(
-        self, project_id: str, data_source: str = "original", variables: List[str] = None
-    ) -> Optional[pd.DataFrame]:
-        """Load time-series data (long format) from database."""
         try:
-            query = (
-                self.client.table("timeseries_data")
-                .select("timestamp, variable, value")
-                .eq("project_id", str(project_id))
-                .eq("data_source", data_source)
-            )
+            user = self.get_user_by_email(email)
+            if not user:
+                # Safer UX (avoid enumeration): claim email sent.
+                # If you want explicit existence, switch message.
+                return {
+                    "success": True,
+                    "message": "If this email exists in our system, a reset link will be sent.",
+                    "email_exists": False,
+                }
 
-            if variables:
-                query = query.in_("variable", variables)
+            token = str(uuid.uuid4())
+            expires = datetime.now() + timedelta(hours=1)
 
-            all_data = []
-            offset = 0
-            limit = 1000
-
-            while True:
-                result = query.order("timestamp").range(offset, offset + limit - 1).execute()
-
-                if not result.data:
-                    break
-
-                all_data.extend(result.data)
-
-                if len(result.data) < limit:
-                    break
-
-                offset += limit
-
-            if not all_data:
-                return None
-
-            df = pd.DataFrame(all_data)
-            df["timestamp"] = pd.to_datetime(df["timestamp"])
-            df = df.sort_values(["variable", "timestamp"]).reset_index(drop=True)
-            return df
-
-        except Exception as e:
-            st.error(f"❌ Error loading time-series data: {str(e)}")
-            return None
-
-    def get_timeseries_summary(self, project_id: str, data_source: str = "original") -> Dict[str, Any]:
-        """Get summary statistics for stored time-series data."""
-        try:
-            count_result = (
-                self.client.table("timeseries_data")
-                .select("data_id", count="exact")
-                .eq("project_id", str(project_id))
-                .eq("data_source", data_source)
-                .execute()
-            )
-
-            total_records = count_result.count if hasattr(count_result, "count") else 0
-
-            vars_result = (
-                self.client.table("timeseries_data")
-                .select("variable")
-                .eq("project_id", str(project_id))
-                .eq("data_source", data_source)
-                .execute()
-            )
-
-            variables = list(set([r["variable"] for r in vars_result.data])) if vars_result.data else []
+            self.client.table("users").update(
+                {
+                    "password_reset_token": token,
+                    "password_reset_expires": expires.isoformat(),
+                    "updated_at": self._now_iso(),
+                }
+            ).eq("user_id", user["user_id"]).execute()
 
             return {
-                "total_records": total_records,
-                "variable_count": len(variables),
-                "variables": sorted(variables),
-                "data_source": data_source,
+                "success": True,
+                "message": "If this email exists in our system, a reset link will be sent.",
+                "email_exists": True,
+                # App.py may optionally use these for debugging/admin flows.
+                # Do NOT show token to end users in production UI.
+                "reset_token": token,
+                "reset_expires": expires.isoformat(),
+                "user_id": user["user_id"],
             }
 
         except Exception as e:
-            st.error(f"Error getting summary: {str(e)}")
-            return {"total_records": 0, "variable_count": 0, "variables": [], "data_source": data_source}
-
-    # ========================================================================
-    # PROJECT PROGRESS (STEP-BASED)
-    # ========================================================================
-
-    def upsert_progress_step(self, project_id: str, step_key: str, step_value: int) -> bool:
-        """
-        Store a single step contribution as a row in progress_steps.
-        Assumes table:
-          progress_steps(project_id uuid/text, step_key text, step_value int, updated_at timestamp)
-        """
-        try:
-            payload = {
-                "project_id": str(project_id),
-                "step_key": str(step_key),
-                "step_value": int(step_value),
-                "updated_at": datetime.now().isoformat(),
+            st.warning(f"request_password_reset failed: {e}")
+            return {
+                "success": False,
+                "message": "An error occurred while processing your request. Please try again later.",
+                "error": str(e),
             }
-            # Upsert on (project_id, step_key)
-            self.client.table("progress_steps").upsert(payload, on_conflict="project_id,step_key").execute()
-            return True
-        except Exception as e:
-            st.warning(f"upsert_progress_step failed: {e}")
-            return False
 
-    def recompute_and_update_project_progress(
-        self,
-        project_id: str,
-        workflow_state: str = None,
-        current_page: int = None,
-    ) -> bool:
-        """
-        Sum all progress_steps.step_value for the project, then update projects.completion_percentage.
-        """
-        try:
-            res = (
-                self.client.table("progress_steps")
-                .select("step_value")
-                .eq("project_id", str(project_id))
-                .execute()
-            )
-            total = 0
-            if res.data:
-                total = sum(int(r.get("step_value") or 0) for r in res.data)
 
-            update_data = {"completion_percentage": int(total), "updated_at": datetime.now().isoformat()}
-            if workflow_state:
-                update_data["workflow_state"] = workflow_state
-            if current_page is not None:
-                update_data["current_page"] = int(current_page)
-
-            self.client.table("projects").update(update_data).eq("project_id", str(project_id)).execute()
-            return True
-
-        except Exception as e:
-            st.warning(f"recompute_and_update_project_progress failed: {e}")
-            return False
-
-    # ========================================================================
-    # PROJECT PROGRESS (DIRECT UPDATE) - SOME PAGES STILL CALL THIS
-    # ========================================================================
-
-    def update_project_progress(
-        self,
-        project_id: str,
-        workflow_state: str = None,
-        current_page: int = None,
-        completion_percentage: int = None,
-    ):
-        """Directly update projects workflow/progress fields (legacy helper)."""
-        try:
-            update_data = {"updated_at": datetime.now().isoformat()}
-
-            if workflow_state:
-                update_data["workflow_state"] = workflow_state
-            if current_page is not None:
-                update_data["current_page"] = int(current_page)
-            if completion_percentage is not None:
-                update_data["completion_percentage"] = int(completion_percentage)
-
-            self.client.table("projects").update(update_data).eq("project_id", str(project_id)).execute()
-
-        except Exception as e:
-            st.warning(f"update_project_progress warning: {e}")
-
-    # ========================================================================
-    # STEP COMPLETION (JSON FIELD ON PROJECTS)
-    # ========================================================================
-
-    def update_step_completion(self, project_id: str, step_key: str, completed: bool = True) -> bool:
-        """Update completion status of a specific workflow step (projects.step_completion JSON)."""
-        try:
-            result = self.client.table("projects").select("step_completion").eq("project_id", str(project_id)).execute()
-
-            if not result.data:
-                return False
-
-            step_completion = result.data[0].get("step_completion", {})
-            if step_completion is None:
-                step_completion = {}
-
-            step_completion[step_key] = bool(completed)
-
-            self.client.table("projects").update(
-                {"step_completion": step_completion, "updated_at": datetime.now().isoformat()}
-            ).eq("project_id", str(project_id)).execute()
-
-            return True
-
-        except Exception as e:
-            st.error(f"Error updating step completion: {str(e)}")
-            return False
-
-    # ========================================================================
-    # PROJECT LISTING (COMMONLY USED BY HOME PAGE)
-    # ========================================================================
-
-    def get_user_projects(self, user_id: str, include_collaborations: bool = True, include_deleted: bool = False) -> List[Dict]:
-        """Get user's projects (owned + collaborated)"""
-        try:
-            owned_query = self.client.table("projects").select("*").eq("owner_id", str(user_id))
-
-            if not include_deleted:
-                owned_query = owned_query.neq("status", "deleted")
-
-            owned_result = owned_query.execute()
-            owned_projects = owned_result.data if owned_result.data else []
-
-            for p in owned_projects:
-                p["access_role"] = "owner"
-                p["is_owner"] = True
-
-            if not include_collaborations:
-                return owned_projects
-
-            # Collaborations (safe if table exists)
-            try:
-                collab = (
-                    self.client.table("project_collaborators")
-                    .select("project_id, role, can_edit, can_delete, created_at")
-                    .eq("user_id", str(user_id))
-                    .execute()
-                )
-
-                if collab.data:
-                    project_ids = [c["project_id"] for c in collab.data]
-                    if project_ids:
-                        projects_query = self.client.table("projects").select("*").in_("project_id", project_ids)
-                        if not include_deleted:
-                            projects_query = projects_query.neq("status", "deleted")
-
-                        projects_res = projects_query.execute()
-                        if projects_res.data:
-                            collab_dict = {c["project_id"]: c for c in collab.data}
-                            for proj in projects_res.data:
-                                info = collab_dict.get(proj["project_id"])
-                                if info:
-                                    proj["access_role"] = info.get("role", "collaborator")
-                                    proj["is_owner"] = False
-                                    proj["can_edit"] = info.get("can_edit", True)
-                                    proj["can_delete"] = info.get("can_delete", False)
-                                    proj["collaboration_since"] = info.get("created_at")
-
-                            owned_projects.extend(projects_res.data)
-
-            except Exception as e:
-                st.warning(f"Note: Could not fetch shared projects: {e}")
-
-            return owned_projects
-
-        except Exception as e:
-            st.error(f"Error fetching projects: {e}")
-            return []
-
+# ---------------------------------------------------------------------
+# Singleton (Streamlit)
+# ---------------------------------------------------------------------
 
 @st.cache_resource
 def get_db_manager() -> SupabaseManager:
-    """Get cached database manager instance"""
+    """Return cached database manager instance."""
     return SupabaseManager()
