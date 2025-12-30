@@ -26,7 +26,6 @@ WORKFLOW_STEPS = [
     ("Mapping", 12),
     ("Imputation", 13),
     ("Trajectory", 14),
-    ("Feedback", 15),
 ]
 
 
