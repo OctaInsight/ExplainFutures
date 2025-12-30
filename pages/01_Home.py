@@ -392,8 +392,10 @@ def show_project_card(project, db):
                 st.caption(f"🤝 Shared with: {collab_names}")
         
         # Progress
-        progress = project.get('completion_percentage', 0)
+        progress = int(project.get('completion_percentage') or 0)
+        progress = max(0, min(100, progress))
         st.progress(progress / 100, text=f"Progress: {progress}%")
+
         
         # Stats
         col1, col2 = st.columns(2)
