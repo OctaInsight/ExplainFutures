@@ -211,7 +211,9 @@ def render_workflow_flowchart_from_db():
         </div>
     </div>
     """
-    components.html(html, height=180, scrolling=False)
+    with st.sidebar:
+        components.html(html, height=180, scrolling=False)
+
 
 
 
