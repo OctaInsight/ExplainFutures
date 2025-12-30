@@ -396,10 +396,7 @@ def show_project_card(project, db):
         progress = max(0, min(100, progress))
         st.progress(progress / 100, text=f"Progress: {progress}%")
 
-#  del this
-st.write("DEBUG project keys:", sorted(project.keys()))
-st.write("DEBUG total_parameters:", project.get("total_parameters"))
-# del the above
+
         
         # Stats
         col1, col2 = st.columns(2)
