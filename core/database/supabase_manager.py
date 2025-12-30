@@ -1,15 +1,13 @@
 """
 ExplainFutures - Supabase Database Manager
-- Time-series storage
-- Project progress step tracking (Option 2: per-step contributions + recompute)
+- Time-series storage + project progress helpers (step-based recompute)
 ⚠️ WARNING: plaintext passwords - NOT RECOMMENDED for production!
 """
 
 import streamlit as st
-from supabase import create_client
+from supabase import create_client, Client
 from typing import Dict, List, Optional, Any
-import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 import pandas as pd
 import numpy as np
@@ -18,65 +16,97 @@ import numpy as np
 class SupabaseManager:
     """Supabase manager with time-series data storage capabilities"""
 
-    # ---------------------
-    # Section 1 — Init / Client
-    # ---------------------
     def __init__(self):
+        """Initialize Supabase client from Streamlit secrets"""
         try:
             self.url = st.secrets["supabase"]["url"]
             self.key = st.secrets["supabase"]["key"]
             self.client = create_client(self.url, self.key)
 
-            self.demo_user_id = st.secrets["app"].get("demo_user_id")
-            self.demo_project_id = st.secrets["app"].get("demo_project_id")
-
-            # test connection
-            self.client.table("users").select("user_id").limit(1).execute()
+            # Test connection quickly
+            self.client.table("projects").select("project_id").limit(1).execute()
 
         except Exception as e:
             st.error(f"❌ Database connection failed: {str(e)}")
             raise
 
-    # ---------------------
-    # Section 2 — Helpers (serialization)
-    # ---------------------
+    # ------------------------------------------------------------------------
+    # BASIC LOOKUPS (USER / PROJECT)
+    # ------------------------------------------------------------------------
+    def get_project_by_id(self, project_id: str):
+        """Fetch minimal project fields used by the UI (sidebar/home)."""
+        try:
+            res = self.client.table("projects").select(
+                "project_id, project_name, project_code, "
+                "workflow_state, current_page, completion_percentage"
+            ).eq("project_id", project_id).limit(1).execute()
+            return res.data[0] if res.data else None
+        except Exception as e:
+            st.warning(f"get_project_by_id failed: {e}")
+            return None
+
+    def get_user_by_id(self, user_id: str):
+        """Fetch minimal user fields used by the UI."""
+        try:
+            res = self.client.table("users").select(
+                "user_id, username, email, full_name, subscription_tier"
+            ).eq("user_id", user_id).limit(1).execute()
+            return res.data[0] if res.data else None
+        except Exception as e:
+            st.warning(f"get_user_by_id failed: {e}")
+            return None
+
     def convert_timestamps_to_serializable(self, obj):
+        """
+        Recursively convert pandas Timestamps and datetime objects to ISO format strings
+        for JSON serialization
+        """
         if isinstance(obj, (pd.Timestamp, datetime)):
             return obj.isoformat()
-        if isinstance(obj, dict):
-            return {k: self.convert_timestamps_to_serializable(v) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [self.convert_timestamps_to_serializable(x) for x in obj]
-        return obj
+        elif isinstance(obj, dict):
+            return {key: self.convert_timestamps_to_serializable(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self.convert_timestamps_to_serializable(item) for item in obj]
+        else:
+            return obj
 
     # ========================================================================
-    # Section 3 — TIME-SERIES DATA MANAGEMENT
+    # TIME-SERIES DATA MANAGEMENT
     # ========================================================================
+
     def save_timeseries_data(
         self,
         project_id: str,
         df_long: pd.DataFrame,
-        data_source: str = "raw",
-        batch_size: int = 1000
+        data_source: str = "original",
+        batch_size: int = 1000,
     ) -> bool:
         """
-        Save time-series data to `timeseries_data`.
-        Expected columns in df_long: (timestamp|time), variable, value
+        Save time-series data to database in batches.
+
+        Expected df_long columns:
+          - timestamp OR time
+          - variable
+          - value
         """
         try:
-            # delete existing rows for (project_id, data_source)
+            # Delete existing for same project+source
             self.client.table("timeseries_data").delete().eq("project_id", str(project_id)).eq(
                 "data_source", data_source
             ).execute()
 
+            records = []
+
             time_col = "timestamp" if "timestamp" in df_long.columns else "time"
 
-            records = []
             for _, row in df_long.iterrows():
                 ts = row[time_col]
-                ts_iso = ts.isoformat() if isinstance(ts, pd.Timestamp) else pd.Timestamp(ts).isoformat()
+                if isinstance(ts, pd.Timestamp):
+                    ts_str = ts.isoformat()
+                else:
+                    ts_str = pd.Timestamp(ts).isoformat()
 
-                val = row.get("value")
+                val = row["value"]
                 if pd.isna(val):
                     val = None
                 else:
@@ -85,35 +115,40 @@ class SupabaseManager:
                 records.append(
                     {
                         "project_id": str(project_id),
-                        "timestamp": ts_iso,
+                        "timestamp": ts_str,
                         "variable": str(row["variable"]),
                         "value": val,
-                        "data_source": str(data_source),
+                        "data_source": data_source,
                     }
                 )
 
-            for i in range(0, len(records), batch_size):
-                self.client.table("timeseries_data").insert(records[i : i + batch_size]).execute()
+            total = len(records)
+            inserted = 0
+
+            for i in range(0, total, batch_size):
+                batch = records[i : i + batch_size]
+                self.client.table("timeseries_data").insert(batch).execute()
+                inserted += len(batch)
 
             return True
 
         except Exception as e:
             st.error(f"❌ Error saving time-series data: {str(e)}")
+            import traceback
+
+            st.error(traceback.format_exc())
             return False
 
     def load_timeseries_data(
-        self,
-        project_id: str,
-        data_source: str = "raw",
-        variables: List[str] = None
+        self, project_id: str, data_source: str = "original", variables: List[str] = None
     ) -> Optional[pd.DataFrame]:
-        """Load time-series data from `timeseries_data` with pagination."""
+        """Load time-series data (long format) from database."""
         try:
             query = (
                 self.client.table("timeseries_data")
-                .select("timestamp, variable, value, data_source")
+                .select("timestamp, variable, value")
                 .eq("project_id", str(project_id))
-                .eq("data_source", str(data_source))
+                .eq("data_source", data_source)
             )
 
             if variables:
@@ -125,11 +160,15 @@ class SupabaseManager:
 
             while True:
                 result = query.order("timestamp").range(offset, offset + limit - 1).execute()
+
                 if not result.data:
                     break
+
                 all_data.extend(result.data)
+
                 if len(result.data) < limit:
                     break
+
                 offset += limit
 
             if not all_data:
@@ -144,25 +183,28 @@ class SupabaseManager:
             st.error(f"❌ Error loading time-series data: {str(e)}")
             return None
 
-    def get_timeseries_summary(self, project_id: str, data_source: str = "raw") -> Dict[str, Any]:
+    def get_timeseries_summary(self, project_id: str, data_source: str = "original") -> Dict[str, Any]:
+        """Get summary statistics for stored time-series data."""
         try:
             count_result = (
                 self.client.table("timeseries_data")
                 .select("data_id", count="exact")
                 .eq("project_id", str(project_id))
-                .eq("data_source", str(data_source))
+                .eq("data_source", data_source)
                 .execute()
             )
+
             total_records = count_result.count if hasattr(count_result, "count") else 0
 
             vars_result = (
                 self.client.table("timeseries_data")
                 .select("variable")
                 .eq("project_id", str(project_id))
-                .eq("data_source", str(data_source))
+                .eq("data_source", data_source)
                 .execute()
             )
-            variables = list({r["variable"] for r in (vars_result.data or [])})
+
+            variables = list(set([r["variable"] for r in vars_result.data])) if vars_result.data else []
 
             return {
                 "total_records": total_records,
@@ -176,125 +218,79 @@ class SupabaseManager:
             return {"total_records": 0, "variable_count": 0, "variables": [], "data_source": data_source}
 
     # ========================================================================
-    # Section 4 — PROJECT PROGRESS (Option 2)
+    # PROJECT PROGRESS (STEP-BASED)
     # ========================================================================
-    def upsert_progress_step(self, project_id: str, step_key: str, step_percent: int) -> bool:
+
+    def upsert_progress_step(self, project_id: str, step_key: str, step_value: int) -> bool:
         """
-        Store each page/step contribution in `project_progress_steps`.
-        If (project_id, step_key) exists -> update, else insert.
+        Store a single step contribution as a row in progress_steps.
+        Assumes table:
+          progress_steps(project_id uuid/text, step_key text, step_value int, updated_at timestamp)
         """
         try:
-            pid = str(project_id)
-            key = str(step_key)
-            pct = int(step_percent)
-
-            existing = (
-                self.client.table("project_progress_steps")
-                .select("step_id")
-                .eq("project_id", pid)
-                .eq("step_key", key)
-                .limit(1)
-                .execute()
-            )
-
             payload = {
-                "project_id": pid,
-                "step_key": key,
-                "step_percent": pct,
+                "project_id": str(project_id),
+                "step_key": str(step_key),
+                "step_value": int(step_value),
                 "updated_at": datetime.now().isoformat(),
             }
-
-            if existing.data:
-                step_id = existing.data[0]["step_id"]
-                self.client.table("project_progress_steps").update(payload).eq("step_id", step_id).execute()
-            else:
-                payload["created_at"] = datetime.now().isoformat()
-                self.client.table("project_progress_steps").insert(payload).execute()
-
+            # Upsert on (project_id, step_key)
+            self.client.table("progress_steps").upsert(payload, on_conflict="project_id,step_key").execute()
             return True
-
         except Exception as e:
-            st.warning(f"Progress step upsert warning: {str(e)}")
+            st.warning(f"upsert_progress_step failed: {e}")
             return False
 
     def recompute_and_update_project_progress(
         self,
         project_id: str,
-        workflow_state: Optional[str] = None,
-        current_page: Optional[int] = None
-    ) -> int:
-        """
-        Sum all steps in `project_progress_steps` and write to `projects.completion_percentage`.
-        Returns the computed percentage.
-        """
-        pid = str(project_id)
-
-        # Sum step percents
-        steps = (
-            self.client.table("project_progress_steps")
-            .select("step_percent")
-            .eq("project_id", pid)
-            .execute()
-        )
-
-        total = 0
-        for r in (steps.data or []):
-            try:
-                total += int(r.get("step_percent") or 0)
-            except Exception:
-                pass
-
-        # clamp
-        total = max(0, min(100, total))
-
-        update_data = {
-            "completion_percentage": total,
-            "updated_at": datetime.now().isoformat(),
-        }
-        if workflow_state is not None:
-            update_data["workflow_state"] = workflow_state
-        if current_page is not None:
-            update_data["current_page"] = int(current_page)
-
-        self.client.table("projects").update(update_data).eq("project_id", pid).execute()
-        return total
-
-    # ========================================================================
-    # Section 5 — Existing: project progress + step completion
-    # ========================================================================
-    def update_project_progress(
-        self,
-        project_id: str,
         workflow_state: str = None,
         current_page: int = None,
-        completion_percentage: int = None
-    ):
+    ) -> bool:
         """
-        Legacy updater. Keep it, but prefer recompute_and_update_project_progress().
+        Sum all progress_steps.step_value for the project, then update projects.completion_percentage.
         """
         try:
-            update_data = {"updated_at": datetime.now().isoformat()}
+            res = (
+                self.client.table("progress_steps")
+                .select("step_value")
+                .eq("project_id", str(project_id))
+                .execute()
+            )
+            total = 0
+            if res.data:
+                total = sum(int(r.get("step_value") or 0) for r in res.data)
 
+            update_data = {"completion_percentage": int(total), "updated_at": datetime.now().isoformat()}
             if workflow_state:
                 update_data["workflow_state"] = workflow_state
-            if current_page:
-                update_data["current_page"] = current_page
-            if completion_percentage is not None:
-                update_data["completion_percentage"] = completion_percentage
+            if current_page is not None:
+                update_data["current_page"] = int(current_page)
 
             self.client.table("projects").update(update_data).eq("project_id", str(project_id)).execute()
+            return True
 
         except Exception as e:
-            st.warning(f"Progress update warning: {str(e)}")
+            st.warning(f"recompute_and_update_project_progress failed: {e}")
+            return False
+
+    # ========================================================================
+    # STEP COMPLETION (JSON FIELD ON PROJECTS)
+    # ========================================================================
 
     def update_step_completion(self, project_id: str, step_key: str, completed: bool = True) -> bool:
+        """Update completion status of a specific workflow step (projects.step_completion JSON)."""
         try:
             result = self.client.table("projects").select("step_completion").eq("project_id", str(project_id)).execute()
+
             if not result.data:
                 return False
 
-            step_completion = result.data[0].get("step_completion") or {}
-            step_completion[str(step_key)] = bool(completed)
+            step_completion = result.data[0].get("step_completion", {})
+            if step_completion is None:
+                step_completion = {}
+
+            step_completion[step_key] = bool(completed)
 
             self.client.table("projects").update(
                 {"step_completion": step_completion, "updated_at": datetime.now().isoformat()}
@@ -306,22 +302,8 @@ class SupabaseManager:
             st.error(f"Error updating step completion: {str(e)}")
             return False
 
-    def get_step_completion(self, project_id: str) -> Dict[str, bool]:
-        try:
-            result = self.client.table("projects").select("step_completion").eq("project_id", str(project_id)).execute()
-            if result.data and result.data[0].get("step_completion"):
-                return result.data[0]["step_completion"]
-            return {}
-        except Exception as e:
-            st.error(f"Error fetching step completion: {str(e)}")
-            return {}
-
-    # ========================================================================
-    # Section 6 — Keep the rest of your class as-is
-    # (User management, projects, parameters, health report, etc.)
-    # ========================================================================
-
 
 @st.cache_resource
 def get_db_manager() -> SupabaseManager:
+    """Get cached database manager instance"""
     return SupabaseManager()
