@@ -34,7 +34,7 @@ def get_logo_base64():
 # =============================================================================
 def render_workflow_flowchart():
     """
-    Updated workflow indicator with visual flowchart
+    Updated workflow indicator with visual flowchart using tables
     NOTE:
     - Dot completion is driven by st.session_state flags.
     - We will set those flags from DB project_progress_steps.step_key
@@ -73,63 +73,67 @@ def render_workflow_flowchart():
     def is_done(key):
         return bool(st.session_state.get(key, False))
 
-    def dot_html(key, tooltip):
+    def dot_cell(key, tooltip):
         done = is_done(key)
         fill = done_fill if done else pending_fill
         border = done_border if done else pending_border
-        return f'<div style="width: 10px; height: 10px; border-radius: 50%; background: {fill}; border: 2px solid {border}; margin: 0 auto;" title="{tooltip}"></div>'
+        return f'<td style="padding: 0; text-align: center;"><div style="width: 10px; height: 10px; border-radius: 50%; background: {fill}; border: 2px solid {border}; margin: 0 auto;" title="{tooltip}"></div></td>'
 
-    def line_html(key, height="8px"):
+    def line_cell(key, height="8px"):
         done = is_done(key)
         color = done_fill if done else pending_fill
-        return f'<div style="width: 2px; height: {height}; background: {color}; margin: 0 auto;"></div>'
+        return f'<td style="padding: 0; text-align: center;"><div style="width: 2px; height: {height}; background: {color}; margin: 0 auto;"></div></td>'
 
-    # Build left column
-    left_parts = []
+    # Build left column rows
+    left_rows = []
     for i, (key, tooltip) in enumerate(left_steps):
         if i > 0:
-            left_parts.append(line_html(left_steps[i-1][0]))
-        left_parts.append(dot_html(key, tooltip))
-    left_parts.append(line_html(left_steps[-1][0]))
-    left_column = "".join(left_parts)
+            left_rows.append(f'<tr>{line_cell(left_steps[i-1][0])}</tr>')
+        left_rows.append(f'<tr>{dot_cell(key, tooltip)}</tr>')
+    left_rows.append(f'<tr>{line_cell(left_steps[-1][0])}</tr>')
+    left_table = "<table style='margin: 0; padding: 0; border-collapse: collapse;'>" + "".join(left_rows) + "</table>"
 
-    # Build right column
-    right_parts = []
-    right_parts.append(dot_html(right_steps[0][0], right_steps[0][1]))
-    right_parts.append(line_html(right_steps[0][0]))
-    right_parts.append(dot_html(right_steps[1][0], right_steps[1][1]))
-    right_parts.append(line_html(right_steps[1][0], "90px"))
-    right_column = "".join(right_parts)
+    # Build right column rows
+    right_rows = []
+    right_rows.append(f'<tr>{dot_cell(right_steps[0][0], right_steps[0][1])}</tr>')
+    right_rows.append(f'<tr>{line_cell(right_steps[0][0])}</tr>')
+    right_rows.append(f'<tr>{dot_cell(right_steps[1][0], right_steps[1][1])}</tr>')
+    right_rows.append(f'<tr>{line_cell(right_steps[1][0], "90px")}</tr>')
+    right_table = "<table style='margin: 0; padding: 0; border-collapse: collapse;'>" + "".join(right_rows) + "</table>"
 
-    # Build center column
-    center_parts = []
+    # Build center column rows
+    center_rows = []
     for i, (key, tooltip) in enumerate(center_steps):
         if i > 0:
-            center_parts.append(line_html(center_steps[i-1][0]))
-        center_parts.append(dot_html(key, tooltip))
-    center_column = "".join(center_parts)
+            center_rows.append(f'<tr>{line_cell(center_steps[i-1][0])}</tr>')
+        center_rows.append(f'<tr>{dot_cell(key, tooltip)}</tr>')
+    center_table = "<table style='margin: 0; padding: 0; border-collapse: collapse;'>" + "".join(center_rows) + "</table>"
 
-    # Main HTML
+    # Main HTML using table layout
     html = f'''
-<div style="text-align: center; padding: 8px 0; margin: 0; background-color: #f8f9fa; border-radius: 8px;">
+<div style="text-align: center; padding: 8px; margin: 0; background-color: #f8f9fa; border-radius: 8px;">
     <div style="font-size: 11px; font-weight: 700; color: #0e6537; margin-bottom: 8px; letter-spacing: 1px;">
         WORKFLOW
     </div>
     
-    <div style="display: flex; justify-content: center; gap: 15px; margin: 8px 0;">
-        <div style="display: flex; flex-direction: column; align-items: center;">
-            {left_column}
-        </div>
-        <div style="display: flex; flex-direction: column; align-items: center;">
-            {right_column}
-        </div>
-    </div>
+    <table style="margin: 8px auto; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 0 10px; vertical-align: top;">
+                {left_table}
+            </td>
+            <td style="padding: 0 10px; vertical-align: top;">
+                {right_table}
+            </td>
+        </tr>
+    </table>
     
-    <div style="display: flex; justify-content: center; margin-top: 0;">
-        <div style="display: flex; flex-direction: column; align-items: center;">
-            {center_column}
-        </div>
-    </div>
+    <table style="margin: 0 auto; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 0; vertical-align: top;">
+                {center_table}
+            </td>
+        </tr>
+    </table>
     
     <div style="font-size: 10px; color: #6b7280; margin-top: 8px;">
         <span style="color: {done_fill};">●</span> Done &nbsp;&nbsp;
