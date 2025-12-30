@@ -176,17 +176,34 @@ def render_app_sidebar():
     """
     
     # Load step completion from database if available
-    if st.session_state.get('current_project_id'):
+    # Load workflow completion from project_progress_steps.step_key
+    if st.session_state.get("current_project_id"):
         try:
             from core.database.supabase_manager import get_db_manager
             db = get_db_manager()
-            step_completion = db.get_step_completion(st.session_state.current_project_id)
-            
-            # Update session state with database values
-            for key, value in step_completion.items():
-                st.session_state[key] = value
-        except:
-            pass  # If database fails, continue with existing session state
+
+            pid = st.session_state.current_project_id
+
+            res = (
+                db.client.table("project_progress_steps")
+                .select("step_key")
+                .eq("project_id", pid)
+                .execute()
+            )
+
+            done_keys = {r.get("step_key") for r in (res.data or []) if r.get("step_key")}
+
+            # IMPORTANT:
+            # Your render_workflow_flowchart() uses keys like:
+            # "data_loaded", "data_cleaned", "data_explored", ...
+            # Therefore, your pages must write those SAME strings into project_progress_steps.step_key.
+            for k in done_keys:
+                st.session_state[str(k)] = True
+
+        except Exception:
+            pass
+
+
     
     # === WORKFLOW PROGRESS FLOWCHART (FIRST - ABOVE LOGO) ===
     render_workflow_flowchart()
@@ -294,19 +311,37 @@ def render_app_sidebar():
         try:
             from core.database.supabase_manager import get_db_manager
             db = get_db_manager()
+
             
             # Get current project details
-            project_result = db.client.table('projects').select('*').eq('project_id', current_project_id).execute()
-            
+            project_result = (
+                db.client.table("projects")
+                .select("project_name, project_code, completion_percentage, workflow_state")
+                .eq("project_id", current_project_id)
+                .limit(1)
+                .execute()
+            )
+
             if project_result.data:
                 project = project_result.data[0]
-                project_name = project.get('project_name', 'Unknown')
-                project_code = project.get('project_code', 'N/A')
-                progress = project.get('completion_percentage', 0)
-                
+                project_name = project.get("project_name", "Unknown")
+                project_code = project.get("project_code", "N/A")
+
+                progress = int(project.get("completion_percentage") or 0)
+                progress = max(0, min(100, progress))
+
                 st.sidebar.info(f"**{project_name}**")
                 st.sidebar.caption(f"Code: {project_code}")
                 st.sidebar.progress(progress / 100, text=f"Progress: {progress}%")
+
+                workflow_state = project.get("workflow_state", "setup")
+                st.sidebar.caption(f"Stage: {str(workflow_state).title()}")
+
+                # keep UI state consistent
+                st.session_state["completion_percentage"] = progress
+            else:
+                st.sidebar.caption("📁 Project not found")
+
                 
                 # Show workflow state
                 workflow_state = project.get('workflow_state', 'setup')
