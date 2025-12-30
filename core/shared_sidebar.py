@@ -9,6 +9,8 @@ import streamlit as st
 from datetime import datetime
 from pathlib import Path
 import base64
+import textwrap
+
 
 
 # =============================================================================
@@ -167,7 +169,8 @@ def render_workflow_flowchart():
         </div>
     </div>
     """
-    st.sidebar.markdown(html, unsafe_allow_html=True)
+    st.sidebar.markdown(textwrap.dedent(html), unsafe_allow_html=True)
+
 
 
 # =============================================================================
