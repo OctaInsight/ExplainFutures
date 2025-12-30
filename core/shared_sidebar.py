@@ -9,7 +9,6 @@ import streamlit as st
 from datetime import datetime
 from pathlib import Path
 import base64
-import textwrap
 
 
 # =============================================================================
@@ -35,7 +34,7 @@ def get_logo_base64():
 # =============================================================================
 def render_workflow_flowchart():
     """
-    Updated workflow indicator
+    Updated workflow indicator with visual flowchart
     NOTE:
     - Dot completion is driven by st.session_state flags.
     - We will set those flags from DB project_progress_steps.step_key
@@ -71,135 +70,73 @@ def render_workflow_flowchart():
     pending_fill = "#d1d5db"
     pending_border = "#6b7280"
 
-    def get_dot_style(key):
-        is_done = bool(st.session_state.get(key, False))
-        fill = done_fill if is_done else pending_fill
-        border = done_border if is_done else pending_border
-        return fill, border
+    def is_done(key):
+        return bool(st.session_state.get(key, False))
 
-    def get_line_color(key):
-        is_done = bool(st.session_state.get(key, False))
-        return done_fill if is_done else pending_fill
+    def dot_html(key, tooltip):
+        done = is_done(key)
+        fill = done_fill if done else pending_fill
+        border = done_border if done else pending_border
+        return f'<div style="width: 10px; height: 10px; border-radius: 50%; background: {fill}; border: 2px solid {border}; margin: 0 auto;" title="{tooltip}"></div>'
 
-    # Build left column HTML
-    left_html_parts = []
+    def line_html(key, height="8px"):
+        done = is_done(key)
+        color = done_fill if done else pending_fill
+        return f'<div style="width: 2px; height: {height}; background: {color}; margin: 0 auto;"></div>'
+
+    # Build left column
+    left_parts = []
     for i, (key, tooltip) in enumerate(left_steps):
-        fill, border = get_dot_style(key)
         if i > 0:
-            line_color = get_line_color(left_steps[i - 1][0])
-            left_html_parts.append(
-                f'<div style="width: 1px; height: 6px; background: {line_color}; margin: 0 auto;"></div>'
-            )
-        left_html_parts.append(
-            f'<div style="width: 6px; height: 6px; border-radius: 50%; '
-            f'background: {fill}; border: 1.5px solid {border}; margin: 0 auto;" title="{tooltip}"></div>'
-        )
-    left_line_color = get_line_color(left_steps[-1][0])
-    left_html_parts.append(
-        f'<div style="width: 1px; height: 6px; background: {left_line_color}; margin: 0 auto;"></div>'
-    )
-    left_html = "".join(left_html_parts)
+            left_parts.append(line_html(left_steps[i-1][0]))
+        left_parts.append(dot_html(key, tooltip))
+    left_parts.append(line_html(left_steps[-1][0]))
+    left_column = "".join(left_parts)
 
-    # Build right column HTML
-    right_html_parts = []
-    fill1, border1 = get_dot_style(right_steps[0][0])
-    right_html_parts.append(
-        f'<div style="width: 6px; height: 6px; border-radius: 50%; '
-        f'background: {fill1}; border: 1.5px solid {border1}; margin: 0 auto;" title="{right_steps[0][1]}"></div>'
-    )
-    line_color_right = get_line_color(right_steps[0][0])
-    right_html_parts.append(
-        f'<div style="width: 1px; height: 6px; background: {line_color_right}; margin: 0 auto;"></div>'
-    )
-    fill2, border2 = get_dot_style(right_steps[1][0])
-    right_html_parts.append(
-        f'<div style="width: 6px; height: 6px; border-radius: 50%; '
-        f'background: {fill2}; border: 1.5px solid {border2}; margin: 0 auto;" title="{right_steps[1][1]}"></div>'
-    )
-    line_color_right2 = get_line_color(right_steps[1][0])
-    remaining_height = 96 - 18
-    right_html_parts.append(
-        f'<div style="width: 1px; height: {remaining_height}px; background: {line_color_right2}; margin: 0 auto;"></div>'
-    )
-    right_html = "".join(right_html_parts)
+    # Build right column
+    right_parts = []
+    right_parts.append(dot_html(right_steps[0][0], right_steps[0][1]))
+    right_parts.append(line_html(right_steps[0][0]))
+    right_parts.append(dot_html(right_steps[1][0], right_steps[1][1]))
+    right_parts.append(line_html(right_steps[1][0], "90px"))
+    right_column = "".join(right_parts)
 
-    # Build center column HTML
-    center_html_parts = []
+    # Build center column
+    center_parts = []
     for i, (key, tooltip) in enumerate(center_steps):
-        fill, border = get_dot_style(key)
         if i > 0:
-            line_color = get_line_color(center_steps[i - 1][0])
-            center_html_parts.append(
-                f'<div style="width: 1px; height: 6px; background: {line_color}; margin: 0 auto;"></div>'
-            )
-        center_html_parts.append(
-            f'<div style="width: 6px; height: 6px; border-radius: 50%; '
-            f'background: {fill}; border: 1.5px solid {border}; margin: 0 auto;" title="{tooltip}"></div>'
-        )
-    center_html = "".join(center_html_parts)
+            center_parts.append(line_html(center_steps[i-1][0]))
+        center_parts.append(dot_html(key, tooltip))
+    center_column = "".join(center_parts)
 
-    # Complete HTML structure
-    html = f"""
-    <style>
-        .workflow-container {{
-            text-align: center;
-            padding: 0.3rem 0;
-            margin: 0;
-        }}
-        .workflow-title {{
-            font-size: 0.65rem;
-            font-weight: 600;
-            background: linear-gradient(135deg, #0e6537 0%, #21c55d 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 0.25rem;
-            letter-spacing: 0.5px;
-        }}
-        .workflow-columns {{
-            display: flex;
-            justify-content: center;
-            gap: 1rem;
-            margin: 0.2rem 0;
-        }}
-        .workflow-column {{
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }}
-        .workflow-legend {{
-            font-size: 0.55rem;
-            color: #6b7280;
-            margin-top: 0.15rem;
-        }}
-    </style>
+    # Main HTML
+    html = f'''
+<div style="text-align: center; padding: 8px 0; margin: 0; background-color: #f8f9fa; border-radius: 8px;">
+    <div style="font-size: 11px; font-weight: 700; color: #0e6537; margin-bottom: 8px; letter-spacing: 1px;">
+        WORKFLOW
+    </div>
     
-    <div class="workflow-container">
-        <div class="workflow-title">
-            WORKFLOW
+    <div style="display: flex; justify-content: center; gap: 15px; margin: 8px 0;">
+        <div style="display: flex; flex-direction: column; align-items: center;">
+            {left_column}
         </div>
-
-        <div class="workflow-columns">
-            <div class="workflow-column">
-                {left_html}
-            </div>
-            <div class="workflow-column">
-                {right_html}
-            </div>
-        </div>
-
-        <div style="display: flex; justify-content: center; margin-top: 0;">
-            <div class="workflow-column">
-                {center_html}
-            </div>
-        </div>
-
-        <div class="workflow-legend">
-            <span style="color: {done_fill};">●</span> Done
-            <span style="color: {pending_fill}; margin-left: 0.3rem;">●</span> Pending
+        <div style="display: flex; flex-direction: column; align-items: center;">
+            {right_column}
         </div>
     </div>
-    """
+    
+    <div style="display: flex; justify-content: center; margin-top: 0;">
+        <div style="display: flex; flex-direction: column; align-items: center;">
+            {center_column}
+        </div>
+    </div>
+    
+    <div style="font-size: 10px; color: #6b7280; margin-top: 8px;">
+        <span style="color: {done_fill};">●</span> Done &nbsp;&nbsp;
+        <span style="color: {pending_fill};">●</span> Pending
+    </div>
+</div>
+'''
     
     st.sidebar.markdown(html, unsafe_allow_html=True)
 
