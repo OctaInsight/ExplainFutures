@@ -209,14 +209,18 @@ with col_left:
                     with st.spinner("Processing request..."):
                         db = get_db_manager()
                         result = db.request_password_reset(reset_email)
-                        
-                        if result['success']:
-                            st.success(f"✅ {result['message']}")
-                            time.sleep(2)
-                            st.session_state.show_password_reset = False
-                            st.rerun()
+
+# the following section was corrected in 30/12/2025 ------
+
+                        if result.get("success"):
+                            if result.get("email_exists"):
+                                st.success("Account found. We have sent password reset instructions to your email.")
+                            else:
+                                st.error("This email is not registered in our system.")
                         else:
-                            st.warning(f"⚠️ {result['message']}")
+                            st.error(result.get("message", "Password reset failed."))
+# end of the corrections ------------------------------------
+
             
             if cancel_button:
                 st.session_state.show_password_reset = False
