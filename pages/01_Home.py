@@ -396,6 +396,7 @@ def show_project_card(project, db):
         progress = max(0, min(100, progress))
         st.progress(progress / 100, text=f"Progress: {progress}%")
 
+
         
         # Stats
         col1, col2 = st.columns(2)
@@ -622,7 +623,9 @@ def show_project_row(project, db):
                     st.caption(f"🤝 **Collaborators:** {collab_list}")
         
         with col2:
-            st.metric("Progress", f"{project.get('completion_percentage', 0)}%")
+            progress = int(project.get('completion_percentage') or 0)
+            progress = max(0, min(100, progress))
+            st.metric("Progress", f"{progress}%")
             st.metric("Parameters", project.get('total_parameters', 0))
             st.metric("Scenarios", project.get('total_scenarios', 0))
         
