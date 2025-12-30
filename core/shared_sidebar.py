@@ -9,6 +9,8 @@ import streamlit as st
 from datetime import datetime
 from pathlib import Path
 import base64
+import streamlit.components.v1 as components
+
 
 
 # =============================================================================
