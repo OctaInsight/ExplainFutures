@@ -212,13 +212,15 @@ with col_left:
 
 # the following section was corrected in 30/12/2025 ------
 
-                        if result.get("success"):
-                            if result.get("email_exists"):
-                                st.success("Account found. We have sent password reset instructions to your email.")
-                            else:
-                                st.error("This email is not registered in our system.")
+
+                        if not result:
+                            st.error("Unexpected error. Please try again.")
                         else:
-                            st.error(result.get("message", "Password reset failed."))
+                            if result.get("email_exists"):
+                                st.success("Account found. Please contact sales@octainsight.com to reset your password.")
+                            else:
+                                st.error("No account found with this email, please contact sales@octainsight.com to create an accounr.")
+
 # end of the corrections ------------------------------------
 
             
