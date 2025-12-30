@@ -657,14 +657,13 @@ def process_data(df, time_column, value_columns, datetime_format):
         st.session_state.health_report = comprehensive_report
         st.session_state.data_loaded = True
     
-    update_project_progress(stage="data_imported", page=2)
+    update_project_progress(stage="data_imported", page=2, percentage=7)
     
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
         try:
-            db.update_project_progress_steps(
+            db.update_step_completion(
                 project_id=st.session_state.current_project_id,
                 step_key='data_loaded',
-                step_percent='7'
                 completed=True
             )
         except:
