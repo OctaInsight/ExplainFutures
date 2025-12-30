@@ -140,6 +140,268 @@ class SupabaseManager:
             st.warning(f"get_user_by_email failed: {e}")
             return None
 
+
+
+# ---------------------------------------------------------------------
+# Home (01_Home.py) + Progress I/O
+# Tables:
+# - projects
+# - project_collaborators
+# - project_progress_steps
+# ---------------------------------------------------------------------
+
+def get_project_by_id(self, project_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch a single project (used by sidebar and project headers)."""
+    try:
+        res = (
+            self.client.table("projects")
+            .select(
+                "project_id, project_name, project_code, description, owner_id, "
+                "application_name, status, visibility, is_demo_project, "
+                "workflow_state, current_page, completion_percentage, "
+                "baseline_year, scenario_target_year, settings, tags, "
+                "created_at, updated_at, last_accessed, team_size"
+            )
+            .eq("project_id", project_id)
+            .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else None
+    except Exception as e:
+        st.warning(f"get_project_by_id failed: {e}")
+        return None
+
+
+def get_user_projects(
+    self,
+    user_id: str,
+    include_collaborations: bool = True,
+    include_deleted: bool = False,
+    application_name: str = "explainfutures",
+) -> List[Dict[str, Any]]:
+    """
+    Home page: list projects owned by user + collaborated projects.
+    Ensures completion_percentage is returned for progress bars.
+    """
+    try:
+        # Owned projects
+        owned_query = (
+            self.client.table("projects")
+            .select(
+                "project_id, project_name, project_code, description, owner_id, "
+                "application_name, status, visibility, is_demo_project, "
+                "workflow_state, current_page, completion_percentage, "
+                "baseline_year, scenario_target_year, tags, created_at, updated_at, last_accessed, team_size"
+            )
+            .eq("owner_id", user_id)
+            .eq("application_name", application_name)
+        )
+
+        if not include_deleted:
+            owned_query = owned_query.neq("status", "deleted")
+
+        owned_res = owned_query.order("updated_at", desc=True).execute()
+        owned_projects = owned_res.data if owned_res.data else []
+
+        for p in owned_projects:
+            p["access_role"] = "owner"
+            p["is_owner"] = True
+
+        if not include_collaborations:
+            return owned_projects
+
+        # Collaborated projects
+        collab_query = (
+            self.client.table("project_collaborators")
+            .select("project_id, role, can_view, can_edit, can_delete, can_export, invitation_status, created_at")
+            .eq("user_id", user_id)
+        )
+        collab_res = collab_query.execute()
+        collabs = collab_res.data if collab_res.data else []
+
+        if not collabs:
+            return owned_projects
+
+        project_ids = [c["project_id"] for c in collabs if c.get("project_id")]
+        if not project_ids:
+            return owned_projects
+
+        proj_query = (
+            self.client.table("projects")
+            .select(
+                "project_id, project_name, project_code, description, owner_id, "
+                "application_name, status, visibility, is_demo_project, "
+                "workflow_state, current_page, completion_percentage, "
+                "baseline_year, scenario_target_year, tags, created_at, updated_at, last_accessed, team_size"
+            )
+            .in_("project_id", project_ids)
+            .eq("application_name", application_name)
+        )
+
+        if not include_deleted:
+            proj_query = proj_query.neq("status", "deleted")
+
+        proj_res = proj_query.execute()
+        collab_projects = proj_res.data if proj_res.data else []
+
+        collab_dict = {c["project_id"]: c for c in collabs}
+        for p in collab_projects:
+            c = collab_dict.get(p["project_id"], {})
+            p["access_role"] = c.get("role", "viewer")
+            p["is_owner"] = False
+            p["can_view"] = c.get("can_view", True)
+            p["can_edit"] = c.get("can_edit", False)
+            p["can_delete"] = c.get("can_delete", False)
+            p["can_export"] = c.get("can_export", True)
+            p["invitation_status"] = c.get("invitation_status", "accepted")
+
+        owned_projects.extend(collab_projects)
+        return owned_projects
+
+    except Exception as e:
+        st.warning(f"get_user_projects failed: {e}")
+        return []
+
+
+def get_project_collaborators(self, project_id: str) -> List[Dict[str, Any]]:
+    """Home page: show collaborators list (minimal, safe)."""
+    try:
+        # Pull collaborator rows
+        collab_res = (
+            self.client.table("project_collaborators")
+            .select(
+                "collaborator_id, project_id, user_id, role, can_view, can_edit, can_delete, can_export, "
+                "invitation_status, invited_by, invited_at, accepted_at, last_accessed, created_at, updated_at"
+            )
+            .eq("project_id", project_id)
+            .execute()
+        )
+        collabs = collab_res.data if collab_res.data else []
+        if not collabs:
+            return []
+
+        # Pull user info for these collaborators
+        user_ids = list({c["user_id"] for c in collabs if c.get("user_id")})
+        users_res = (
+            self.client.table("users")
+            .select("user_id, username, email, full_name")
+            .in_("user_id", user_ids)
+            .execute()
+        )
+        users = users_res.data if users_res.data else []
+        users_dict = {u["user_id"]: u for u in users}
+
+        out = []
+        for c in collabs:
+            u = users_dict.get(c["user_id"], {})
+            out.append(
+                {
+                    **c,
+                    "username": u.get("username"),
+                    "email": u.get("email"),
+                    "full_name": u.get("full_name"),
+                }
+            )
+        return out
+
+    except Exception as e:
+        st.warning(f"get_project_collaborators failed: {e}")
+        return []
+
+
+def touch_project_last_accessed(self, project_id: str, user_id: Optional[str] = None) -> None:
+    """Called when opening a project from Home to update recency fields."""
+    try:
+        payload = {"last_accessed": self._now_iso(), "updated_at": self._now_iso()}
+        if user_id:
+            payload["last_activity_by"] = user_id
+        self.client.table("projects").update(payload).eq("project_id", project_id).execute()
+    except Exception:
+        pass
+
+
+# ----------------------------
+# Progress-step functions (Option 2)
+# ----------------------------
+
+def upsert_progress_step(self, project_id: str, step_key: str, step_percent: int) -> bool:
+    """
+    Insert/update a single step contribution in project_progress_steps.
+    Requires a UNIQUE constraint on (project_id, step_key) OR uses manual update fallback.
+    """
+    try:
+        step_percent = int(step_percent)
+
+        # Try upsert (works if unique constraint exists in DB)
+        payload = {
+            "project_id": project_id,
+            "step_key": step_key,
+            "step_percent": step_percent,
+            "updated_at": self._now_iso(),
+        }
+
+        try:
+            self.client.table("project_progress_steps").upsert(payload).execute()
+            return True
+        except Exception:
+            # Fallback: manual update then insert
+            existing = (
+                self.client.table("project_progress_steps")
+                .select("id")
+                .eq("project_id", project_id)
+                .eq("step_key", step_key)
+                .limit(1)
+                .execute()
+            )
+            if existing.data:
+                self.client.table("project_progress_steps").update(
+                    {"step_percent": step_percent, "updated_at": self._now_iso()}
+                ).eq("id", existing.data[0]["id"]).execute()
+            else:
+                self.client.table("project_progress_steps").insert(payload).execute()
+            return True
+
+    except Exception as e:
+        st.warning(f"upsert_progress_step failed: {e}")
+        return False
+
+
+def recompute_and_update_project_progress(
+    self,
+    project_id: str,
+    workflow_state: Optional[str] = None,
+    current_page: Optional[int] = None,
+) -> int:
+    """
+    Sum all step_percent from project_progress_steps and write it to projects.completion_percentage.
+    Returns the computed percentage.
+    """
+    try:
+        res = (
+            self.client.table("project_progress_steps")
+            .select("step_percent")
+            .eq("project_id", project_id)
+            .execute()
+        )
+        rows = res.data if res.data else []
+        total = sum(int(r.get("step_percent") or 0) for r in rows)
+        total = max(0, min(100, int(total)))
+
+        update_payload = {"completion_percentage": total, "updated_at": self._now_iso()}
+        if workflow_state is not None:
+            update_payload["workflow_state"] = workflow_state
+        if current_page is not None:
+            update_payload["current_page"] = int(current_page)
+
+        self.client.table("projects").update(update_payload).eq("project_id", project_id).execute()
+        return total
+
+    except Exception as e:
+        st.warning(f"recompute_and_update_project_progress failed: {e}")
+        return 0
+ 
+  
+
     # ---------------------------------------------------------------------
     # App.py: Login
     # ---------------------------------------------------------------------
