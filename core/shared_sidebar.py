@@ -34,7 +34,7 @@ def get_logo_base64():
 # =============================================================================
 def render_workflow_flowchart():
     """
-    Updated workflow indicator with visual flowchart using tables
+    Updated workflow indicator
     NOTE:
     - Dot completion is driven by st.session_state flags.
     - We will set those flags from DB project_progress_steps.step_key
@@ -70,77 +70,106 @@ def render_workflow_flowchart():
     pending_fill = "#d1d5db"
     pending_border = "#6b7280"
 
-    def is_done(key):
-        return bool(st.session_state.get(key, False))
+    def get_dot_style(key):
+        """Get style for a dot based on completion"""
+        is_done = st.session_state.get(key, False)
+        fill = done_fill if is_done else pending_fill
+        border = done_border if is_done else pending_border
+        return fill, border
 
-    def dot_cell(key, tooltip):
-        done = is_done(key)
-        fill = done_fill if done else pending_fill
-        border = done_border if done else pending_border
-        return f'<td style="padding: 0; text-align: center;"><div style="width: 10px; height: 10px; border-radius: 50%; background: {fill}; border: 2px solid {border}; margin: 0 auto;" title="{tooltip}"></div></td>'
+    def get_line_color(key):
+        """Get line color based on completion"""
+        is_done = st.session_state.get(key, False)
+        return done_fill if is_done else pending_fill
 
-    def line_cell(key, height="8px"):
-        done = is_done(key)
-        color = done_fill if done else pending_fill
-        return f'<td style="padding: 0; text-align: center;"><div style="width: 2px; height: {height}; background: {color}; margin: 0 auto;"></div></td>'
-
-    # Build left column rows
-    left_rows = []
+    # Build left column (8 dots with connecting lines)
+    left_html_parts = []
     for i, (key, tooltip) in enumerate(left_steps):
+        fill, border = get_dot_style(key)
+        
         if i > 0:
-            left_rows.append(f'<tr>{line_cell(left_steps[i-1][0])}</tr>')
-        left_rows.append(f'<tr>{dot_cell(key, tooltip)}</tr>')
-    left_rows.append(f'<tr>{line_cell(left_steps[-1][0])}</tr>')
-    left_table = "<table style='margin: 0; padding: 0; border-collapse: collapse;'>" + "".join(left_rows) + "</table>"
+            # Add connecting line
+            line_color = get_line_color(left_steps[i-1][0])
+            left_html_parts.append(f'<div style="width: 1px; height: 6px; background: {line_color};"></div>')
+        
+        # Add dot
+        left_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill}; border: 1.5px solid {border};" title="{tooltip}"></div>')
+    
+    # Final line from left to center
+    left_line_color = get_line_color(left_steps[-1][0])
+    left_html_parts.append(f'<div style="width: 1px; height: 6px; background: {left_line_color};"></div>')
+    
+    left_html = ''.join(left_html_parts)
 
-    # Build right column rows
-    right_rows = []
-    right_rows.append(f'<tr>{dot_cell(right_steps[0][0], right_steps[0][1])}</tr>')
-    right_rows.append(f'<tr>{line_cell(right_steps[0][0])}</tr>')
-    right_rows.append(f'<tr>{dot_cell(right_steps[1][0], right_steps[1][1])}</tr>')
-    right_rows.append(f'<tr>{line_cell(right_steps[1][0], "90px")}</tr>')
-    right_table = "<table style='margin: 0; padding: 0; border-collapse: collapse;'>" + "".join(right_rows) + "</table>"
+    # Build right column (2 dots with connecting line)
+    right_html_parts = []
+    
+    # First dot
+    fill1, border1 = get_dot_style(right_steps[0][0])
+    right_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill1}; border: 1.5px solid {border1};" title="{right_steps[0][1]}"></div>')
+    
+    # Connecting line between the two right dots
+    line_color_right = get_line_color(right_steps[0][0])
+    right_html_parts.append(f'<div style="width: 1px; height: 6px; background: {line_color_right};"></div>')
+    
+    # Second dot
+    fill2, border2 = get_dot_style(right_steps[1][0])
+    right_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill2}; border: 1.5px solid {border2};" title="{right_steps[1][1]}"></div>')
+    
+    # Long line from second dot to center (to match left column height)
+    line_color_right2 = get_line_color(right_steps[1][0])
+    # Calculate height to match left column: 8 dots + 8 lines = 8*6 + 8*6 = 96px minus the 2 dots and 1 line we already have
+    remaining_height = 96 - 18  # 78px
+    right_html_parts.append(f'<div style="width: 1px; height: {remaining_height}px; background: {line_color_right2};"></div>')
+    
+    right_html = ''.join(right_html_parts)
 
-    # Build center column rows
-    center_rows = []
+    # Build center column (3 dots for mapping/completion/final)
+    center_html_parts = []
+    
     for i, (key, tooltip) in enumerate(center_steps):
+        fill, border = get_dot_style(key)
+        
         if i > 0:
-            center_rows.append(f'<tr>{line_cell(center_steps[i-1][0])}</tr>')
-        center_rows.append(f'<tr>{dot_cell(key, tooltip)}</tr>')
-    center_table = "<table style='margin: 0; padding: 0; border-collapse: collapse;'>" + "".join(center_rows) + "</table>"
+            # Add connecting line between center steps
+            line_color = get_line_color(center_steps[i-1][0])
+            center_html_parts.append(f'<div style="width: 1px; height: 6px; background: {line_color};"></div>')
+        
+        # Add dot
+        center_html_parts.append(f'<div style="width: 6px; height: 6px; border-radius: 50%; background: {fill}; border: 1.5px solid {border};" title="{tooltip}"></div>')
+    
+    center_html = ''.join(center_html_parts)
 
-    # Main HTML using table layout
+    # Assemble complete flowchart
     html = f'''
-<div style="text-align: center; padding: 8px; margin: 0; background-color: #f8f9fa; border-radius: 8px;">
-    <div style="font-size: 11px; font-weight: 700; color: #0e6537; margin-bottom: 8px; letter-spacing: 1px;">
-        WORKFLOW
+    <div style="text-align: center; padding: 0.3rem 0; margin: 0;">
+        <div style="font-size: 0.65rem; font-weight: 600; background: linear-gradient(135deg, #0e6537 0%, #21c55d 100%); 
+                    -webkit-background-clip: text; -webkit-text-fill-color: transparent; 
+                    margin-bottom: 0.25rem; letter-spacing: 0.5px;">
+            WORKFLOW
+        </div>
+        <div style="display: flex; justify-content: center; gap: 1rem; margin: 0.2rem 0;">
+            <!-- Left Column (Historical) -->
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 0;">
+                {left_html}
+            </div>
+            <!-- Right Column (Scenarios) -->
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 0;">
+                {right_html}
+            </div>
+        </div>
+        <!-- Center Column (Mapping + Final) -->
+        <div style="display: flex; justify-content: center; margin-top: 0;">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 0;">
+                {center_html}
+            </div>
+        </div>
+        <div style="font-size: 0.55rem; color: #6b7280; margin-top: 0.15rem;">
+            <span style="color: {done_fill};">●</span> Done 
+            <span style="color: {pending_fill}; margin-left: 0.3rem;">●</span> Pending
+        </div>
     </div>
-    
-    <table style="margin: 8px auto; border-collapse: collapse;">
-        <tr>
-            <td style="padding: 0 10px; vertical-align: top;">
-                {left_table}
-            </td>
-            <td style="padding: 0 10px; vertical-align: top;">
-                {right_table}
-            </td>
-        </tr>
-    </table>
-    
-    <table style="margin: 0 auto; border-collapse: collapse;">
-        <tr>
-            <td style="padding: 0; vertical-align: top;">
-                {center_table}
-            </td>
-        </tr>
-    </table>
-    
-    <div style="font-size: 10px; color: #6b7280; margin-top: 8px;">
-        <span style="color: {done_fill};">●</span> Done &nbsp;&nbsp;
-        <span style="color: {pending_fill};">●</span> Pending
-    </div>
-</div>
-'''
+    '''
     
     st.sidebar.markdown(html, unsafe_allow_html=True)
 
