@@ -195,6 +195,83 @@ def initialize_cleaning_history():
     if "has_unsaved_changes" not in st.session_state:
         st.session_state.has_unsaved_changes = False
 
+# ______ the following is the load function ------
+# ---------------------
+# Section A: Page-3 I/O on load (DB → session_state)
+# ---------------------
+import streamlit as st
+import pandas as pd
+
+def load_page3_data_on_page_load():
+    """
+    Page 3 load:
+      1) timeseries_data(original)   -> st.session_state.df_long
+      2) timeseries_data(cleaned)    -> st.session_state.df_clean_long (optional)
+      3) parameters                  -> st.session_state.project_parameters
+      4) health_reports(latest)      -> st.session_state.health_report (optional)
+
+    Safe behavior:
+      - If any dataset does not exist yet, sets None / empty list and continues.
+      - Does NOT modify DB.
+    """
+    # Require a loaded project
+    project_id = st.session_state.get("current_project_id")
+    if not project_id:
+        return False
+
+    # DB manager
+    try:
+        from core.database.supabase_manager import get_db_manager
+        db = get_db_manager()
+    except Exception as e:
+        st.warning(f"DB unavailable: {e}")
+        return False
+
+    # 1) Load ORIGINAL timeseries (required for this page)
+    df_long = None
+    try:
+        df_long = db.load_timeseries_data(project_id, data_source="original")
+    except Exception:
+        df_long = None
+
+    st.session_state["df_long"] = df_long  # may be None
+
+    # 2) Load CLEANED timeseries (optional, for showing prior work)
+    df_clean_long = None
+    try:
+        df_clean_long = db.load_timeseries_data(project_id, data_source="cleaned")
+    except Exception:
+        df_clean_long = None
+
+    st.session_state["df_clean_long"] = df_clean_long  # may be None
+
+    # 3) Load PARAMETERS (optional but recommended for UI + summaries)
+    project_parameters = []
+    try:
+        project_parameters = db.get_project_parameters(project_id) or []
+    except Exception:
+        project_parameters = []
+
+    st.session_state["project_parameters"] = project_parameters
+
+    # 4) Load latest HEALTH REPORT (optional)
+    health_report = None
+    try:
+        health_report = db.get_health_report(project_id)
+    except Exception:
+        health_report = None
+
+    st.session_state["health_report"] = health_report
+
+    # Convenience flags (optional)
+    st.session_state["has_original_data"] = isinstance(df_long, pd.DataFrame) and not df_long.empty
+    st.session_state["has_cleaned_data"] = isinstance(df_clean_long, pd.DataFrame) and not df_clean_long.empty
+
+    return True
+
+
+# ------ end of the load function ------- 
+
 
 def add_to_cleaning_history(operation_type, method, variables, details=None):
     """Add operation to history"""
@@ -433,6 +510,16 @@ def main():
     """Main function"""
 
     initialize_cleaning_history()
+
+# ---- call the load function ------
+# after st.set_page_config(...) and render_app_sidebar()
+    if st.session_state.get("authenticated") and st.session_state.get("current_project_id"):
+        if "page3_loaded_once" not in st.session_state:
+            load_page3_data_on_page_load()
+            st.session_state["page3_loaded_once"] = True
+
+
+# ---- end the call to load function ----
 
     if not st.session_state.get('current_project_id'):
         st.warning("⚠️ No project selected")
