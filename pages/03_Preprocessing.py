@@ -360,75 +360,106 @@ def plot_before_after_comparison(df_all, var_raw, var_cleaned):
 # SECTION 5: ENHANCED CLEANING FUNCTIONS (MORE SCIENTIFIC METHODS)
 # =============================================================================
 
-def handle_missing_values(df, variables, method, **kwargs):
-    """Handle missing values with scientific methods"""
+def handle_missing_values(df, variables, method, new_var_names=None, **kwargs):
+    """
+    Handle missing values by creating NEW cleaned variables
+    Returns: (updated_df, list_of_new_variable_names)
+    """
     df_copy = df.copy()
+    new_columns = []
     
-    for var in variables:
-        mask = df_copy['variable'] == var
-        values = df_copy.loc[mask, 'value'].copy()
+    for idx, var in enumerate(variables):
+        # Create new variable name
+        if new_var_names and idx < len(new_var_names):
+            new_var_name = new_var_names[idx]
+        else:
+            method_short = method.lower().replace(' ', '_').replace('(', '').replace(')', '')
+            new_var_name = f"{var}_{method_short}_missing"
         
+        new_columns.append(new_var_name)
+        
+        # Get original variable data
+        var_data = df[df['variable'] == var].copy()
+        values = var_data['value'].copy()
+        
+        # Create new cleaned variable
+        cleaned_data = var_data.copy()
+        cleaned_data['variable'] = new_var_name
+        
+        # Apply cleaning method
         if method == "Drop Rows":
-            df_copy = df_copy[~(mask & df_copy['value'].isna())]
-        
+            cleaned_data = cleaned_data[cleaned_data['value'].notna()]
         elif method == "Forward Fill (LOCF)":
-            df_copy.loc[mask, 'value'] = values.fillna(method='ffill')
-        
+            cleaned_data.loc[:, 'value'] = values.fillna(method='ffill')
         elif method == "Backward Fill (NOCB)":
-            df_copy.loc[mask, 'value'] = values.fillna(method='bfill')
-        
+            cleaned_data.loc[:, 'value'] = values.fillna(method='bfill')
         elif method == "Linear Interpolation":
-            df_copy.loc[mask, 'value'] = values.interpolate(method='linear')
-        
+            cleaned_data.loc[:, 'value'] = values.interpolate(method='linear')
         elif method == "Cubic Spline Interpolation":
             if len(values.dropna()) >= 4:
-                df_copy.loc[mask, 'value'] = values.interpolate(method='cubic')
+                cleaned_data.loc[:, 'value'] = values.interpolate(method='cubic')
             else:
-                df_copy.loc[mask, 'value'] = values.interpolate(method='linear')
-        
+                cleaned_data.loc[:, 'value'] = values.interpolate(method='linear')
         elif method == "Polynomial Interpolation":
             order = kwargs.get('poly_order', 2)
             if len(values.dropna()) >= order + 1:
-                df_copy.loc[mask, 'value'] = values.interpolate(method='polynomial', order=order)
+                cleaned_data.loc[:, 'value'] = values.interpolate(method='polynomial', order=order)
             else:
-                df_copy.loc[mask, 'value'] = values.interpolate(method='linear')
-        
+                cleaned_data.loc[:, 'value'] = values.interpolate(method='linear')
         elif method == "Mean Imputation":
-            df_copy.loc[mask, 'value'] = values.fillna(values.mean())
-        
+            cleaned_data.loc[:, 'value'] = values.fillna(values.mean())
         elif method == "Median Imputation":
-            df_copy.loc[mask, 'value'] = values.fillna(values.median())
-        
+            cleaned_data.loc[:, 'value'] = values.fillna(values.median())
         elif method == "Mode Imputation":
             mode_val = values.mode()[0] if len(values.mode()) > 0 else values.mean()
-            df_copy.loc[mask, 'value'] = values.fillna(mode_val)
-        
+            cleaned_data.loc[:, 'value'] = values.fillna(mode_val)
         elif method == "KNN Imputation":
             from sklearn.impute import KNNImputer
             k = kwargs.get('k_neighbors', 5)
             imputer = KNNImputer(n_neighbors=k)
             vals_array = values.values.reshape(-1, 1)
             imputed = imputer.fit_transform(vals_array)
-            df_copy.loc[mask, 'value'] = imputed.flatten()
-        
+            cleaned_data.loc[:, 'value'] = imputed.flatten()
         elif method == "Constant Value":
             fill_val = kwargs.get('fill_value', 0)
-            df_copy.loc[mask, 'value'] = values.fillna(fill_val)
+            cleaned_data.loc[:, 'value'] = values.fillna(fill_val)
+        
+        # Add cleaned data to dataframe
+        df_copy = pd.concat([df_copy, cleaned_data], ignore_index=True)
     
-    return df_copy
+    return df_copy, new_columns
 
 
-def handle_outliers(df, variables, method, **kwargs):
-    """Handle outliers with scientific methods"""
+def handle_outliers(df, variables, method, new_var_names=None, **kwargs):
+    """
+    Handle outliers by creating NEW cleaned variables
+    Returns: (updated_df, list_of_new_variable_names)
+    """
     df_copy = df.copy()
+    new_columns = []
     
-    for var in variables:
-        mask = df_copy['variable'] == var
-        values = df_copy.loc[mask, 'value'].dropna()
+    for idx, var in enumerate(variables):
+        # Create new variable name
+        if new_var_names and idx < len(new_var_names):
+            new_var_name = new_var_names[idx]
+        else:
+            method_short = method.lower().replace(' ', '_').replace('(', '').replace(')', '')
+            new_var_name = f"{var}_{method_short}_outlier"
+        
+        new_columns.append(new_var_name)
+        
+        # Get original variable data
+        var_data = df[df['variable'] == var].copy()
+        values = var_data['value'].dropna()
         
         if len(values) == 0:
             continue
         
+        # Create new cleaned variable
+        cleaned_data = var_data.copy()
+        cleaned_data['variable'] = new_var_name
+        
+        # Apply outlier detection and handling
         if method == "IQR Method":
             q1 = values.quantile(0.25)
             q3 = values.quantile(0.75)
@@ -436,66 +467,80 @@ def handle_outliers(df, variables, method, **kwargs):
             factor = kwargs.get('iqr_factor', 1.5)
             lower = q1 - factor * iqr
             upper = q3 + factor * iqr
-            outlier_mask = (df_copy.loc[mask, 'value'] < lower) | (df_copy.loc[mask, 'value'] > upper)
+            outlier_mask = (cleaned_data['value'] < lower) | (cleaned_data['value'] > upper)
             
             action = kwargs.get('action', 'remove')
             if action == 'remove':
-                df_copy = df_copy[~(mask & outlier_mask)]
+                cleaned_data = cleaned_data[~outlier_mask]
             elif action == 'cap':
-                df_copy.loc[mask & outlier_mask & (df_copy['value'] < lower), 'value'] = lower
-                df_copy.loc[mask & outlier_mask & (df_copy['value'] > upper), 'value'] = upper
+                cleaned_data.loc[outlier_mask & (cleaned_data['value'] < lower), 'value'] = lower
+                cleaned_data.loc[outlier_mask & (cleaned_data['value'] > upper), 'value'] = upper
         
         elif method == "Z-Score Method":
             threshold = kwargs.get('z_threshold', 3.0)
             mean = values.mean()
             std = values.std()
             if std > 0:
-                z_scores = np.abs((df_copy.loc[mask, 'value'] - mean) / std)
+                z_scores = np.abs((cleaned_data['value'] - mean) / std)
                 outlier_mask = z_scores > threshold
                 
                 action = kwargs.get('action', 'remove')
                 if action == 'remove':
-                    df_copy = df_copy[~(mask & outlier_mask)]
+                    cleaned_data = cleaned_data[~outlier_mask]
                 elif action == 'cap':
                     cap_val_low = mean - threshold * std
                     cap_val_high = mean + threshold * std
-                    df_copy.loc[mask & outlier_mask & (df_copy['value'] < cap_val_low), 'value'] = cap_val_low
-                    df_copy.loc[mask & outlier_mask & (df_copy['value'] > cap_val_high), 'value'] = cap_val_high
+                    cleaned_data.loc[outlier_mask & (cleaned_data['value'] < cap_val_low), 'value'] = cap_val_low
+                    cleaned_data.loc[outlier_mask & (cleaned_data['value'] > cap_val_high), 'value'] = cap_val_high
         
         elif method == "Modified Z-Score":
             threshold = kwargs.get('modified_z_threshold', 3.5)
             median = values.median()
             mad = np.median(np.abs(values - median))
             if mad > 0:
-                modified_z = 0.6745 * (df_copy.loc[mask, 'value'] - median) / mad
+                modified_z = 0.6745 * (cleaned_data['value'] - median) / mad
                 outlier_mask = np.abs(modified_z) > threshold
                 
                 action = kwargs.get('action', 'remove')
                 if action == 'remove':
-                    df_copy = df_copy[~(mask & outlier_mask)]
+                    cleaned_data = cleaned_data[~outlier_mask]
         
         elif method == "Isolation Forest":
             from sklearn.ensemble import IsolationForest
             contamination = kwargs.get('contamination', 0.1)
             clf = IsolationForest(contamination=contamination, random_state=42)
-            vals_array = values.values.reshape(-1, 1)
-            predictions = clf.fit_predict(vals_array)
-            outlier_mask = predictions == -1
-            
-            if kwargs.get('action', 'remove') == 'remove':
-                valid_indices = np.where(mask)[0][~outlier_mask]
-                df_copy = df_copy.iloc[valid_indices]
+            vals_clean = cleaned_data['value'].dropna()
+            if len(vals_clean) > 0:
+                vals_array = vals_clean.values.reshape(-1, 1)
+                predictions = clf.fit_predict(vals_array)
+                outlier_mask = predictions == -1
+                
+                if kwargs.get('action', 'remove') == 'remove':
+                    valid_indices = cleaned_data[cleaned_data['value'].notna()].index[~outlier_mask]
+                    cleaned_data = cleaned_data.loc[valid_indices]
+        
+        # Add cleaned data to dataframe
+        df_copy = pd.concat([df_copy, cleaned_data], ignore_index=True)
     
-    return df_copy
+    return df_copy, new_columns
 
 
-def apply_transformations(df, variables, transformation, **kwargs):
-    """Apply mathematical transformations"""
+def apply_transformations(df, variables, transformation, new_var_names=None, **kwargs):
+    """
+    Apply mathematical transformations by creating NEW variables
+    Returns: (updated_df, list_of_new_variable_names)
+    """
     df_copy = df.copy()
     new_columns = []
     
-    for var in variables:
-        new_var_name = f"{var}_{transformation.lower().replace(' ', '_').replace('(', '').replace(')', '')}"
+    for idx, var in enumerate(variables):
+        # Create new variable name
+        if new_var_names and idx < len(new_var_names):
+            new_var_name = new_var_names[idx]
+        else:
+            transform_short = transformation.lower().replace(' ', '_').replace('(', '').replace(')', '').replace('-', '_')
+            new_var_name = f"{var}_{transform_short}_transform"
+        
         new_columns.append(new_var_name)
         
         var_data = df[df['variable'] == var].copy()
@@ -946,15 +991,44 @@ def main():
                 st.success("✅ No missing values detected!")
                 selected_vars = []
         
+        # Naming section
+        new_var_names = []
+        if selected_vars:
+            st.markdown("---")
+            st.markdown("#### ✏️ Name Your Cleaned Variables")
+            st.caption("Edit the suggested names or keep defaults")
+            
+            for var in selected_vars:
+                method_short = method.lower().replace(' ', '_').replace('(', '').replace(')', '')
+                default_name = f"{var}_{method_short}_missing"
+                
+                new_name = st.text_input(
+                    f"Cleaned name for '{var}'",
+                    value=default_name,
+                    key=f"miss_name_{var}"
+                )
+                new_var_names.append(new_name)
+        
         # Apply button
         if selected_vars:
             st.markdown("---")
             if st.button("✅ Apply Cleaning", type="primary", use_container_width=True, key="apply_miss"):
-                st.session_state.df_working = handle_missing_values(
-                    st.session_state.df_working, selected_vars, method, **kwargs
+                df_result, new_cols = handle_missing_values(
+                    st.session_state.df_working, selected_vars, method, new_var_names, **kwargs
                 )
-                add_to_cleaning_history("missing_values", method, selected_vars, kwargs)
-                st.success(f"✅ Applied {method} to {len(selected_vars)} parameters")
+                st.session_state.df_working = df_result
+                
+                # Update cleaned variables list immediately
+                current_cleaned = st.session_state.get('cleaned_variables', [])
+                st.session_state.cleaned_variables = list(set(current_cleaned + new_cols))
+                
+                # Update all_variables list
+                st.session_state.all_variables = sorted(df_result['variable'].unique().tolist())
+                
+                add_to_cleaning_history("missing_values", method, selected_vars, {'new_columns': new_cols})
+                
+                st.success(f"✅ Created {len(new_cols)} cleaned variables: {', '.join(new_cols)}")
+                st.info("💡 Click 'Save to Database' to persist these cleaned variables")
                 st.rerun()
     
     # TAB 2: Outliers
@@ -999,14 +1073,43 @@ def main():
                 key="out_vars"
             )
         
+        # Naming section
+        new_var_names = []
+        if selected_vars:
+            st.markdown("---")
+            st.markdown("#### ✏️ Name Your Cleaned Variables")
+            st.caption("Edit the suggested names or keep defaults")
+            
+            for var in selected_vars:
+                method_short = method.lower().replace(' ', '_').replace('(', '').replace(')', '')
+                default_name = f"{var}_{method_short}_outlier"
+                
+                new_name = st.text_input(
+                    f"Cleaned name for '{var}'",
+                    value=default_name,
+                    key=f"out_name_{var}"
+                )
+                new_var_names.append(new_name)
+        
         if selected_vars:
             st.markdown("---")
             if st.button("✅ Apply Cleaning", type="primary", use_container_width=True, key="apply_out"):
-                st.session_state.df_working = handle_outliers(
-                    st.session_state.df_working, selected_vars, method, **kwargs
+                df_result, new_cols = handle_outliers(
+                    st.session_state.df_working, selected_vars, method, new_var_names, **kwargs
                 )
-                add_to_cleaning_history("outliers", method, selected_vars, kwargs)
-                st.success(f"✅ Applied {method} to {len(selected_vars)} parameters")
+                st.session_state.df_working = df_result
+                
+                # Update cleaned variables list immediately
+                current_cleaned = st.session_state.get('cleaned_variables', [])
+                st.session_state.cleaned_variables = list(set(current_cleaned + new_cols))
+                
+                # Update all_variables list
+                st.session_state.all_variables = sorted(df_result['variable'].unique().tolist())
+                
+                add_to_cleaning_history("outliers", method, selected_vars, {'new_columns': new_cols, **kwargs})
+                
+                st.success(f"✅ Created {len(new_cols)} cleaned variables: {', '.join(new_cols)}")
+                st.info("💡 Click 'Save to Database' to persist these cleaned variables")
                 st.rerun()
     
     # TAB 3: Transformations
@@ -1053,11 +1156,29 @@ def main():
                 key="trans_vars"
             )
         
+        # Naming section
+        new_var_names = []
+        if selected_vars:
+            st.markdown("---")
+            st.markdown("#### ✏️ Name Your Transformed Variables")
+            st.caption("Edit the suggested names or keep defaults")
+            
+            for var in selected_vars:
+                transform_short = transformation.lower().replace(' ', '_').replace('(', '').replace(')', '').replace('-', '_')
+                default_name = f"{var}_{transform_short}_transform"
+                
+                new_name = st.text_input(
+                    f"Transformed name for '{var}'",
+                    value=default_name,
+                    key=f"trans_name_{var}"
+                )
+                new_var_names.append(new_name)
+        
         if selected_vars:
             st.markdown("---")
             if st.button("✅ Apply Transformation", type="primary", use_container_width=True, key="apply_trans"):
                 df_result, new_cols = apply_transformations(
-                    st.session_state.df_working, selected_vars, transformation
+                    st.session_state.df_working, selected_vars, transformation, new_var_names
                 )
                 st.session_state.df_working = df_result
                 
@@ -1070,7 +1191,7 @@ def main():
                 
                 add_to_cleaning_history("transformation", transformation, selected_vars, {'new_columns': new_cols})
                 
-                st.success(f"✅ Created {len(new_cols)} new variables: {', '.join(new_cols)}")
+                st.success(f"✅ Created {len(new_cols)} transformed variables: {', '.join(new_cols)}")
                 st.info("💡 Click 'Save to Database' to persist these cleaned variables")
                 st.rerun()
     
@@ -1116,17 +1237,6 @@ def main():
     raw_vars = st.session_state.get('raw_variables', [])
     cleaned_vars = st.session_state.get('cleaned_variables', [])
     
-    # Debug info
-    with st.expander("🔍 Debug Info"):
-        st.write(f"**Raw variables:** {len(raw_vars)}")
-        if raw_vars:
-            st.write(raw_vars[:10])
-        st.write(f"**Cleaned variables:** {len(cleaned_vars)}")
-        if cleaned_vars:
-            st.write(cleaned_vars[:10])
-        else:
-            st.info("ℹ️ No cleaned variables yet. Apply transformations to create them.")
-    
     if cleaned_vars and raw_vars:
         col1, col2, col3 = st.columns([2, 2, 1])
         
@@ -1158,10 +1268,11 @@ def main():
         st.info("ℹ️ **No cleaned variables available yet**")
         st.markdown("""
         **To create cleaned variables:**
-        1. Go to the **Transformations** tab
-        2. Select parameters and a transformation method
-        3. Click **Apply Transformation**
-        4. New cleaned variables will appear here
+        1. Go to any cleaning tab (Missing Values, Outliers, or Transformations)
+        2. Select parameters and choose a method
+        3. Edit variable names if desired
+        4. Click **Apply Cleaning/Transformation**
+        5. New cleaned variables will appear here for comparison
         """)
     else:
         st.info("ℹ️ No raw variables available")
