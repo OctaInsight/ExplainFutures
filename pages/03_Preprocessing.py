@@ -199,114 +199,155 @@ def initialize_cleaning_history():
 
 
 # ---------------------
-# Section A: Page-3 I/O on load (DB → session_state) - FIXED TO LOAD ALL DATA
+# Section A: Page-3 I/O on load (DB → session_state) - ALWAYS LOADS FRESH FROM DATABASE
 # ---------------------
-def load_page3_data_on_page_load() -> bool:
+def load_page3_data_on_page_load(force_reload: bool = False) -> bool:
     """
-    Page 3 load (DB → session_state). FIXED to load ALL data from database.
+    Page 3 load (DB → session_state). ALWAYS loads fresh data from database.
 
-    Loads:
-      1) ALL timeseries_data with data_source='original' or 'raw' -> st.session_state.df_long
-      2) ALL timeseries_data with data_source='cleaned'          -> merged into st.session_state.df_clean
-      3) ALL parameters from parameters table                     -> st.session_state.project_parameters
-      4) Latest health_report from health_reports table          -> st.session_state.health_report
-      5) Derived helper lists -> value_columns, raw_variables, cleaned_variables, time_column
-      6) Snapshot hashes      -> initial_data_hash, current_data_hash, has_unsaved_changes
+    This function IGNORES session_state and loads everything fresh from database:
+      1) ALL timeseries_data (all data_sources: 'raw', 'original', 'cleaned')
+      2) ALL parameters from parameters table
+      3) Latest health_report from health_reports table
+      4) Derives all helper lists from loaded data
+      5) Sets up snapshot hashes for dirty tracking
 
-    This ensures the page shows ALL data from ALL uploads, not just the last one.
+    Parameters:
+        force_reload: If True, ignores data_loaded flag and reloads anyway
+
+    Returns:
+        True if successful, False otherwise
     """
     if not DB_AVAILABLE:
+        st.error("❌ Database not available")
         return False
 
     project_id = st.session_state.get("current_project_id")
     if not project_id:
+        st.error("❌ No project selected")
         return False
 
     try:
+        st.info("🔄 Loading ALL project data from database...")
+        
         # 1) Load ALL ORIGINAL/RAW timeseries from database
+        # Try both 'raw' and 'original' for backwards compatibility
         df_raw = None
+        data_source_used = None
+        
         for src_label in ("raw", "original"):
             try:
-                df_raw = db.load_timeseries_data(project_id=project_id, data_source=src_label)
-                if df_raw is not None and len(df_raw) > 0:
+                df_temp = db.load_timeseries_data(project_id=project_id, data_source=src_label)
+                if df_temp is not None and len(df_temp) > 0:
+                    df_raw = df_temp
+                    data_source_used = src_label
+                    st.success(f"✅ Found data with data_source='{src_label}'")
                     break
-            except Exception:
-                df_raw = None
+            except Exception as e:
+                st.warning(f"Could not load data_source='{src_label}': {e}")
+                continue
 
         if df_raw is None or len(df_raw) == 0:
-            st.warning("⚠️ No raw/original data found in database. Please upload data first.")
+            st.error("❌ No raw/original data found in database. Please upload data on Page 2 first.")
             return False
 
         # 2) Load ALL CLEANED timeseries from database
         df_cleaned = None
         try:
             df_cleaned = db.load_timeseries_data(project_id=project_id, data_source="cleaned")
-        except Exception:
+            if df_cleaned is not None and len(df_cleaned) > 0:
+                st.success(f"✅ Found {len(df_cleaned):,} cleaned data points")
+        except Exception as e:
+            st.info(f"ℹ️ No cleaned data yet (this is normal for new projects): {e}")
             df_cleaned = None
 
         # 3) Load ALL parameters from parameters table
+        parameters = []
         try:
             parameters = db.get_project_parameters(project_id)
-            st.session_state.project_parameters = parameters if parameters else []
+            if parameters:
+                st.success(f"✅ Loaded {len(parameters)} parameters from database")
+                # Also set value_columns from parameters table for consistency
+                param_names = [p['parameter_name'] for p in parameters]
+            else:
+                st.warning("⚠️ No parameters found in parameters table")
         except Exception as e:
-            st.warning(f"Could not load parameters: {e}")
-            st.session_state.project_parameters = []
+            st.error(f"❌ Could not load parameters: {e}")
+            parameters = []
 
         # 4) Load latest health report from health_reports table
+        health_report = None
         try:
             health_report = db.get_health_report(project_id)
-            st.session_state.health_report = health_report
+            if health_report:
+                st.success(f"✅ Loaded health report (score: {health_report.get('health_score', 'N/A')})")
         except Exception as e:
-            st.warning(f"Could not load health report: {e}")
-            st.session_state.health_report = None
+            st.info(f"ℹ️ No health report yet: {e}")
+            health_report = None
 
-        # Session state wiring (expected by the rest of the page)
+        # ============================================================
+        # POPULATE SESSION STATE FROM DATABASE DATA
+        # ============================================================
+        
+        # Raw data
         st.session_state.df_long = df_raw
-
+        
+        # Combined working dataframe (raw + cleaned)
         if df_cleaned is not None and len(df_cleaned) > 0:
-            # Merge raw and cleaned data
             st.session_state.df_clean = pd.concat([df_raw, df_cleaned], ignore_index=True)
         else:
             st.session_state.df_clean = df_raw.copy()
 
-        # Derived lists
+        # Get all unique variables from the data
         all_variables = list(st.session_state.df_clean["variable"].unique())
         all_variables.sort()
-        st.session_state.value_columns = all_variables
-
+        
+        # Raw variables (from df_long)
         raw_variables = list(df_raw["variable"].unique())
         raw_variables.sort()
-        st.session_state.raw_variables = raw_variables
-
+        
+        # Cleaned variables (only in df_cleaned, not in df_raw)
         if df_cleaned is not None and len(df_cleaned) > 0:
-            cleaned_variables = list(df_cleaned["variable"].unique())
+            cleaned_vars = list(df_cleaned["variable"].unique())
+            # Only keep variables that are NOT in raw data
+            cleaned_variables = [v for v in cleaned_vars if v not in raw_variables]
             cleaned_variables.sort()
-            st.session_state.cleaned_variables = cleaned_variables
         else:
-            st.session_state.cleaned_variables = []
+            cleaned_variables = []
 
+        # Set session state variables
+        st.session_state.value_columns = all_variables
+        st.session_state.raw_variables = raw_variables
+        st.session_state.cleaned_variables = cleaned_variables
+        st.session_state.project_parameters = parameters
+        st.session_state.health_report = health_report
+
+        # Time column detection
         time_col = "timestamp" if "timestamp" in df_raw.columns else "time"
         st.session_state.time_column = time_col
 
-        # Snapshot hashes
+        # Snapshot hashes for dirty tracking
         st.session_state.initial_data_hash = calculate_df_hash_fast(st.session_state.df_clean)
         st.session_state.current_data_hash = st.session_state.initial_data_hash
         st.session_state.has_unsaved_changes = False
 
-        # Mark loaded
+        # Mark as loaded
         st.session_state.data_loaded = True
 
-        # Log what was loaded
-        st.success(f"✅ Loaded {len(df_raw):,} raw data points across {len(raw_variables)} variables")
-        if df_cleaned is not None and len(df_cleaned) > 0:
-            st.success(f"✅ Loaded {len(df_cleaned):,} cleaned data points across {len(cleaned_variables)} variables")
-        if st.session_state.project_parameters:
-            st.success(f"✅ Loaded {len(st.session_state.project_parameters)} parameters from database")
+        # Summary info
+        st.success(f"""
+        **📊 Data Loaded Successfully:**
+        - **Total Variables:** {len(all_variables)}
+        - **Raw Variables:** {len(raw_variables)}
+        - **Cleaned Variables:** {len(cleaned_variables)}
+        - **Data Points:** {len(st.session_state.df_clean):,}
+        - **Parameters in DB:** {len(parameters)}
+        """)
 
         return True
 
     except Exception as e:
-        st.error(f"Error during page-load data fetch: {str(e)}")
+        st.error(f"❌ Error loading data from database: {str(e)}")
         import traceback
         st.error(traceback.format_exc())
         return False
@@ -1154,7 +1195,7 @@ def save_to_database():
 #---------------------
 
 def main():
-    """Main page function"""
+    """Main page function - ALWAYS loads fresh data from database"""
     
     # Check project
     if not st.session_state.get('current_project_id'):
@@ -1166,18 +1207,21 @@ def main():
     # Initialize
     initialize_cleaning_history()
     
-    # Load data if not already loaded
-    if not st.session_state.get('data_loaded'):
-        with st.spinner("Loading project data from database..."):
-            success = load_page3_data_on_page_load()
-            if not success:
-                st.error("Failed to load project data")
-                st.stop()
+    # ALWAYS LOAD DATA FROM DATABASE (ignore data_loaded flag)
+    # This ensures we see ALL data from ALL uploads, not just session state
+    with st.spinner("🔄 Loading ALL project data from database..."):
+        # Force reload every time the page loads
+        st.session_state.data_loaded = False  # Reset flag to force reload
+        success = load_page3_data_on_page_load(force_reload=True)
+        if not success:
+            st.error("❌ Failed to load project data from database")
+            st.info("💡 Please ensure you have uploaded data on Page 2")
+            st.stop()
     
     # Render unsaved changes banner (always visible)
     render_unsaved_changes_banner()
     
-    # Metrics row - FIXED to show correct counts
+    # Metrics row - Shows data from database
     col1, col2, col3, col4 = st.columns(4)
     
     total_vars = len(st.session_state.get('value_columns', []))
