@@ -571,44 +571,68 @@ def apply_transformations(df, variables, transformation, **kwargs):
 # =============================================================================
 
 def save_to_database():
-    """Save cleaned data with append-only logic"""
+    """
+    Save cleaned data with append-only logic
+    FIXED: Properly identifies cleaned variables and updates session state
+    """
     project_id = st.session_state.get('current_project_id')
     
     if not project_id or not DB_AVAILABLE:
-        st.error("❌ Cannot save")
+        st.error("❌ Cannot save: No project or database unavailable")
         return
     
-    with st.spinner("💾 Saving..."):
+    with st.spinner("💾 Saving to database..."):
         try:
-            all_vars_in_working = st.session_state.df_working['variable'].unique()
-            raw_vars = st.session_state.raw_variables
+            # Get current working data
+            df_working = st.session_state.get('df_working')
+            if df_working is None or len(df_working) == 0:
+                st.warning("⚠️ No working data available")
+                return
+            
+            # Identify NEW cleaned variables (not in raw data)
+            all_vars_in_working = df_working['variable'].unique().tolist()
+            raw_vars = st.session_state.get('raw_variables', [])
+            
+            # New cleaned variables are those in working data but NOT in raw data
             new_cleaned_vars = [v for v in all_vars_in_working if v not in raw_vars]
             
             if not new_cleaned_vars:
                 st.warning("⚠️ No new cleaned variables to save")
+                st.info("💡 Cleaned variables are created when you apply transformations or derive new columns")
                 return
             
+            st.info(f"📊 Found {len(new_cleaned_vars)} new cleaned variables: {', '.join(new_cleaned_vars[:3])}{'...' if len(new_cleaned_vars) > 3 else ''}")
+            
+            # Extract data for new cleaned variables
             time_col = st.session_state.get('time_column', 'timestamp')
-            cleaned_df_new = st.session_state.df_working[
-                st.session_state.df_working['variable'].isin(new_cleaned_vars)
+            cleaned_df_new = df_working[
+                df_working['variable'].isin(new_cleaned_vars)
             ].copy()
             
+            # Check for existing cleaned data to avoid duplicates
             existing_cleaned = st.session_state.get('df_cleaned_db')
             if existing_cleaned is not None and len(existing_cleaned) > 0:
+                st.info(f"🔍 Checking for duplicates in {len(existing_cleaned)} existing cleaned records...")
+                
                 for var in new_cleaned_vars:
                     var_existing = existing_cleaned[existing_cleaned['variable'] == var]
                     if len(var_existing) > 0:
                         existing_timestamps = set(var_existing[time_col].values)
+                        # Remove rows that already exist
                         cleaned_df_new = cleaned_df_new[
                             ~((cleaned_df_new['variable'] == var) & 
                               (cleaned_df_new[time_col].isin(existing_timestamps)))
                         ]
             
             if len(cleaned_df_new) == 0:
-                st.info("ℹ️ All data already in database")
+                st.info("ℹ️ All cleaned data already exists in database")
                 return
             
+            st.info(f"💾 Saving {len(cleaned_df_new):,} new records...")
+            
+            # Save to database
             success = False
+            
             if hasattr(db, "upsert_timeseries_data"):
                 success = db.upsert_timeseries_data(
                     project_id=project_id,
@@ -617,12 +641,22 @@ def save_to_database():
                     batch_size=1000,
                     ignore_duplicates=True
                 )
-            
-            if not success:
-                st.error("❌ Save failed")
+            elif hasattr(db, "save_timeseries_data"):
+                success = db.save_timeseries_data(
+                    project_id=project_id,
+                    df_long=cleaned_df_new,
+                    data_source="cleaned",
+                    batch_size=1000
+                )
+            else:
+                st.error("❌ Database manager missing save method")
                 return
             
-            # Update parameters
+            if not success:
+                st.error("❌ Failed to save to timeseries_data table")
+                return
+            
+            # Update parameters table
             cleaned_params = []
             for var in new_cleaned_vars:
                 var_subset = cleaned_df_new[cleaned_df_new['variable'] == var]
@@ -642,29 +676,69 @@ def save_to_database():
             
             if cleaned_params:
                 db.save_parameters(project_id, cleaned_params)
+                st.info(f"✅ Updated {len(cleaned_params)} parameters")
             
-            # Update progress
+            # Update progress: step_key='data_cleaned', step_percent=7
             try:
+                # Method 1: Use upsert_progress_step if available
                 if hasattr(db, "upsert_progress_step"):
-                    db.upsert_progress_step(project_id, "data_cleaned", 7)
+                    db.upsert_progress_step(
+                        project_id=project_id,
+                        step_key="data_cleaned",
+                        step_percent=7
+                    )
+                    st.info("✅ Progress step updated: data_cleaned = 7%")
+                else:
+                    # Method 2: Direct database upsert
+                    db.client.table("project_progress_steps").upsert({
+                        "project_id": project_id,
+                        "step_key": "data_cleaned",
+                        "step_percent": 7,
+                        "updated_at": datetime.now().isoformat()
+                    }, on_conflict="project_id,step_key").execute()
+                    st.info("✅ Progress step updated (direct): data_cleaned = 7%")
                 
+                # Recompute total progress
                 if hasattr(db, "recompute_and_update_project_progress"):
                     db.recompute_and_update_project_progress(
-                        project_id, workflow_state="preprocessing", current_page=3
+                        project_id=project_id,
+                        workflow_state="preprocessing",
+                        current_page=3
                     )
-            except Exception:
-                pass
+                    st.info("✅ Total project progress recomputed")
+            except Exception as e:
+                st.warning(f"⚠️ Progress update failed: {e}")
             
+            # Update session state
             st.session_state.has_unsaved_changes = False
-            st.success(f"🎉 Saved {len(cleaned_df_new):,} records!")
+            
+            # Add new cleaned variables to session state
+            current_cleaned = st.session_state.get('cleaned_variables', [])
+            st.session_state.cleaned_variables = list(set(current_cleaned + new_cleaned_vars))
+            
+            # Success message
+            st.success(f"""
+            🎉 **Successfully saved to database!**
+            - **Records:** {len(cleaned_df_new):,}
+            - **Variables:** {len(new_cleaned_vars)}
+            - **Parameters:** {len(cleaned_params)} updated
+            - **Progress:** Step 'data_cleaned' = 7%
+            """)
+            
             st.balloons()
             
             time.sleep(2)
+            
+            # Reload data from database to show updated state
             st.session_state.page3_data_loaded = False
             st.rerun()
             
         except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
+            st.error(f"❌ Save error: {str(e)}")
+            import traceback
+            with st.expander("🔍 Error Details"):
+                st.code(traceback.format_exc())
+
 
 
 # =============================================================================
@@ -715,20 +789,39 @@ def main():
     st.markdown("---")
     
     # UPDATE 2: Save button + Go to Visualization button
-    if st.session_state.get('cleaning_history'):
-        st.markdown("### 💾 Save & Continue")
-        
+    st.markdown("### 💾 Save & Continue")
+    
+    # Show save section if there are operations OR cleaned variables
+    has_operations = bool(st.session_state.get('cleaning_history'))
+    has_cleaned_vars = bool(st.session_state.get('cleaned_variables'))
+    
+    if has_operations or has_cleaned_vars:
         col1, col2 = st.columns(2)
         
         with col1:
+            # Show info about what will be saved
+            cleaned_vars = st.session_state.get('cleaned_variables', [])
+            if cleaned_vars:
+                st.info(f"📊 {len(cleaned_vars)} cleaned variable(s) ready to save")
+            
             if st.button("💾 Save to Database", type="primary", use_container_width=True, key="save_btn"):
                 save_to_database()
         
         with col2:
             if st.button("📊 Go to Data Visualization", type="secondary", use_container_width=True, key="viz_btn"):
                 st.switch_page("pages/04_Exploration_and_Visualization.py")
+    else:
+        # Show minimal interface when no operations
+        col1, col2 = st.columns(2)
         
-        st.markdown("---")
+        with col1:
+            st.info("ℹ️ Apply cleaning operations to enable saving")
+        
+        with col2:
+            if st.button("📊 Go to Data Visualization", type="secondary", use_container_width=True, key="viz_btn_alt"):
+                st.switch_page("pages/04_Exploration_and_Visualization.py")
+    
+    st.markdown("---")
     
     # UPDATE 3: Parameters Health Table (from Page 2)
     st.markdown("### 📋 Parameters Health Status")
@@ -967,8 +1060,18 @@ def main():
                     st.session_state.df_working, selected_vars, transformation
                 )
                 st.session_state.df_working = df_result
+                
+                # Update cleaned variables list immediately
+                current_cleaned = st.session_state.get('cleaned_variables', [])
+                st.session_state.cleaned_variables = list(set(current_cleaned + new_cols))
+                
+                # Update all_variables list
+                st.session_state.all_variables = sorted(df_result['variable'].unique().tolist())
+                
                 add_to_cleaning_history("transformation", transformation, selected_vars, {'new_columns': new_cols})
-                st.success(f"✅ Created {len(new_cols)} new variables")
+                
+                st.success(f"✅ Created {len(new_cols)} new variables: {', '.join(new_cols)}")
+                st.info("💡 Click 'Save to Database' to persist these cleaned variables")
                 st.rerun()
     
     # TAB 4: Summary
@@ -1013,6 +1116,17 @@ def main():
     raw_vars = st.session_state.get('raw_variables', [])
     cleaned_vars = st.session_state.get('cleaned_variables', [])
     
+    # Debug info
+    with st.expander("🔍 Debug Info"):
+        st.write(f"**Raw variables:** {len(raw_vars)}")
+        if raw_vars:
+            st.write(raw_vars[:10])
+        st.write(f"**Cleaned variables:** {len(cleaned_vars)}")
+        if cleaned_vars:
+            st.write(cleaned_vars[:10])
+        else:
+            st.info("ℹ️ No cleaned variables yet. Apply transformations to create them.")
+    
     if cleaned_vars and raw_vars:
         col1, col2, col3 = st.columns([2, 2, 1])
         
@@ -1038,8 +1152,19 @@ def main():
                 
                 with st.expander("💾 Export Figure"):
                     quick_export_buttons(fig, f"comparison_{selected_raw}_vs_{selected_cleaned}", ['png', 'pdf', 'html'])
+            else:
+                st.error("❌ Could not create comparison plot")
+    elif not cleaned_vars:
+        st.info("ℹ️ **No cleaned variables available yet**")
+        st.markdown("""
+        **To create cleaned variables:**
+        1. Go to the **Transformations** tab
+        2. Select parameters and a transformation method
+        3. Click **Apply Transformation**
+        4. New cleaned variables will appear here
+        """)
     else:
-        st.info("ℹ️ Create cleaned variables to enable comparison plots")
+        st.info("ℹ️ No raw variables available")
 
 
 if __name__ == "__main__":
