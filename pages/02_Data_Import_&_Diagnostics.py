@@ -310,9 +310,10 @@ def show_next_steps_after_upload():
         if health_score >= 70:
             st.success("✅ Recommended")
         
-    if st.button("📊 Visualization", type="primary"
+    if st.button("📊 Visualization", 
                  use_container_width=True,
-                 key="btn_visualize"):
+                 type="primary" if primary_action == "visualize" else "secondary"):
+
         if DB_AVAILABLE and st.session_state.get("current_project_id"):
             try:
                 db.update_project_progress(
@@ -331,9 +332,10 @@ def show_next_steps_after_upload():
         if health_score < 70:
             st.warning("⚠️ Recommended")
         
-    if st.button("🧹 Data Cleaning", type="primary"
+    if st.button("🧹 Data Cleaning", 
                  use_container_width=True,
-                 key="btn_clean"):
+                 type="primary" if primary_action == "visualize" else "secondary"):
+                     
         if DB_AVAILABLE and st.session_state.get("current_project_id"):
             try:
                 db.update_project_progress(
