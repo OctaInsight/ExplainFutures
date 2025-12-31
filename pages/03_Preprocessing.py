@@ -1,11 +1,14 @@
 """
-Page 3: Data Cleaning & Preprocessing
+Page 3: Data Cleaning & Preprocessing - COMPLETE UPDATE
 
-FIXED:
-1. Session state reset on page load (keeps only project/auth/progress keys)
-2. Loads ALL data from database on page load (raw + cleaned + parameters + health)
-3. Append-only save with duplicate checking
-4. Progress tracking with upsert to project_progress_steps
+UPDATES:
+1. Metrics use comprehensive_health_report (comparable to Page 2)
+2. "Go to Visualization" button added
+3. Parameters health table with status colors
+4. Replaced "Smoothing" tab with "Summary" tab
+5. Enhanced scientific methods for cleaning
+6. Two-column layout in tabs (methods + parameter selection)
+7. Before/After comparison plots with export (PNG, PDF, HTML)
 """
 
 import streamlit as st
@@ -56,56 +59,39 @@ if not st.session_state.get('authenticated', False):
 
 
 # =============================================================================
-# SECTION 1: SESSION STATE RESET ON PAGE LOAD
+# SECTION 1: SESSION STATE RESET AND HELPER FUNCTIONS
 # =============================================================================
 
 def reset_page_session_state():
-    """
-    Reset session state for this page, keeping only:
-    - Project identifiers (current_project_id, current_project, etc.)
-    - User/auth keys (authenticated, user_id, profile, etc.)
-    - Progress keys (workflow_state, completion_percentage, etc.)
-    """
-    # Define keys to preserve
+    """Reset session state, keeping only project/auth/progress keys"""
     keys_to_keep = {
-        # Project identifiers
         'current_project_id', 'current_project', 'selected_project',
         'project_name', 'project_description', 'project_created_at',
-        
-        # User/auth
         'authenticated', 'user_id', 'user_email', 'user_name',
         'user_profile', 'session_id',
-        
-        # Progress tracking
         'workflow_state', 'completion_percentage', 'current_page',
         'project_progress', 'step_completion',
-        
-        # Sidebar state
         'sidebar_state', 'page_config'
     }
     
-    # Get all current keys
     all_keys = list(st.session_state.keys())
-    
-    # Remove keys not in preserve list
     for key in all_keys:
         if key not in keys_to_keep:
             del st.session_state[key]
 
 
 def calculate_data_hash(df):
-    """Calculate a hash of the dataframe to detect changes"""
+    """Calculate hash for change detection"""
     if df is None or len(df) == 0:
         return None
     try:
-        data_str = df.to_json()
-        return hashlib.md5(data_str.encode()).hexdigest()
+        return hashlib.md5(df.to_json().encode()).hexdigest()
     except:
         return None
 
 
 def initialize_cleaning_history():
-    """Initialize session state for cleaning operations"""
+    """Initialize cleaning operation history"""
     if "cleaning_history" not in st.session_state:
         st.session_state.cleaning_history = []
     if "has_unsaved_changes" not in st.session_state:
@@ -126,23 +112,88 @@ def add_to_cleaning_history(operation_type, method, variables, details=None):
 
 
 # =============================================================================
-# SECTION 2: LOAD DATA FROM DATABASE ON PAGE LOAD
+# SECTION 2: GET COMPREHENSIVE HEALTH REPORT (FROM PAGE 2)
+# =============================================================================
+
+def get_comprehensive_health_report():
+    """Get comprehensive health report from parameters (SAME as Page 2)"""
+    if not DB_AVAILABLE or not st.session_state.get('current_project_id'):
+        return None
+    
+    try:
+        parameters = db.get_project_parameters(st.session_state.current_project_id)
+        
+        if not parameters:
+            return None
+        
+        total_missing = 0
+        total_count = 0
+        missing_values_detail = {}
+        
+        for param in parameters:
+            param_name = param['parameter_name']
+            missing_count = param.get('missing_count', 0)
+            param_total = param.get('total_count', 0)
+            
+            total_missing += missing_count
+            total_count += param_total
+            
+            if param_total > 0:
+                missing_pct = missing_count / param_total
+                missing_values_detail[param_name] = {
+                    'count': missing_count,
+                    'percentage': missing_pct,
+                    'total': param_total
+                }
+        
+        health_score = 100
+        issues = []
+        
+        for var, info in missing_values_detail.items():
+            missing_pct = info['percentage']
+            if missing_pct > 0.20:
+                health_score -= 15
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing (critical)")
+            elif missing_pct > 0.05:
+                health_score -= 5
+                issues.append(f"⚠️ {var}: {missing_pct*100:.1f}% missing")
+        
+        health_score = max(0, min(100, health_score))
+        
+        if health_score >= 85:
+            category = "excellent"
+        elif health_score >= 70:
+            category = "good"
+        elif health_score >= 50:
+            category = "fair"
+        else:
+            category = "poor"
+        
+        return {
+            'health_score': health_score,
+            'health_category': category,
+            'total_parameters': len(parameters),
+            'total_data_points': total_count,
+            'total_missing_values': total_missing,
+            'missing_percentage': total_missing / total_count if total_count > 0 else 0,
+            'critical_issues': len([i for i in issues if 'critical' in i.lower()]),
+            'warnings': len([i for i in issues if 'warning' in i.lower()]),
+            'missing_values_detail': missing_values_detail,
+            'issues_list': issues,
+            'parameters_analyzed': [p['parameter_name'] for p in parameters]
+        }
+        
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return None
+
+
+# =============================================================================
+# SECTION 3: LOAD DATA FROM DATABASE
 # =============================================================================
 
 def load_project_data_from_database():
-    """
-    Load ALL project data from database on page load:
-    1. timeseries_data where data_source IN ('raw', 'cleaned')
-    2. parameters table (all rows for project)
-    3. health_reports (latest report)
-    
-    Stores in session_state as:
-    - df_raw: Raw timeseries data
-    - df_cleaned_db: Cleaned timeseries data from database
-    - df_working: Combined raw + cleaned for working/editing
-    - parameters_df: DataFrame of parameters
-    - health_report: Dict of health report
-    """
+    """Load ALL project data from database on page load"""
     if not DB_AVAILABLE:
         st.error("❌ Database not available")
         return False
@@ -153,7 +204,7 @@ def load_project_data_from_database():
         return False
     
     try:
-        # 1. Load RAW timeseries data
+        # Load RAW data
         df_raw = None
         for src_label in ('raw', 'original'):
             try:
@@ -165,13 +216,12 @@ def load_project_data_from_database():
                 continue
         
         if df_raw is None or len(df_raw) == 0:
-            st.error("❌ No raw data found in database. Please upload data on Page 2.")
+            st.error("❌ No raw data found. Please upload data on Page 2.")
             return False
         
-        # Store raw data
         st.session_state.df_raw = df_raw.copy()
         
-        # 2. Load CLEANED timeseries data
+        # Load CLEANED data
         df_cleaned_db = None
         try:
             df_cleaned_db = db.load_timeseries_data(project_id=project_id, data_source='cleaned')
@@ -182,30 +232,20 @@ def load_project_data_from_database():
         except Exception:
             st.session_state.df_cleaned_db = pd.DataFrame(columns=df_raw.columns)
         
-        # 3. Create working dataframe (raw + cleaned)
+        # Create working dataframe
         if df_cleaned_db is not None and len(df_cleaned_db) > 0:
             st.session_state.df_working = pd.concat([df_raw, df_cleaned_db], ignore_index=True)
         else:
             st.session_state.df_working = df_raw.copy()
         
-        # 4. Load parameters
+        # Load parameters
         try:
             parameters = db.get_project_parameters(project_id)
-            if parameters:
-                st.session_state.parameters_df = pd.DataFrame(parameters)
-            else:
-                st.session_state.parameters_df = pd.DataFrame()
+            st.session_state.parameters_df = pd.DataFrame(parameters) if parameters else pd.DataFrame()
         except Exception:
             st.session_state.parameters_df = pd.DataFrame()
         
-        # 5. Load health report
-        try:
-            health_report = db.get_health_report(project_id)
-            st.session_state.health_report = health_report if health_report else {}
-        except Exception:
-            st.session_state.health_report = {}
-        
-        # 6. Extract variable lists
+        # Extract variable lists
         st.session_state.raw_variables = sorted(df_raw['variable'].unique().tolist())
         
         if df_cleaned_db is not None and len(df_cleaned_db) > 0:
@@ -216,85 +256,76 @@ def load_project_data_from_database():
         
         st.session_state.all_variables = sorted(st.session_state.df_working['variable'].unique().tolist())
         
-        # 7. Detect time column
+        # Time column
         time_col = 'timestamp' if 'timestamp' in df_raw.columns else 'time'
         st.session_state.time_column = time_col
         
-        # 8. Initialize hash for change tracking
+        # Hash for change tracking
         st.session_state.initial_data_hash = calculate_data_hash(st.session_state.df_working)
-        
-        # 9. Mark as loaded
         st.session_state.page3_data_loaded = True
         
         return True
         
     except Exception as e:
         st.error(f"❌ Error loading data: {str(e)}")
-        import traceback
-        st.error(traceback.format_exc())
         return False
 
 
 # =============================================================================
-# SECTION 3: EXPORT AND PLOTTING FUNCTIONS
+# SECTION 4: EXPORT FUNCTION (FROM PAGE 7)
 # =============================================================================
 
-def export_figure(fig, filename_prefix):
-    """Export figure as PNG, PDF, HTML"""
-    st.markdown("### 📥 Export Options")
+def quick_export_buttons(fig, filename_prefix, formats=['png', 'pdf', 'html']):
+    """Export figure in multiple formats (from Page 7)"""
+    cols = st.columns(len(formats))
     
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        png_bytes = pio.to_image(fig, format='png', width=1200, height=600)
-        st.download_button(
-            label="📊 Download PNG",
-            data=png_bytes,
-            file_name=f"{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
-            mime="image/png",
-            use_container_width=True
-        )
-    
-    with col2:
-        pdf_bytes = pio.to_image(fig, format='pdf', width=1200, height=600)
-        st.download_button(
-            label="📄 Download PDF",
-            data=pdf_bytes,
-            file_name=f"{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-            mime="application/pdf",
-            use_container_width=True
-        )
-    
-    with col3:
-        html_bytes = pio.to_html(fig, include_plotlyjs='cdn').encode()
-        st.download_button(
-            label="🌐 Download HTML",
-            data=html_bytes,
-            file_name=f"{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
-            mime="text/html",
-            use_container_width=True
-        )
+    for idx, fmt in enumerate(formats):
+        with cols[idx]:
+            if fmt == 'png':
+                png_bytes = pio.to_image(fig, format='png', width=1200, height=600)
+                st.download_button(
+                    label="📊 PNG",
+                    data=png_bytes,
+                    file_name=f"{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                    mime="image/png",
+                    use_container_width=True
+                )
+            elif fmt == 'pdf':
+                pdf_bytes = pio.to_image(fig, format='pdf', width=1200, height=600)
+                st.download_button(
+                    label="📄 PDF",
+                    data=pdf_bytes,
+                    file_name=f"{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            elif fmt == 'html':
+                html_bytes = pio.to_html(fig, include_plotlyjs='cdn').encode()
+                st.download_button(
+                    label="🌐 HTML",
+                    data=html_bytes,
+                    file_name=f"{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                    mime="text/html",
+                    use_container_width=True
+                )
 
 
-def plot_comparison_before_after(df_all, var_original, var_cleaned, title="Before vs After"):
-    """Plot comparison between original and cleaned variable"""
+def plot_before_after_comparison(df_all, var_raw, var_cleaned):
+    """Create before/after comparison plot"""
     try:
         time_col = st.session_state.get('time_column', 'timestamp')
         
-        data_original = df_all[df_all['variable'] == var_original].copy().sort_values(time_col)
+        data_raw = df_all[df_all['variable'] == var_raw].copy().sort_values(time_col)
         data_cleaned = df_all[df_all['variable'] == var_cleaned].copy().sort_values(time_col)
-        
-        if len(data_original) == 0 and len(data_cleaned) == 0:
-            return None
         
         fig = go.Figure()
         
-        if len(data_original) > 0:
+        if len(data_raw) > 0:
             fig.add_trace(go.Scatter(
-                x=data_original[time_col],
-                y=data_original['value'],
+                x=data_raw[time_col],
+                y=data_raw['value'],
                 mode='lines+markers',
-                name=f'{var_original} (Original)',
+                name=f'{var_raw} (Raw)',
                 line=dict(color='#95a5a6', width=2, dash='dot'),
                 marker=dict(size=4, opacity=0.6)
             ))
@@ -310,7 +341,7 @@ def plot_comparison_before_after(df_all, var_original, var_cleaned, title="Befor
             ))
         
         fig.update_layout(
-            title=title,
+            title=f"Before vs After: {var_raw} → {var_cleaned}",
             xaxis_title="Time",
             yaxis_title="Value",
             hovermode='x unified',
@@ -321,16 +352,16 @@ def plot_comparison_before_after(df_all, var_original, var_cleaned, title="Befor
         
         return fig
     except Exception as e:
-        st.error(f"Error creating plot: {str(e)}")
+        st.error(f"Plot error: {str(e)}")
         return None
 
 
 # =============================================================================
-# SECTION 4: CLEANING FUNCTIONS
+# SECTION 5: ENHANCED CLEANING FUNCTIONS (MORE SCIENTIFIC METHODS)
 # =============================================================================
 
 def handle_missing_values(df, variables, method, **kwargs):
-    """Handle missing values"""
+    """Handle missing values with scientific methods"""
     df_copy = df.copy()
     
     for var in variables:
@@ -339,17 +370,48 @@ def handle_missing_values(df, variables, method, **kwargs):
         
         if method == "Drop Rows":
             df_copy = df_copy[~(mask & df_copy['value'].isna())]
-        elif method == "Forward Fill":
+        
+        elif method == "Forward Fill (LOCF)":
             df_copy.loc[mask, 'value'] = values.fillna(method='ffill')
-        elif method == "Backward Fill":
+        
+        elif method == "Backward Fill (NOCB)":
             df_copy.loc[mask, 'value'] = values.fillna(method='bfill')
-        elif method == "Interpolate":
-            df_copy.loc[mask, 'value'] = values.interpolate()
-        elif method == "Fill with Mean":
+        
+        elif method == "Linear Interpolation":
+            df_copy.loc[mask, 'value'] = values.interpolate(method='linear')
+        
+        elif method == "Cubic Spline Interpolation":
+            if len(values.dropna()) >= 4:
+                df_copy.loc[mask, 'value'] = values.interpolate(method='cubic')
+            else:
+                df_copy.loc[mask, 'value'] = values.interpolate(method='linear')
+        
+        elif method == "Polynomial Interpolation":
+            order = kwargs.get('poly_order', 2)
+            if len(values.dropna()) >= order + 1:
+                df_copy.loc[mask, 'value'] = values.interpolate(method='polynomial', order=order)
+            else:
+                df_copy.loc[mask, 'value'] = values.interpolate(method='linear')
+        
+        elif method == "Mean Imputation":
             df_copy.loc[mask, 'value'] = values.fillna(values.mean())
-        elif method == "Fill with Median":
+        
+        elif method == "Median Imputation":
             df_copy.loc[mask, 'value'] = values.fillna(values.median())
-        elif method == "Fill with Constant":
+        
+        elif method == "Mode Imputation":
+            mode_val = values.mode()[0] if len(values.mode()) > 0 else values.mean()
+            df_copy.loc[mask, 'value'] = values.fillna(mode_val)
+        
+        elif method == "KNN Imputation":
+            from sklearn.impute import KNNImputer
+            k = kwargs.get('k_neighbors', 5)
+            imputer = KNNImputer(n_neighbors=k)
+            vals_array = values.values.reshape(-1, 1)
+            imputed = imputer.fit_transform(vals_array)
+            df_copy.loc[mask, 'value'] = imputed.flatten()
+        
+        elif method == "Constant Value":
             fill_val = kwargs.get('fill_value', 0)
             df_copy.loc[mask, 'value'] = values.fillna(fill_val)
     
@@ -357,7 +419,7 @@ def handle_missing_values(df, variables, method, **kwargs):
 
 
 def handle_outliers(df, variables, method, **kwargs):
-    """Handle outliers"""
+    """Handle outliers with scientific methods"""
     df_copy = df.copy()
     
     for var in variables:
@@ -371,8 +433,9 @@ def handle_outliers(df, variables, method, **kwargs):
             q1 = values.quantile(0.25)
             q3 = values.quantile(0.75)
             iqr = q3 - q1
-            lower = q1 - 1.5 * iqr
-            upper = q3 + 1.5 * iqr
+            factor = kwargs.get('iqr_factor', 1.5)
+            lower = q1 - factor * iqr
+            upper = q3 + factor * iqr
             outlier_mask = (df_copy.loc[mask, 'value'] < lower) | (df_copy.loc[mask, 'value'] > upper)
             
             action = kwargs.get('action', 'remove')
@@ -382,49 +445,57 @@ def handle_outliers(df, variables, method, **kwargs):
                 df_copy.loc[mask & outlier_mask & (df_copy['value'] < lower), 'value'] = lower
                 df_copy.loc[mask & outlier_mask & (df_copy['value'] > upper), 'value'] = upper
         
-        elif method == "Z-Score":
+        elif method == "Z-Score Method":
+            threshold = kwargs.get('z_threshold', 3.0)
             mean = values.mean()
             std = values.std()
             if std > 0:
                 z_scores = np.abs((df_copy.loc[mask, 'value'] - mean) / std)
-                outlier_mask = z_scores > 3
+                outlier_mask = z_scores > threshold
                 
                 action = kwargs.get('action', 'remove')
                 if action == 'remove':
                     df_copy = df_copy[~(mask & outlier_mask)]
-    
-    return df_copy
-
-
-def apply_smoothing(df, variables, method, **kwargs):
-    """Apply smoothing"""
-    df_copy = df.copy()
-    
-    for var in variables:
-        mask = df_copy['variable'] == var
-        values = df_copy.loc[mask, 'value'].copy()
+                elif action == 'cap':
+                    cap_val_low = mean - threshold * std
+                    cap_val_high = mean + threshold * std
+                    df_copy.loc[mask & outlier_mask & (df_copy['value'] < cap_val_low), 'value'] = cap_val_low
+                    df_copy.loc[mask & outlier_mask & (df_copy['value'] > cap_val_high), 'value'] = cap_val_high
         
-        if method == "Moving Average":
-            window = kwargs.get('window', 3)
-            smoothed = values.rolling(window=window, center=True, min_periods=1).mean()
-            df_copy.loc[mask, 'value'] = smoothed
-        elif method == "Exponential Smoothing":
-            alpha = kwargs.get('alpha', 0.3)
-            smoothed = values.ewm(alpha=alpha, adjust=False).mean()
-            df_copy.loc[mask, 'value'] = smoothed
+        elif method == "Modified Z-Score":
+            threshold = kwargs.get('modified_z_threshold', 3.5)
+            median = values.median()
+            mad = np.median(np.abs(values - median))
+            if mad > 0:
+                modified_z = 0.6745 * (df_copy.loc[mask, 'value'] - median) / mad
+                outlier_mask = np.abs(modified_z) > threshold
+                
+                action = kwargs.get('action', 'remove')
+                if action == 'remove':
+                    df_copy = df_copy[~(mask & outlier_mask)]
+        
+        elif method == "Isolation Forest":
+            from sklearn.ensemble import IsolationForest
+            contamination = kwargs.get('contamination', 0.1)
+            clf = IsolationForest(contamination=contamination, random_state=42)
+            vals_array = values.values.reshape(-1, 1)
+            predictions = clf.fit_predict(vals_array)
+            outlier_mask = predictions == -1
+            
+            if kwargs.get('action', 'remove') == 'remove':
+                valid_indices = np.where(mask)[0][~outlier_mask]
+                df_copy = df_copy.iloc[valid_indices]
     
     return df_copy
 
 
-def apply_transformations(df, variables, transformation):
+def apply_transformations(df, variables, transformation, **kwargs):
     """Apply mathematical transformations"""
     df_copy = df.copy()
     new_columns = []
     
-    time_col = st.session_state.get('time_column', 'timestamp')
-    
     for var in variables:
-        new_var_name = f"{var}_{transformation.lower().replace(' ', '_')}"
+        new_var_name = f"{var}_{transformation.lower().replace(' ', '_').replace('(', '').replace(')', '')}"
         new_columns.append(new_var_name)
         
         var_data = df[df['variable'] == var].copy()
@@ -442,6 +513,7 @@ def apply_transformations(df, variables, transformation):
             else:
                 transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
                     np.log(transformed_data.loc[transformed_data['value'].notna(), 'value'])
+        
         elif "Square Root" in transformation:
             min_val = values.min()
             if pd.notna(min_val) and min_val < 0:
@@ -451,12 +523,28 @@ def apply_transformations(df, variables, transformation):
             else:
                 transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
                     np.sqrt(transformed_data.loc[transformed_data['value'].notna(), 'value'])
-        elif "Standardize" in transformation:
+        
+        elif "Box-Cox" in transformation:
+            from scipy import stats
+            vals_clean = values.dropna()
+            if len(vals_clean) > 0 and vals_clean.min() > 0:
+                transformed_vals, _ = stats.boxcox(vals_clean)
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = transformed_vals
+        
+        elif "Yeo-Johnson" in transformation:
+            from scipy import stats
+            vals_clean = values.dropna()
+            if len(vals_clean) > 0:
+                transformed_vals, _ = stats.yeojohnson(vals_clean)
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = transformed_vals
+        
+        elif "Standardize" in transformation or "Z-Score" in transformation:
             mean = values.mean()
             std = values.std()
             if pd.notna(mean) and pd.notna(std) and std > 0:
                 transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
                     (transformed_data.loc[transformed_data['value'].notna(), 'value'] - mean) / std
+        
         elif "Min-Max" in transformation:
             min_val = values.min()
             max_val = values.max()
@@ -464,37 +552,34 @@ def apply_transformations(df, variables, transformation):
                 transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
                     (transformed_data.loc[transformed_data['value'].notna(), 'value'] - min_val) / (max_val - min_val)
         
+        elif "Robust Scaling" in transformation:
+            median = values.median()
+            q1 = values.quantile(0.25)
+            q3 = values.quantile(0.75)
+            iqr = q3 - q1
+            if iqr > 0:
+                transformed_data.loc[transformed_data['value'].notna(), 'value'] = \
+                    (transformed_data.loc[transformed_data['value'].notna(), 'value'] - median) / iqr
+        
         df_copy = pd.concat([df_copy, transformed_data], ignore_index=True)
     
     return df_copy, new_columns
 
 
 # =============================================================================
-# SECTION 5: SAVE TO DATABASE (APPEND-ONLY WITH DUPLICATE CHECKING)
+# SECTION 6: SAVE TO DATABASE
 # =============================================================================
 
 def save_to_database():
-    """
-    Save cleaned data to database with append-only logic:
-    1. Identify newly created cleaned variables (not in raw data)
-    2. Check for existing rows to avoid duplicates
-    3. Save only new rows with data_source='cleaned'
-    4. Update parameters table
-    5. Update progress: upsert to project_progress_steps
-    """
+    """Save cleaned data with append-only logic"""
     project_id = st.session_state.get('current_project_id')
     
-    if not project_id:
-        st.error("❌ No project selected")
+    if not project_id or not DB_AVAILABLE:
+        st.error("❌ Cannot save")
         return
     
-    if not DB_AVAILABLE:
-        st.error("❌ Database not available")
-        return
-    
-    with st.spinner("💾 Saving to database..."):
+    with st.spinner("💾 Saving..."):
         try:
-            # 1. Identify newly created cleaned variables
             all_vars_in_working = st.session_state.df_working['variable'].unique()
             raw_vars = st.session_state.raw_variables
             new_cleaned_vars = [v for v in all_vars_in_working if v not in raw_vars]
@@ -503,42 +588,27 @@ def save_to_database():
                 st.warning("⚠️ No new cleaned variables to save")
                 return
             
-            # 2. Extract data for new cleaned variables
             time_col = st.session_state.get('time_column', 'timestamp')
             cleaned_df_new = st.session_state.df_working[
                 st.session_state.df_working['variable'].isin(new_cleaned_vars)
             ].copy()
             
-            # 3. Check for existing cleaned data to avoid duplicates
             existing_cleaned = st.session_state.get('df_cleaned_db')
             if existing_cleaned is not None and len(existing_cleaned) > 0:
-                # Remove rows that already exist in database
                 for var in new_cleaned_vars:
                     var_existing = existing_cleaned[existing_cleaned['variable'] == var]
                     if len(var_existing) > 0:
                         existing_timestamps = set(var_existing[time_col].values)
-                        var_new = cleaned_df_new[cleaned_df_new['variable'] == var]
-                        
-                        # Keep only rows with timestamps NOT in existing data
-                        mask_to_keep = ~var_new[time_col].isin(existing_timestamps)
-                        rows_to_remove = var_new[~mask_to_keep]
-                        
-                        if len(rows_to_remove) > 0:
-                            # Remove duplicate rows
-                            cleaned_df_new = cleaned_df_new[
-                                ~((cleaned_df_new['variable'] == var) & 
-                                  (cleaned_df_new[time_col].isin(existing_timestamps)))
-                            ]
+                        cleaned_df_new = cleaned_df_new[
+                            ~((cleaned_df_new['variable'] == var) & 
+                              (cleaned_df_new[time_col].isin(existing_timestamps)))
+                        ]
             
             if len(cleaned_df_new) == 0:
-                st.info("ℹ️ All cleaned data already exists in database")
+                st.info("ℹ️ All data already in database")
                 return
             
-            st.info(f"Saving {len(cleaned_df_new):,} new records for {len(new_cleaned_vars)} variables...")
-            
-            # 4. Save to timeseries_data with data_source='cleaned'
             success = False
-            
             if hasattr(db, "upsert_timeseries_data"):
                 success = db.upsert_timeseries_data(
                     project_id=project_id,
@@ -547,22 +617,12 @@ def save_to_database():
                     batch_size=1000,
                     ignore_duplicates=True
                 )
-            elif hasattr(db, "save_timeseries_data"):
-                success = db.save_timeseries_data(
-                    project_id=project_id,
-                    df_long=cleaned_df_new,
-                    data_source="cleaned",
-                    batch_size=1000
-                )
-            else:
-                st.error("❌ Database manager missing save method")
-                return
             
             if not success:
-                st.error("❌ Failed to save data")
+                st.error("❌ Save failed")
                 return
             
-            # 5. Update parameters table
+            # Update parameters
             cleaned_params = []
             for var in new_cleaned_vars:
                 var_subset = cleaned_df_new[cleaned_df_new['variable'] == var]
@@ -583,262 +643,403 @@ def save_to_database():
             if cleaned_params:
                 db.save_parameters(project_id, cleaned_params)
             
-            # 6. Update progress: upsert to project_progress_steps
+            # Update progress
             try:
-                # Upsert step_key='data_cleaned', step_percent=7
                 if hasattr(db, "upsert_progress_step"):
-                    db.upsert_progress_step(
-                        project_id=project_id,
-                        step_key="data_cleaned",
-                        step_percent=7
-                    )
-                else:
-                    # Fallback: direct upsert
-                    db.client.table("project_progress_steps").upsert({
-                        "project_id": project_id,
-                        "step_key": "data_cleaned",
-                        "step_percent": 7,
-                        "updated_at": datetime.now().isoformat()
-                    }, on_conflict="project_id,step_key").execute()
+                    db.upsert_progress_step(project_id, "data_cleaned", 7)
                 
-                # Recompute total progress
                 if hasattr(db, "recompute_and_update_project_progress"):
                     db.recompute_and_update_project_progress(
-                        project_id=project_id,
-                        workflow_state="preprocessing",
-                        current_page=3
+                        project_id, workflow_state="preprocessing", current_page=3
                     )
-            except Exception as e:
-                st.warning(f"Progress update failed: {e}")
+            except Exception:
+                pass
             
-            # 7. Update session state
             st.session_state.has_unsaved_changes = False
-            st.session_state.cleaned_variables = list(
-                set(st.session_state.get('cleaned_variables', []) + new_cleaned_vars)
-            )
-            
-            # Success message
-            st.success(f"""
-            🎉 **Successfully saved!**
-            - {len(cleaned_df_new):,} new data points
-            - {len(cleaned_params)} parameters updated
-            - Progress: Step 'data_cleaned' = 7%
-            """)
-            
+            st.success(f"🎉 Saved {len(cleaned_df_new):,} records!")
             st.balloons()
             
             time.sleep(2)
-            
-            # Reload data from database
             st.session_state.page3_data_loaded = False
             st.rerun()
             
         except Exception as e:
-            st.error(f"❌ Save error: {str(e)}")
-            import traceback
-            st.error(traceback.format_exc())
+            st.error(f"❌ Error: {str(e)}")
 
 
 # =============================================================================
-# SECTION 6: MAIN FUNCTION
+# SECTION 7: MAIN FUNCTION
 # =============================================================================
 
 def main():
-    """Main function with session reset and data loading"""
+    """Main function"""
     
-    # Check project
     if not st.session_state.get('current_project_id'):
         st.warning("⚠️ Please select a project")
         if st.button("← Go to Home"):
             st.switch_page("pages/01_Home.py")
         st.stop()
     
-    # STEP 1: Reset session state on page load (if not already loaded)
+    # Reset and load data
     if not st.session_state.get('page3_data_loaded', False):
         reset_page_session_state()
         initialize_cleaning_history()
-    
-    # STEP 2: Load data from database
-    if not st.session_state.get('page3_data_loaded', False):
-        with st.spinner("📊 Loading project data from database..."):
+        
+        with st.spinner("📊 Loading data..."):
             success = load_project_data_from_database()
-            
             if not success:
-                st.error("❌ Failed to load project data")
-                if st.button("🔄 Retry"):
-                    st.rerun()
                 st.stop()
     
-    # Get data from session state
-    df_working = st.session_state.get('df_working')
-    raw_vars = st.session_state.get('raw_variables', [])
-    cleaned_vars = st.session_state.get('cleaned_variables', [])
-    all_vars = st.session_state.get('all_variables', [])
+    # Get comprehensive health report (SAME as Page 2)
+    comprehensive_report = get_comprehensive_health_report()
     
-    # Metrics
+    if not comprehensive_report:
+        st.error("❌ No health report available")
+        st.stop()
+    
+    # UPDATE 1: Metrics from comprehensive health report
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Variables", len(all_vars))
-    col2.metric("Raw Variables", len(raw_vars))
-    col3.metric("Cleaned Variables", len(cleaned_vars))
+    
+    col1.metric("Total Parameters", comprehensive_report.get('total_parameters', 0))
+    
+    # Count raw vs cleaned data points
+    df_raw = st.session_state.get('df_raw')
+    df_cleaned_db = st.session_state.get('df_cleaned_db')
+    raw_count = len(df_raw) if df_raw is not None else 0
+    cleaned_count = len(df_cleaned_db) if df_cleaned_db is not None else 0
+    
+    col2.metric("Raw Data", f"{raw_count:,}")
+    col3.metric("Cleaned Data", f"{cleaned_count:,}")
     col4.metric("Operations", len(st.session_state.get('cleaning_history', [])))
     
     st.markdown("---")
     
-    # Save button (always visible)
+    # UPDATE 2: Save button + Go to Visualization button
     if st.session_state.get('cleaning_history'):
-        st.markdown("### 💾 Save Your Work")
+        st.markdown("### 💾 Save & Continue")
         
-        col1, col2 = st.columns([3, 1])
+        col1, col2 = st.columns(2)
         
         with col1:
-            total_new = sum(len(op.get('details', {}).get('new_columns', [])) 
-                           for op in st.session_state.cleaning_history)
-            st.info(f"📝 {len(st.session_state.cleaning_history)} operations creating {total_new} new columns")
+            if st.button("💾 Save to Database", type="primary", use_container_width=True, key="save_btn"):
+                save_to_database()
         
         with col2:
-            if st.button("💾 Save", type="primary", use_container_width=True, key="save_top"):
-                save_to_database()
+            if st.button("📊 Go to Data Visualization", type="secondary", use_container_width=True, key="viz_btn"):
+                st.switch_page("pages/04_Exploration_and_Visualization.py")
         
         st.markdown("---")
     
-    # Comparison section
-    if cleaned_vars and raw_vars:
-        st.markdown("### 📊 Compare Original vs Cleaned Data")
+    # UPDATE 3: Parameters Health Table (from Page 2)
+    st.markdown("### 📋 Parameters Health Status")
+    
+    missing_detail = comprehensive_report.get('missing_values_detail', {})
+    
+    if missing_detail:
+        param_health_data = []
+        for var, info in missing_detail.items():
+            missing_count = info.get('count', 0)
+            total_count = info.get('total', 0)
+            missing_pct = info.get('percentage', 0)
+            
+            # Determine if raw or cleaned
+            is_raw = var in st.session_state.get('raw_variables', [])
+            is_cleaned = var in st.session_state.get('cleaned_variables', [])
+            data_type = "Raw" if is_raw and not is_cleaned else "Cleaned" if is_cleaned else "Both"
+            
+            # Health status with color
+            if missing_pct > 0.20:
+                status = "🔴 Critical"
+                problem = f"High missing: {missing_pct*100:.1f}%"
+            elif missing_pct > 0.05:
+                status = "🟡 Warning"
+                problem = f"Missing: {missing_pct*100:.1f}%"
+            else:
+                status = "🟢 Healthy"
+                problem = "No issues"
+            
+            param_health_data.append({
+                "Parameter": var,
+                "Type": data_type,
+                "Missing": f"{missing_count:,}",
+                "Total": f"{total_count:,}",
+                "Missing %": f"{missing_pct*100:.1f}%",
+                "Problem": problem,
+                "Status": status
+            })
         
-        col1, col2, col3 = st.columns([2, 2, 4])
+        st.dataframe(pd.DataFrame(param_health_data), use_container_width=True, hide_index=True)
+    else:
+        st.success("✅ All parameters healthy!")
+    
+    st.markdown("---")
+    
+    # UPDATE 4: Tabs with enhanced layout
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "🔍 Missing Values",
+        "📊 Outliers",
+        "🔄 Transformations",
+        "📋 Summary"
+    ])
+    
+    # TAB 1: Missing Values
+    with tab1:
+        st.header("🔍 Missing Values Handling")
+        
+        # Two-column layout
+        col_left, col_right = st.columns([1, 1])
+        
+        with col_left:
+            st.markdown("#### 📐 Method Selection")
+            
+            method = st.selectbox(
+                "Imputation Method",
+                [
+                    "Drop Rows",
+                    "Forward Fill (LOCF)",
+                    "Backward Fill (NOCB)",
+                    "Linear Interpolation",
+                    "Cubic Spline Interpolation",
+                    "Polynomial Interpolation",
+                    "Mean Imputation",
+                    "Median Imputation",
+                    "Mode Imputation",
+                    "KNN Imputation",
+                    "Constant Value"
+                ],
+                key="miss_method"
+            )
+            
+            kwargs = {}
+            if method == "Polynomial Interpolation":
+                kwargs['poly_order'] = st.slider("Polynomial Order", 2, 5, 2)
+            elif method == "KNN Imputation":
+                kwargs['k_neighbors'] = st.slider("K Neighbors", 3, 10, 5)
+            elif method == "Constant Value":
+                kwargs['fill_value'] = st.number_input("Fill Value", value=0.0)
+            
+            st.markdown("---")
+            st.markdown("**Method Description:**")
+            if "Interpolation" in method:
+                st.info("Estimates missing values using surrounding data points")
+            elif "Imputation" in method:
+                st.info("Fills missing values with statistical measures")
+            elif "Fill" in method:
+                st.info("Propagates values forward or backward in time")
+        
+        with col_right:
+            st.markdown("#### 📊 Parameters with Missing Values")
+            
+            # Filter parameters with missing values
+            params_with_missing = []
+            if missing_detail:
+                for var, info in missing_detail.items():
+                    if info.get('count', 0) > 0:
+                        params_with_missing.append(var)
+            
+            if params_with_missing:
+                selected_vars = st.multiselect(
+                    "Select parameters to clean",
+                    params_with_missing,
+                    key="miss_vars"
+                )
+                
+                if selected_vars:
+                    st.markdown("**Selected:**")
+                    for var in selected_vars:
+                        info = missing_detail[var]
+                        st.text(f"• {var}: {info['count']:,} missing ({info['percentage']*100:.1f}%)")
+            else:
+                st.success("✅ No missing values detected!")
+                selected_vars = []
+        
+        # Apply button
+        if selected_vars:
+            st.markdown("---")
+            if st.button("✅ Apply Cleaning", type="primary", use_container_width=True, key="apply_miss"):
+                st.session_state.df_working = handle_missing_values(
+                    st.session_state.df_working, selected_vars, method, **kwargs
+                )
+                add_to_cleaning_history("missing_values", method, selected_vars, kwargs)
+                st.success(f"✅ Applied {method} to {len(selected_vars)} parameters")
+                st.rerun()
+    
+    # TAB 2: Outliers
+    with tab2:
+        st.header("📊 Outlier Detection & Handling")
+        
+        col_left, col_right = st.columns([1, 1])
+        
+        with col_left:
+            st.markdown("#### 📐 Method Selection")
+            
+            method = st.selectbox(
+                "Detection Method",
+                [
+                    "IQR Method",
+                    "Z-Score Method",
+                    "Modified Z-Score",
+                    "Isolation Forest"
+                ],
+                key="out_method"
+            )
+            
+            action = st.selectbox("Action", ["remove", "cap"], key="out_action")
+            
+            kwargs = {'action': action}
+            if method == "IQR Method":
+                kwargs['iqr_factor'] = st.slider("IQR Factor", 1.0, 3.0, 1.5, 0.1)
+            elif method == "Z-Score Method":
+                kwargs['z_threshold'] = st.slider("Z-Score Threshold", 2.0, 4.0, 3.0, 0.1)
+            elif method == "Modified Z-Score":
+                kwargs['modified_z_threshold'] = st.slider("Modified Z Threshold", 2.5, 5.0, 3.5, 0.1)
+            elif method == "Isolation Forest":
+                kwargs['contamination'] = st.slider("Contamination", 0.01, 0.2, 0.1, 0.01)
+        
+        with col_right:
+            st.markdown("#### 📊 Select Parameters")
+            
+            raw_vars = st.session_state.get('raw_variables', [])
+            selected_vars = st.multiselect(
+                "Parameters to analyze",
+                raw_vars,
+                key="out_vars"
+            )
+        
+        if selected_vars:
+            st.markdown("---")
+            if st.button("✅ Apply Cleaning", type="primary", use_container_width=True, key="apply_out"):
+                st.session_state.df_working = handle_outliers(
+                    st.session_state.df_working, selected_vars, method, **kwargs
+                )
+                add_to_cleaning_history("outliers", method, selected_vars, kwargs)
+                st.success(f"✅ Applied {method} to {len(selected_vars)} parameters")
+                st.rerun()
+    
+    # TAB 3: Transformations
+    with tab3:
+        st.header("🔄 Mathematical Transformations")
+        
+        col_left, col_right = st.columns([1, 1])
+        
+        with col_left:
+            st.markdown("#### 📐 Transformation Type")
+            
+            transformation = st.selectbox(
+                "Transform",
+                [
+                    "Log Transform",
+                    "Square Root Transform",
+                    "Box-Cox Transform",
+                    "Yeo-Johnson Transform",
+                    "Standardize (Z-Score)",
+                    "Min-Max Normalize",
+                    "Robust Scaling"
+                ],
+                key="trans_method"
+            )
+            
+            st.markdown("---")
+            st.markdown("**Why Transform?**")
+            if "Log" in transformation:
+                st.info("Reduces right skewness, stabilizes variance")
+            elif "Box-Cox" in transformation:
+                st.info("Automatically finds best power transformation")
+            elif "Standardize" in transformation:
+                st.info("Centers data with mean=0, std=1")
+            elif "Min-Max" in transformation:
+                st.info("Scales data to [0, 1] range")
+        
+        with col_right:
+            st.markdown("#### 📊 Select Parameters")
+            
+            raw_vars = st.session_state.get('raw_variables', [])
+            selected_vars = st.multiselect(
+                "Parameters to transform",
+                raw_vars,
+                key="trans_vars"
+            )
+        
+        if selected_vars:
+            st.markdown("---")
+            if st.button("✅ Apply Transformation", type="primary", use_container_width=True, key="apply_trans"):
+                df_result, new_cols = apply_transformations(
+                    st.session_state.df_working, selected_vars, transformation
+                )
+                st.session_state.df_working = df_result
+                add_to_cleaning_history("transformation", transformation, selected_vars, {'new_columns': new_cols})
+                st.success(f"✅ Created {len(new_cols)} new variables")
+                st.rerun()
+    
+    # TAB 4: Summary
+    with tab4:
+        st.header("📋 Cleaning Operations Summary")
+        
+        if not st.session_state.get('cleaning_history'):
+            st.info("ℹ️ No operations performed yet")
+        else:
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Operations", len(st.session_state.cleaning_history))
+            
+            modified_vars = set()
+            for op in st.session_state.cleaning_history:
+                modified_vars.update(op['variables'])
+            col2.metric("Parameters Modified", len(modified_vars))
+            
+            total_new = sum(len(op.get('details', {}).get('new_columns', [])) 
+                           for op in st.session_state.cleaning_history)
+            col3.metric("New Variables Created", total_new)
+            
+            st.markdown("---")
+            st.subheader("Operation Log")
+            
+            ops_data = []
+            for i, op in enumerate(st.session_state.cleaning_history, 1):
+                new_cols = op.get('details', {}).get('new_columns', [])
+                ops_data.append({
+                    "#": i,
+                    "Type": op['type'].replace('_', ' ').title(),
+                    "Method": op['method'],
+                    "Parameters": ", ".join(op['variables'][:3]) + ("..." if len(op['variables']) > 3 else ""),
+                    "New Variables": ", ".join(new_cols[:2]) + ("..." if len(new_cols) > 2 else "") if new_cols else "-"
+                })
+            
+            st.dataframe(pd.DataFrame(ops_data), use_container_width=True, hide_index=True)
+    
+    # Comparison Plot Section (outside tabs)
+    st.markdown("---")
+    st.markdown("### 📊 Before/After Comparison")
+    
+    raw_vars = st.session_state.get('raw_variables', [])
+    cleaned_vars = st.session_state.get('cleaned_variables', [])
+    
+    if cleaned_vars and raw_vars:
+        col1, col2, col3 = st.columns([2, 2, 1])
         
         with col1:
-            selected_raw = st.selectbox("Original Variable", raw_vars, key="cmp_raw")
+            selected_raw = st.selectbox("Raw Data", raw_vars, key="cmp_raw")
         
         with col2:
-            selected_cleaned = st.selectbox("Cleaned Variable", cleaned_vars, key="cmp_clean")
+            selected_cleaned = st.selectbox("Cleaned Data", cleaned_vars, key="cmp_clean")
         
         with col3:
-            if st.button("🔍 Compare", use_container_width=True, type="primary", key="cmp_btn"):
+            if st.button("🔍 Plot", use_container_width=True, type="primary"):
                 st.session_state.show_comparison = True
         
         if st.session_state.get('show_comparison', False):
-            fig = plot_comparison_before_after(
-                df_working,
+            fig = plot_before_after_comparison(
+                st.session_state.df_working,
                 selected_raw,
-                selected_cleaned,
-                f"Before vs After: {selected_raw} → {selected_cleaned}"
+                selected_cleaned
             )
             
             if fig:
                 st.plotly_chart(fig, use_container_width=True)
-                export_figure(fig, f"comparison_{selected_raw}_vs_{selected_cleaned}")
-            else:
-                st.warning("No data to compare")
-        
-        st.markdown("---")
-    
-    # Tabs for cleaning operations
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "🔍 Missing Values",
-        "📊 Outliers",
-        "📈 Smoothing",
-        "🔄 Transformations"
-    ])
-    
-    with tab1:
-        st.header("🔍 Missing Values")
-        
-        if not raw_vars:
-            st.info("No variables available")
-        else:
-            selected = st.multiselect("Select variables", raw_vars, key="miss_vars")
-            
-            if selected:
-                method = st.selectbox(
-                    "Method",
-                    ["Drop Rows", "Forward Fill", "Backward Fill", "Interpolate", 
-                     "Fill with Mean", "Fill with Median", "Fill with Constant"],
-                    key="miss_method"
-                )
                 
-                kwargs = {}
-                if method == "Fill with Constant":
-                    kwargs['fill_value'] = st.number_input("Fill value", value=0.0)
-                
-                if st.button("✅ Apply", key="apply_miss"):
-                    st.session_state.df_working = handle_missing_values(
-                        st.session_state.df_working, selected, method, **kwargs
-                    )
-                    add_to_cleaning_history("missing_values", method, selected, kwargs)
-                    st.success(f"✅ Applied to {len(selected)} variables")
-                    st.rerun()
-    
-    with tab2:
-        st.header("📊 Outliers")
-        
-        if not raw_vars:
-            st.info("No variables available")
-        else:
-            selected = st.multiselect("Select variables", raw_vars, key="out_vars")
-            
-            if selected:
-                method = st.selectbox("Method", ["IQR Method", "Z-Score"], key="out_method")
-                action = st.selectbox("Action", ["remove", "cap"], key="out_action")
-                
-                if st.button("✅ Apply", key="apply_out"):
-                    st.session_state.df_working = handle_outliers(
-                        st.session_state.df_working, selected, method, action=action
-                    )
-                    add_to_cleaning_history("outliers", method, selected, {'action': action})
-                    st.success(f"✅ Applied to {len(selected)} variables")
-                    st.rerun()
-    
-    with tab3:
-        st.header("📈 Smoothing")
-        
-        if not raw_vars:
-            st.info("No variables available")
-        else:
-            selected = st.multiselect("Select variables", raw_vars, key="smooth_vars")
-            
-            if selected:
-                method = st.selectbox("Method", ["Moving Average", "Exponential Smoothing"], key="smooth_method")
-                
-                kwargs = {}
-                if method == "Moving Average":
-                    kwargs['window'] = st.slider("Window", 3, 21, 5)
-                elif method == "Exponential Smoothing":
-                    kwargs['alpha'] = st.slider("Alpha", 0.1, 0.9, 0.3)
-                
-                if st.button("✅ Apply", key="apply_smooth"):
-                    st.session_state.df_working = apply_smoothing(
-                        st.session_state.df_working, selected, method, **kwargs
-                    )
-                    add_to_cleaning_history("smoothing", method, selected, kwargs)
-                    st.success(f"✅ Applied to {len(selected)} variables")
-                    st.rerun()
-    
-    with tab4:
-        st.header("🔄 Transformations")
-        
-        if not raw_vars:
-            st.info("No variables available")
-        else:
-            selected = st.multiselect("Select variables", raw_vars, key="trans_vars")
-            
-            if selected:
-                transformation = st.selectbox(
-                    "Transformation",
-                    ["Log", "Square Root", "Standardize (Z-Score)", "Min-Max Normalize"],
-                    key="trans_method"
-                )
-                
-                if st.button("✅ Apply", key="apply_trans"):
-                    df_result, new_cols = apply_transformations(
-                        st.session_state.df_working, selected, transformation
-                    )
-                    st.session_state.df_working = df_result
-                    add_to_cleaning_history(
-                        "transformation", transformation, selected, {'new_columns': new_cols}
-                    )
-                    st.success(f"✅ Created {len(new_cols)} new variables")
-                    st.rerun()
+                with st.expander("💾 Export Figure"):
+                    quick_export_buttons(fig, f"comparison_{selected_raw}_vs_{selected_cleaned}", ['png', 'pdf', 'html'])
+    else:
+        st.info("ℹ️ Create cleaned variables to enable comparison plots")
 
 
 if __name__ == "__main__":
