@@ -475,24 +475,73 @@ def render_upload_section():
     """Upload section"""
     st.header("Step 1: Upload Your Data File")
     
-    if st.session_state.get('data_loaded') and st.session_state.get('value_columns'):
-        with st.expander("✅ Current Project Data", expanded=False):
-            st.success(f"📊 {len(st.session_state.value_columns)} parameters loaded")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.caption("**Parameters:**")
-                for var in st.session_state.value_columns[:10]:
-                    st.text(f"  • {var}")
-                if len(st.session_state.value_columns) > 10:
-                    st.caption(f"  ... +{len(st.session_state.value_columns) - 10} more")
-            
-            with col2:
-                if st.session_state.get('health_report'):
-                    health = st.session_state.health_report
-                    st.caption("**Health:**")
-                    st.text(f"  Score: {health.get('health_score', 'N/A')}/100")
-                    st.text(f"  Category: {health.get('health_category', 'N/A')}")
+    # Current Project Data expander - FIXED to use comprehensive health report
+    if st.session_state.get('data_loaded') or (DB_AVAILABLE and st.session_state.get('current_project_id')):
+        # Get comprehensive health report (SAME as used everywhere else)
+        comprehensive_report = get_comprehensive_health_report()
+        
+        if comprehensive_report:
+            with st.expander("✅ Current Project Data", expanded=False):
+                # Health metrics at top
+                col_a, col_b, col_c = st.columns(3)
+                
+                with col_a:
+                    health_score = comprehensive_report.get('health_score', 0)
+                    health_category = comprehensive_report.get('health_category', 'unknown')
+                    
+                    score_map = {
+                        "excellent": ("🟢", "Excellent"),
+                        "good": ("🟡", "Good"),
+                        "fair": ("🟠", "Fair"),
+                        "poor": ("🔴", "Poor")
+                    }
+                    score_color, score_text = score_map.get(health_category, ("⚪", "Unknown"))
+                    
+                    st.metric("Health Score", f"{health_score}/100")
+                    st.markdown(f"**{score_color} {score_text}**")
+                
+                with col_b:
+                    st.metric("Parameters", comprehensive_report.get('total_parameters', 0))
+                
+                with col_c:
+                    st.metric("Data Points", f"{comprehensive_report.get('total_data_points', 0):,}")
+                
+                st.markdown("---")
+                
+                # Parameters table with missing values (SAME as missing values table in health report tab)
+                st.caption("**Parameters & Missing Values:**")
+                
+                missing_detail = comprehensive_report.get('missing_values_detail', {})
+                
+                if missing_detail:
+                    param_data = []
+                    for var, info in missing_detail.items():
+                        missing_count = info.get('count', 0)
+                        total_count = info.get('total', 0)
+                        
+                        if total_count > 0:
+                            missing_pct = missing_count / total_count
+                        else:
+                            missing_pct = info.get('percentage', 0)
+                        
+                        status = "🔴" if missing_pct > 0.20 else "🟡" if missing_pct > 0.05 else "🟢"
+                        
+                        param_data.append({
+                            "Parameter": var,
+                            "Missing": f"{missing_count:,}",
+                            "Total": f"{total_count:,}",
+                            "Missing %": f"{missing_pct*100:.1f}%",
+                            "Status": status
+                        })
+                    
+                    # Show top 10 parameters
+                    df_display = pd.DataFrame(param_data)
+                    st.dataframe(df_display.head(10), use_container_width=True, hide_index=True)
+                    
+                    if len(param_data) > 10:
+                        st.caption(f"... +{len(param_data) - 10} more parameters")
+                else:
+                    st.success("✅ No missing values detected!")
     
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
         try:
