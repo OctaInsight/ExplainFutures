@@ -48,6 +48,44 @@ except:
     DB_AVAILABLE = False
     st.error("⚠️ Database not available")
 
+def hydrate_df_long_from_db_if_missing():
+    """
+    If a project is already loaded and df_long is not in session_state,
+    load it from timeseries_data (data_source='original').
+
+    This does not alter core logic; it only pre-fills state.
+    """
+    if not DB_AVAILABLE:
+        return
+    pid = st.session_state.get("current_project_id")
+    if not pid:
+        return
+
+    # Only hydrate if missing
+    if st.session_state.get("df_long") is not None:
+        return
+
+    try:
+        if hasattr(db, "load_timeseries_data"):
+            df_db = db.load_timeseries_data(project_id=pid, data_source="original")
+        else:
+            df_db = None
+
+        if df_db is not None and len(df_db) > 0:
+            st.session_state.df_long = df_db
+            st.session_state.data_loaded = True
+
+            # Optional (safe): align common UI hints if your UI expects them
+            # st.session_state.uploaded_file_name = st.session_state.get("uploaded_file_name", "Loaded from database")
+
+    except Exception as e:
+        st.warning(f"Could not load time-series from database: {e}")
+
+
+# Call it once near the top of the page
+hydrate_df_long_from_db_if_missing()
+
+
 st.title("📁 Upload & Data Diagnostics")
 st.markdown("*Upload your time-series data and assess data quality*")
 st.markdown("---")
@@ -193,21 +231,47 @@ def get_comprehensive_health_report():
         return None
 
 
-def update_project_progress(stage: str = "data_import", page: int = 2, percentage: int = 7):
-    """Update progress"""
-    if not DB_AVAILABLE or not st.session_state.get('current_project_id'):
+def update_project_progress_steps(stage: str = "data_loaded", step_percent: int = 7, page: int = 2):
+    """
+    Write ONE step contribution to project_progress_steps, then recompute total progress
+    into projects.completion_percentage.
+
+    stage -> stored as project_progress_steps.step_key
+    step_percent -> stored as project_progress_steps.step_percent
+    """
+    if not DB_AVAILABLE or not st.session_state.get("current_project_id"):
         return
-    
+
+    pid = st.session_state.current_project_id
+
     try:
-        db.update_project_progress(
-            project_id=st.session_state.current_project_id,
-            workflow_state=stage,
-            current_page=page,
-            completion_percentage=percentage
-        )
-        st.session_state.data_loaded = True
+        # 1) Upsert this step contribution
+        if hasattr(db, "upsert_progress_step"):
+            db.upsert_progress_step(pid, stage, int(step_percent))
+        else:
+            # Fallback: direct insert/update (only if you don't have the method yet)
+            # (Prefer keeping this in SupabaseManager, but leaving here as safe fallback)
+            db.client.table("project_progress_steps").upsert({
+                "project_id": pid,
+                "step_key": stage,
+                "step_percent": int(step_percent),
+            }, on_conflict="project_id,step_key").execute()
+
+        # 2) Recompute total progress and write it to projects table
+        if hasattr(db, "recompute_and_update_project_progress"):
+            db.recompute_and_update_project_progress(
+                pid,
+                workflow_state=stage,   # keep it aligned (or map stage->workflow_state later)
+                current_page=page
+            )
+        else:
+            # If the recompute function doesn't exist, do a minimal safe update
+            # (You said you already added this function earlier; this is fallback only)
+            st.warning("recompute_and_update_project_progress() not found in db manager.")
+
     except Exception as e:
-        st.warning(f"Progress update failed: {str(e)}")
+        st.warning(f"Progress steps update failed: {e}")
+
 
 
 def show_next_steps_after_upload():
@@ -657,7 +721,8 @@ def process_data(df, time_column, value_columns, datetime_format):
         st.session_state.health_report = comprehensive_report
         st.session_state.data_loaded = True
     
-    update_project_progress(stage="data_imported", page=2, percentage=7)
+    update_project_progress_steps(stage="data_loaded", step_percent=7, page=2)
+
     
     if DB_AVAILABLE and st.session_state.get('current_project_id'):
         try:
