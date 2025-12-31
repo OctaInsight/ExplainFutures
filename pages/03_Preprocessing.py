@@ -757,9 +757,17 @@ def save_to_database():
             # Update session state
             st.session_state.has_unsaved_changes = False
             
-            # Add new cleaned variables to session state
-            current_cleaned = st.session_state.get('cleaned_variables', [])
-            st.session_state.cleaned_variables = list(set(current_cleaned + new_cleaned_vars))
+            # CRITICAL: Clear the cleaning history after successful save
+            st.session_state.cleaning_history = []
+            
+            # Update cleaned variables in database list
+            # After save, the new variables are now in the database
+            current_db_cleaned = st.session_state.get('df_cleaned_db')
+            if current_db_cleaned is not None and len(current_db_cleaned) > 0:
+                # Merge new cleaned data with existing
+                st.session_state.df_cleaned_db = pd.concat([current_db_cleaned, cleaned_df_new], ignore_index=True)
+            else:
+                st.session_state.df_cleaned_db = cleaned_df_new.copy()
             
             # Success message
             st.success(f"""
@@ -774,7 +782,7 @@ def save_to_database():
             
             time.sleep(2)
             
-            # Reload data from database to show updated state
+            # Reload data from database to refresh state
             st.session_state.page3_data_loaded = False
             st.rerun()
             
@@ -836,18 +844,25 @@ def main():
     # UPDATE 2: Save button + Go to Visualization button
     st.markdown("### 💾 Save & Continue")
     
-    # Show save section if there are operations OR cleaned variables
-    has_operations = bool(st.session_state.get('cleaning_history'))
-    has_cleaned_vars = bool(st.session_state.get('cleaned_variables'))
+    # Get current cleaned variables in session
+    cleaned_vars_in_session = st.session_state.get('cleaned_variables', [])
     
-    if has_operations or has_cleaned_vars:
+    # Get cleaned variables already saved in database
+    df_cleaned_db = st.session_state.get('df_cleaned_db')
+    cleaned_vars_in_db = []
+    if df_cleaned_db is not None and len(df_cleaned_db) > 0:
+        cleaned_vars_in_db = df_cleaned_db['variable'].unique().tolist()
+    
+    # Calculate NEW cleaned variables (in session but NOT in database)
+    new_cleaned_vars_count = len([v for v in cleaned_vars_in_session if v not in cleaned_vars_in_db])
+    
+    # Show save section only if there are NEW cleaned variables to save
+    if new_cleaned_vars_count > 0:
         col1, col2 = st.columns(2)
         
         with col1:
-            # Show info about what will be saved
-            cleaned_vars = st.session_state.get('cleaned_variables', [])
-            if cleaned_vars:
-                st.info(f"📊 {len(cleaned_vars)} cleaned variable(s) ready to save")
+            # Show accurate count of NEW cleaned variables
+            st.info(f"📊 {new_cleaned_vars_count} cleaned variable(s) ready to save")
             
             if st.button("💾 Save to Database", type="primary", use_container_width=True, key="save_btn"):
                 save_to_database()
@@ -856,14 +871,17 @@ def main():
             if st.button("📊 Go to Data Visualization", type="secondary", use_container_width=True, key="viz_btn"):
                 st.switch_page("pages/04_Exploration_and_Visualization.py")
     else:
-        # Show minimal interface when no operations
-        col1, col2 = st.columns(2)
+        # No new cleaned variables - show only visualization button
+        col1, col2 = st.columns([3, 1])
         
         with col1:
-            st.info("ℹ️ Apply cleaning operations to enable saving")
+            if cleaned_vars_in_session and len(cleaned_vars_in_session) > 0:
+                st.success(f"✅ All {len(cleaned_vars_in_session)} cleaned variable(s) already saved to database")
+            else:
+                st.info("ℹ️ Apply cleaning operations to create cleaned variables")
         
         with col2:
-            if st.button("📊 Go to Data Visualization", type="secondary", use_container_width=True, key="viz_btn_alt"):
+            if st.button("📊 Go to Visualization", type="secondary", use_container_width=True, key="viz_btn_alt"):
                 st.switch_page("pages/04_Exploration_and_Visualization.py")
     
     st.markdown("---")
