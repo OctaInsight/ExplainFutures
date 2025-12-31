@@ -278,14 +278,14 @@ def show_next_steps_after_upload():
     """
     Show next steps - FIXED to:
     1. Always appear (not dependent on upload)
-    2. Use health report from database
+    2. Use get_comprehensive_health_report() (SAME as Data Health Report tab)
     3. Buttons work outside DB check
     4. Proper indentation
     """
     st.markdown("---")
     st.header("🎯 What's Next?")
     
-    # Get health score from database health report
+    # Get health score from get_comprehensive_health_report() - SAME as tab
     health_score = 75  # Default
     health_category = "good"
     total_params = 0
@@ -293,20 +293,16 @@ def show_next_steps_after_upload():
     critical_issues = 0
     warnings = 0
     
-    # Load health report from database
-    if DB_AVAILABLE and st.session_state.get('current_project_id'):
-        try:
-            health_report_db = db.get_health_report(st.session_state.current_project_id)
-            if health_report_db:
-                health_score = health_report_db.get('health_score', 75)
-                health_category = health_report_db.get('health_category', 'good')
-                total_params = health_report_db.get('total_parameters', 0)
-                total_points = health_report_db.get('total_data_points', 0)
-                critical_issues = health_report_db.get('critical_issues', 0)
-                warnings = health_report_db.get('warnings', 0)
-        except Exception:
-            # Use defaults if can't load from DB
-            pass
+    # Load comprehensive health report (SAME source as Data Health Report tab)
+    comprehensive_report = get_comprehensive_health_report()
+    
+    if comprehensive_report:
+        health_score = comprehensive_report.get('health_score', 75)
+        health_category = comprehensive_report.get('health_category', 'good')
+        total_params = comprehensive_report.get('total_parameters', 0)
+        total_points = comprehensive_report.get('total_data_points', 0)
+        critical_issues = comprehensive_report.get('critical_issues', 0)
+        warnings = comprehensive_report.get('warnings', 0)
     
     # Display overall health status with metrics
     col_a, col_b, col_c, col_d = st.columns(4)
