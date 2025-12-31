@@ -1201,127 +1201,125 @@ def show_summary():
 
 def save_to_database():
     """Save cleaned data to database"""
-
-
-with st.spinner("💾 Saving to database..."):
-    try:
-        project_id = st.session_state.current_project_id
-
-        # Identify newly created cleaned variables (do NOT overwrite/delete existing DB data)
-        all_vars = st.session_state.df_clean['variable'].unique()
-        original_vars = st.session_state.df_long['variable'].unique()
-        new_cleaned_vars = [v for v in all_vars if v not in original_vars]
-
-        if not new_cleaned_vars:
-            st.warning("⚠️ No new cleaned variables to save")
-            return
-
-        # Build dataframe containing ONLY the new cleaned variables
-        time_col = 'timestamp' if 'timestamp' in st.session_state.df_clean.columns else 'time'
-        cleaned_df_new = st.session_state.df_clean[
-            st.session_state.df_clean['variable'].isin(new_cleaned_vars)
-        ].copy()
-
-        # Ensure required columns exist for DB write
-        required_cols = {time_col, "variable", "value"}
-        missing_cols = [c for c in required_cols if c not in cleaned_df_new.columns]
-        if missing_cols:
-            st.error(f"❌ Cleaned data missing required column(s): {', '.join(missing_cols)}")
-            return
-
-        st.info(
-            f"Appending cleaned dataset (no delete/overwrite): "
-            f"{len(cleaned_df_new):,} new records across {len(new_cleaned_vars)} new variable(s)."
-        )
-
-        # APPEND-ONLY SAVE (NO DELETE, NO DUPLICATION)
-        # - Requires DB uniqueness: (project_id, data_source, timestamp, variable)
-        # - Uses UPSERT/ignore duplicates in supabase_manager
-        if hasattr(db, "save_cleaned_timeseries_append"):
-            success = db.save_cleaned_timeseries_append(project_id, cleaned_df_new, batch_size=1000)
-        elif hasattr(db, "upsert_timeseries_data"):
-            success = db.upsert_timeseries_data(
-                project_id=project_id,
-                df_long=cleaned_df_new,
-                data_source="cleaned",
-                batch_size=1000,
-                ignore_duplicates=True
+    with st.spinner("💾 Saving to database..."):
+        try:
+            project_id = st.session_state.current_project_id
+    
+            # Identify newly created cleaned variables (do NOT overwrite/delete existing DB data)
+            all_vars = st.session_state.df_clean['variable'].unique()
+            original_vars = st.session_state.df_long['variable'].unique()
+            new_cleaned_vars = [v for v in all_vars if v not in original_vars]
+    
+            if not new_cleaned_vars:
+                st.warning("⚠️ No new cleaned variables to save")
+                return
+    
+            # Build dataframe containing ONLY the new cleaned variables
+            time_col = 'timestamp' if 'timestamp' in st.session_state.df_clean.columns else 'time'
+            cleaned_df_new = st.session_state.df_clean[
+                st.session_state.df_clean['variable'].isin(new_cleaned_vars)
+            ].copy()
+    
+            # Ensure required columns exist for DB write
+            required_cols = {time_col, "variable", "value"}
+            missing_cols = [c for c in required_cols if c not in cleaned_df_new.columns]
+            if missing_cols:
+                st.error(f"❌ Cleaned data missing required column(s): {', '.join(missing_cols)}")
+                return
+    
+            st.info(
+                f"Appending cleaned dataset (no delete/overwrite): "
+                f"{len(cleaned_df_new):,} new records across {len(new_cleaned_vars)} new variable(s)."
             )
-        else:
-            st.error("❌ Database manager is missing append/UPSERT method for cleaned data.")
-            st.info("Please ensure supabase_manager includes save_cleaned_timeseries_append() or upsert_timeseries_data().")
-            return
-
-        if not success:
-            st.error("❌ Failed to append cleaned data")
-            return
-
-        # Update parameters for ONLY newly created cleaned variables
-        cleaned_params = []
-        for var in new_cleaned_vars:
-            var_subset = cleaned_df_new[cleaned_df_new['variable'] == var]
-            var_data = var_subset['value'].dropna()
-
-            if len(var_data) > 0:
-                cleaned_params.append({
-                    'name': var,
-                    'data_type': 'numeric',
-                    'min_value': float(var_data.min()),
-                    'max_value': float(var_data.max()),
-                    'mean_value': float(var_data.mean()),
-                    'std_value': float(var_data.std()),
-                    'missing_count': int(var_subset['value'].isna().sum()),
-                    'total_count': int(len(var_subset))
-                })
-
-        if cleaned_params:
-            db.save_parameters(project_id, cleaned_params)
-
-        # State transition (existing behavior kept)
-        db.update_step_completion(project_id, 'data_cleaned', True)
-
-        # Progress subsystem (agreed approach)
-        if DB_AVAILABLE and st.session_state.get("current_project_id"):
-            pid = st.session_state.current_project_id
-
-            # Step contribution for page 3
-            db.upsert_progress_step(pid, "page3_data_cleaning", 7)
-
-            # Recompute total and write back to projects
-            db.recompute_and_update_project_progress(
-                pid,
-                workflow_state="preprocessing_complete",
-                current_page=3
+    
+            # APPEND-ONLY SAVE (NO DELETE, NO DUPLICATION)
+            # - Requires DB uniqueness: (project_id, data_source, timestamp, variable)
+            # - Uses UPSERT/ignore duplicates in supabase_manager
+            if hasattr(db, "save_cleaned_timeseries_append"):
+                success = db.save_cleaned_timeseries_append(project_id, cleaned_df_new, batch_size=1000)
+            elif hasattr(db, "upsert_timeseries_data"):
+                success = db.upsert_timeseries_data(
+                    project_id=project_id,
+                    df_long=cleaned_df_new,
+                    data_source="cleaned",
+                    batch_size=1000,
+                    ignore_duplicates=True
+                )
+            else:
+                st.error("❌ Database manager is missing append/UPSERT method for cleaned data.")
+                st.info("Please ensure supabase_manager includes save_cleaned_timeseries_append() or upsert_timeseries_data().")
+                return
+    
+            if not success:
+                st.error("❌ Failed to append cleaned data")
+                return
+    
+            # Update parameters for ONLY newly created cleaned variables
+            cleaned_params = []
+            for var in new_cleaned_vars:
+                var_subset = cleaned_df_new[cleaned_df_new['variable'] == var]
+                var_data = var_subset['value'].dropna()
+    
+                if len(var_data) > 0:
+                    cleaned_params.append({
+                        'name': var,
+                        'data_type': 'numeric',
+                        'min_value': float(var_data.min()),
+                        'max_value': float(var_data.max()),
+                        'mean_value': float(var_data.mean()),
+                        'std_value': float(var_data.std()),
+                        'missing_count': int(var_subset['value'].isna().sum()),
+                        'total_count': int(len(var_subset))
+                    })
+    
+            if cleaned_params:
+                db.save_parameters(project_id, cleaned_params)
+    
+            # State transition (existing behavior kept)
+            db.update_step_completion(project_id, 'data_cleaned', True)
+    
+            # Progress subsystem (agreed approach)
+            if DB_AVAILABLE and st.session_state.get("current_project_id"):
+                pid = st.session_state.current_project_id
+    
+                # Step contribution for page 3
+                db.upsert_progress_step(pid, "page3_data_cleaning", 7)
+    
+                # Recompute total and write back to projects
+                db.recompute_and_update_project_progress(
+                    pid,
+                    workflow_state="preprocessing_complete",
+                    current_page=3
+                )
+    
+            # Reset dirty tracking AFTER successful save
+            st.session_state.data_cleaned = True
+            st.session_state.has_unsaved_changes = False
+            st.session_state.initial_data_hash = calculate_df_hash_fast(st.session_state.df_clean)
+            st.session_state.current_data_hash = st.session_state.initial_data_hash
+    
+            st.session_state.cleaned_variables = list(
+                set(st.session_state.get('cleaned_variables', []) + new_cleaned_vars)
             )
-
-        # Reset dirty tracking AFTER successful save
-        st.session_state.data_cleaned = True
-        st.session_state.has_unsaved_changes = False
-        st.session_state.initial_data_hash = calculate_df_hash_fast(st.session_state.df_clean)
-        st.session_state.current_data_hash = st.session_state.initial_data_hash
-
-        st.session_state.cleaned_variables = list(
-            set(st.session_state.get('cleaned_variables', []) + new_cleaned_vars)
-        )
-
-        st.success("🎉 Successfully appended cleaned data to database!")
-        st.balloons()
-
-        st.info(f"""
-        **✅ Saved (append-only):**
-        - {len(cleaned_df_new):,} new cleaned data points
-        - {len(cleaned_params)} parameters updated for new cleaned variables
-        """)
-
-        time.sleep(1)
-        # Force reload from DB to reflect persisted state
-        st.session_state.data_loaded = False
-        st.rerun()
-
-    except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
-        import traceback
-        st.code(traceback.format_exc())
+    
+            st.success("🎉 Successfully appended cleaned data to database!")
+            st.balloons()
+    
+            st.info(f"""
+            **✅ Saved (append-only):**
+            - {len(cleaned_df_new):,} new cleaned data points
+            - {len(cleaned_params)} parameters updated for new cleaned variables
+            """)
+    
+            time.sleep(1)
+            # Force reload from DB to reflect persisted state
+            st.session_state.data_loaded = False
+            st.rerun()
+    
+        except Exception as e:
+            st.error(f"❌ Error: {str(e)}")
+            import traceback
+            st.code(traceback.format_exc())
 
 
 if __name__ == "__main__":
