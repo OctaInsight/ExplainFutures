@@ -275,88 +275,139 @@ def update_project_progress_steps(stage: str = "data_loaded", step_percent: int 
 
 
 def show_next_steps_after_upload():
-    """Show next steps"""
+    """
+    Show next steps - FIXED to:
+    1. Always appear (not dependent on upload)
+    2. Use health report from database
+    3. Buttons work outside DB check
+    4. Proper indentation
+    """
     st.markdown("---")
     st.header("🎯 What's Next?")
     
-    health_score = 100
-    comprehensive_report = get_comprehensive_health_report()
+    # Get health score from database health report
+    health_score = 75  # Default
+    health_category = "good"
+    total_params = 0
+    total_points = 0
+    critical_issues = 0
+    warnings = 0
     
-    if comprehensive_report:
-        health_score = comprehensive_report['health_score']
-    elif st.session_state.get('health_report'):
+    # Load health report from database
+    if DB_AVAILABLE and st.session_state.get('current_project_id'):
         try:
-            health_score, _, _ = calculate_data_health_score(st.session_state.health_report)
-        except:
-            health_score = 75
+            health_report_db = db.get_health_report(st.session_state.current_project_id)
+            if health_report_db:
+                health_score = health_report_db.get('health_score', 75)
+                health_category = health_report_db.get('health_category', 'good')
+                total_params = health_report_db.get('total_parameters', 0)
+                total_points = health_report_db.get('total_data_points', 0)
+                critical_issues = health_report_db.get('critical_issues', 0)
+                warnings = health_report_db.get('warnings', 0)
+        except Exception:
+            # Use defaults if can't load from DB
+            pass
     
+    # Display overall health status with metrics
+    col_a, col_b, col_c, col_d = st.columns(4)
+    
+    with col_a:
+        score_map = {
+            "excellent": ("🟢", "Excellent"),
+            "good": ("🟡", "Good"),
+            "fair": ("🟠", "Fair"),
+            "poor": ("🔴", "Poor")
+        }
+        score_color, score_text = score_map.get(health_category, ("⚪", "Unknown"))
+        st.metric("Health Score", f"{health_score}/100")
+        st.markdown(f"**{score_color} {score_text}**")
+    
+    with col_b:
+        st.metric("Parameters", total_params)
+    
+    with col_c:
+        st.metric("Data Points", f"{total_points:,}")
+    
+    with col_d:
+        st.metric("Issues", critical_issues + warnings)
+    
+    st.markdown("---")
+    
+    # Determine primary action based on health score
     if health_score >= 85:
-        st.success("**Excellent Data Quality! ✨**")
+        st.success("**✨ Excellent Data Quality! Ready to visualize.**")
         primary_action = "visualize"
     elif health_score >= 70:
-        st.info("**Good Data Quality 👍**")
+        st.info("**👍 Good Data Quality - You can visualize or clean.**")
         primary_action = "either"
     elif health_score >= 50:
-        st.warning("**Fair Data Quality ⚠️** Consider cleaning")
+        st.warning("**⚠️ Fair Data Quality - Consider cleaning first.**")
         primary_action = "clean"
     else:
-        st.error("**Poor Data Quality 🔴** Cleaning recommended")
+        st.error("**🔴 Poor Data Quality - Cleaning strongly recommended.**")
         primary_action = "clean"
     
+    st.markdown("### Choose Your Next Step:")
+    
+    # Three columns for navigation - FIXED indentation
     col1, col2, col3 = st.columns(3)
     
-    
-    
-    
-    
-        with col1:
+    with col1:
         st.markdown("#### 📊 Visualize Data")
-
+        st.markdown("Explore patterns and trends")
+        
         if health_score >= 70:
             st.success("✅ Recommended")
-
+        
         if st.button(
-            "📊 Visualization",
+            "📊 Go to Visualization",
             use_container_width=True,
-            type="primary" if primary_action == "visualize" else "secondary"
+            type="primary" if primary_action == "visualize" else "secondary",
+            key="btn_viz"
         ):
+            # Update progress if DB available
             if DB_AVAILABLE and st.session_state.get("current_project_id"):
-                db.update_project_progress(
-                    project_id=st.session_state.current_project_id,
-                    workflow_state="exploration",
-                    current_page=4,
-                    completion_percentage=14
-                )
-
+                try:
+                    db.update_project_progress(
+                        project_id=st.session_state.current_project_id,
+                        workflow_state="exploration",
+                        current_page=4
+                    )
+                except Exception:
+                    pass
+            
             st.switch_page("pages/04_Exploration_and_Visualization.py")
-
-
+    
     with col2:
         st.markdown("#### 🧹 Clean Data")
-
+        st.markdown("Handle missing values and outliers")
+        
         if health_score < 70:
             st.warning("⚠️ Recommended")
-
+        
         if st.button(
-            "🧹 Data Cleaning",
+            "🧹 Go to Data Cleaning",
             use_container_width=True,
-            type="primary" if primary_action == "clean" else "secondary"
+            type="primary" if primary_action == "clean" else "secondary",
+            key="btn_clean"
         ):
+            # Update progress if DB available
             if DB_AVAILABLE and st.session_state.get("current_project_id"):
-                db.update_project_progress(
-                    project_id=st.session_state.current_project_id,
-                    workflow_state="preprocessing",
-                    current_page=3,
-                    completion_percentage=7
-                )
-
+                try:
+                    db.update_project_progress(
+                        project_id=st.session_state.current_project_id,
+                        workflow_state="preprocessing",
+                        current_page=3
+                    )
+                except Exception:
+                    pass
+            
             st.switch_page("pages/03_Preprocessing.py")
-
-    
     
     with col3:
-        st.markdown("#### 📋 Health Report")
-        st.info("💡 Switch to **Data Health Report** tab")
+        st.markdown("#### 📊 View Full Report")
+        st.markdown("Detailed health analysis")
+        st.info("💡 See full report in tab above ⬆️")
 
 
 def load_data_from_database_if_available():
@@ -419,6 +470,9 @@ def main():
     
     with tab2:
         render_health_report_section()
+    
+    # ALWAYS show next steps (outside tabs, regardless of upload status)
+    show_next_steps_after_upload()
 
 
 def render_upload_section():
@@ -461,10 +515,6 @@ def render_upload_section():
     
     if uploaded_file is None:
         st.info("👆 Upload CSV, TXT, or Excel")
-        
-        if st.session_state.get('data_loaded') and st.session_state.get('value_columns'):
-            st.markdown("---")
-            show_next_steps_after_upload()
         return
     
     st.session_state.uploaded_file_name = uploaded_file.name
@@ -760,8 +810,6 @@ def process_data(df, time_column, value_columns, datetime_format):
     col1.metric("Variables", len(value_columns))
     col2.metric("Data Points", len(df_long))
     col3.metric("Time Range", f"{time_metadata['time_span']} days")
-    
-    show_next_steps_after_upload()
 
 
 def render_health_report_section():
