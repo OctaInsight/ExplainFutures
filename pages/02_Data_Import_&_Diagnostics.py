@@ -286,7 +286,7 @@ def show_next_steps_after_upload():
     st.header("🎯 What's Next?")
     
     # Get health score from get_comprehensive_health_report() - SAME as tab
-    health_score = 75  # Default
+    health_score = 0  # Default
     health_category = "good"
     total_params = 0
     total_points = 0
@@ -297,7 +297,7 @@ def show_next_steps_after_upload():
     comprehensive_report = get_comprehensive_health_report()
     
     if comprehensive_report:
-        health_score = comprehensive_report.get('health_score', 75)
+        health_score = comprehensive_report.get('health_score', 0)
         health_category = comprehensive_report.get('health_category', 'good')
         total_params = comprehensive_report.get('total_parameters', 0)
         total_points = comprehensive_report.get('total_data_points', 0)
