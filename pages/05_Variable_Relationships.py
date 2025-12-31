@@ -118,7 +118,10 @@ def reset_page_session_state():
 
 
 def load_project_data_from_database():
-    """Load ALL project data from database (timeseries_data + parameters)"""
+    """
+    Load ALL project data from database (timeseries_data + parameters)
+    AND update progress step: relations_analyzed = 7%
+    """
     try:
         from core.database.supabase_manager import get_db_manager
         db = get_db_manager()
@@ -178,6 +181,37 @@ def load_project_data_from_database():
         # Time column
         time_col = 'timestamp' if 'timestamp' in df_all.columns else 'time'
         st.session_state.time_column = time_col
+        
+        # Update progress: step_key='relations_analyzed', step_percent=7
+        try:
+            from datetime import datetime
+            
+            # Method 1: Use upsert_progress_step if available
+            if hasattr(db, "upsert_progress_step"):
+                db.upsert_progress_step(
+                    project_id=project_id,
+                    step_key="relations_analyzed",
+                    step_percent=7
+                )
+            else:
+                # Method 2: Direct database upsert
+                db.client.table("project_progress_steps").upsert({
+                    "project_id": project_id,
+                    "step_key": "relations_analyzed",
+                    "step_percent": 7,
+                    "updated_at": datetime.now().isoformat()
+                }, on_conflict="project_id,step_key").execute()
+            
+            # Recompute total progress
+            if hasattr(db, "recompute_and_update_project_progress"):
+                db.recompute_and_update_project_progress(
+                    project_id=project_id,
+                    workflow_state="analysis",
+                    current_page=5
+                )
+        except Exception as e:
+            # Don't fail if progress update fails
+            pass
         
         return True
         
