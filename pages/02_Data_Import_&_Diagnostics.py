@@ -310,34 +310,44 @@ def show_next_steps_after_upload():
         if health_score >= 70:
             st.success("✅ Recommended")
         
-        if st.button("📊 Visualization", 
-                     use_container_width=True, 
-                     type="primary" if primary_action == "visualize" else "secondary"):
-            if DB_AVAILABLE and st.session_state.get('current_project_id'):
+    if st.button("📊 Visualization",
+                 use_container_width=True,
+                 type="primary" if primary_action == "visualize" else "secondary",
+                 key="btn_visualize"):
+        if DB_AVAILABLE and st.session_state.get("current_project_id"):
+            try:
                 db.update_project_progress(
                     project_id=st.session_state.current_project_id,
                     workflow_state="exploration",
                     current_page=4,
                     completion_percentage=14
                 )
-            st.switch_page("pages/04_Exploration_and_Visualization.py")
+            except Exception as e:
+                st.warning(f"Progress update failed (navigation will continue): {e}")
+        st.switch_page("pages/04_Exploration_and_Visualization.py")
+
     
     with col2:
         st.markdown("#### 🧹 Clean Data")
         if health_score < 70:
             st.warning("⚠️ Recommended")
         
-        if st.button("🧹 Data Cleaning", 
-                     use_container_width=True,
-                     type="primary" if primary_action == "clean" else "secondary"):
-            if DB_AVAILABLE and st.session_state.get('current_project_id'):
+    if st.button("🧹 Data Cleaning",
+                 use_container_width=True,
+                 type="primary" if primary_action == "clean" else "secondary",
+                 key="btn_clean"):
+        if DB_AVAILABLE and st.session_state.get("current_project_id"):
+            try:
                 db.update_project_progress(
                     project_id=st.session_state.current_project_id,
                     workflow_state="preprocessing",
                     current_page=3,
                     completion_percentage=7
                 )
-            st.switch_page("pages/03_Preprocessing.py")
+            except Exception as e:
+                st.warning(f"Progress update failed (navigation will continue): {e}")
+        st.switch_page("pages/03_Preprocessing.py")
+
     
     with col3:
         st.markdown("#### 📋 Health Report")
