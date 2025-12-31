@@ -124,30 +124,8 @@ class SupabaseManager:
             # Delete existing for this project+source first
             self.client.table("timeseries_data").delete().eq("project_id", project_id).eq(
                 "data_source", data_source
-            ).execute()
+            ).execute()            records = self._build_timeseries_records(project_id, df_long, data_source)
 
-            time_col = "timestamp" if "timestamp" in df_long.columns else "time"
-            records: List[Dict[str, Any]] = []
-
-            for _, row in df_long.iterrows():
-                ts = row[time_col]
-                ts_str = ts.isoformat() if isinstance(ts, pd.Timestamp) else pd.Timestamp(ts).isoformat()
-
-                val = row["value"]
-                if pd.isna(val):
-                    val = None
-                else:
-                    val = float(val)
-
-                records.append(
-                    {
-                        "project_id": str(project_id),
-                        "timestamp": ts_str,
-                        "variable": str(row["variable"]),
-                        "value": val,
-                        "data_source": data_source,
-                    }
-                )
 
             inserted_count = 0
             for i in range(0, len(records), batch_size):
@@ -163,6 +141,119 @@ class SupabaseManager:
 
             st.error(traceback.format_exc())
             return False
+
+
+def _build_timeseries_records(
+    self,
+    project_id: str,
+    df_long: pd.DataFrame,
+    data_source: str,
+) -> List[Dict[str, Any]]:
+    """Convert a long dataframe into Supabase-ready records for timeseries_data.
+
+    Expected columns: timestamp or time, variable, value.
+
+    Notes:
+    - Timestamps are stored as ISO strings.
+    - NaN values are stored as NULL.
+    """
+    time_col = "timestamp" if "timestamp" in df_long.columns else "time"
+    records: List[Dict[str, Any]] = []
+
+    for _, row in df_long.iterrows():
+        ts = row[time_col]
+        # Robust timestamp handling
+        if isinstance(ts, pd.Timestamp):
+            ts_str = ts.isoformat()
+        else:
+            ts_str = pd.Timestamp(ts).isoformat()
+
+        val = row.get("value")
+        if pd.isna(val):
+            val_out = None
+        else:
+            # Ensure JSON-serializable numeric
+            val_out = float(val)
+
+        records.append(
+            {
+                "project_id": str(project_id),
+                "timestamp": ts_str,
+                "variable": str(row.get("variable")),
+                "value": val_out,
+                "data_source": str(data_source),
+            }
+        )
+
+    return records
+
+def upsert_timeseries_data(
+    self,
+    project_id: str,
+    df_long: pd.DataFrame,
+    data_source: str = "cleaned",
+    batch_size: int = 1000,
+    on_conflict: str = "project_id,data_source,timestamp,variable",
+    ignore_duplicates: bool = True,
+) -> bool:
+    """Append/UPSERT time-series rows into timeseries_data (non-destructive).
+
+    This is the safe method for Page 3 (cleaning) where we must:
+    - NOT delete existing cleaned data
+    - NOT create duplicates
+
+    Recommended DB constraint (must exist for perfect deduplication):
+      UNIQUE (project_id, data_source, timestamp, variable)
+
+    Behavior:
+    - If the unique constraint exists:
+        - upsert(..., on_conflict=..., ignore_duplicates=True) will append new rows and ignore duplicates.
+        - If you set ignore_duplicates=False, conflicting rows will be overwritten (not recommended for your current rule).
+    - If the unique constraint does NOT exist:
+        - Supabase cannot reliably deduplicate; this method will still try upsert but duplicates may occur.
+    """
+    try:
+        if df_long is None or len(df_long) == 0:
+            return True
+
+        records = self._build_timeseries_records(project_id, df_long, data_source)
+
+        for i in range(0, len(records), batch_size):
+            batch = records[i : i + batch_size]
+            # supabase-py supports upsert with on_conflict and ignore_duplicates
+            self.client.table("timeseries_data").upsert(
+                batch,
+                on_conflict=on_conflict,
+                ignore_duplicates=ignore_duplicates,
+            ).execute()
+
+        return True
+
+    except Exception as e:
+        st.error(f"❌ Error upserting time-series data: {str(e)}")
+        import traceback
+        st.error(traceback.format_exc())
+        return False
+
+def save_cleaned_timeseries_append(
+    self,
+    project_id: str,
+    cleaned_df_new: pd.DataFrame,
+    batch_size: int = 1000,
+) -> bool:
+    """Convenience wrapper for Page 3: append only NEW cleaned data.
+
+    - Writes to data_source='cleaned'
+    - Uses upsert with ignore_duplicates=True (append-only, no overwrite)
+    """
+    return self.upsert_timeseries_data(
+        project_id=project_id,
+        df_long=cleaned_df_new,
+        data_source="cleaned",
+        batch_size=batch_size,
+        on_conflict="project_id,data_source,timestamp,variable",
+        ignore_duplicates=True,
+    )
 
     def load_timeseries_data(
         self,
