@@ -193,7 +193,7 @@ def get_comprehensive_health_report():
         return None
 
 
-def update_project_progress(stage: str = "data_import", page: int = 2, percentage: int = 7):
+def update_project_progress_steps(step_key: str = "data_loaded", step_percent: int = 7):
     """Update progress"""
     if not DB_AVAILABLE or not st.session_state.get('current_project_id'):
         return
