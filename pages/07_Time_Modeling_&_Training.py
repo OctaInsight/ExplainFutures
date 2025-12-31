@@ -63,7 +63,123 @@ def initialize_page_state():
         st.session_state.training_complete = False
 
 
+
+
+# =============================================================================
+# SESSION STATE RESET AND DATABASE LOADING
+# =============================================================================
+
+def reset_page_session_state():
+    """Reset session state, keeping only project/auth/progress keys"""
+    keys_to_keep = {
+        'current_project_id', 'current_project', 'selected_project',
+        'project_name', 'project_description', 'project_created_at',
+        'authenticated', 'user_id', 'user_email', 'user_name',
+        'user_profile', 'session_id',
+        'workflow_state', 'completion_percentage', 'current_page',
+        'project_progress', 'step_completion',
+        'sidebar_state', 'page_config'
+    }
+    
+    all_keys = list(st.session_state.keys())
+    for key in all_keys:
+        if key not in keys_to_keep:
+            del st.session_state[key]
+
+
+def load_project_data_from_database():
+    """Load ALL project data from database (timeseries_data + parameters)"""
+    try:
+        from core.database.supabase_manager import get_db_manager
+        db = get_db_manager()
+    except:
+        st.error("❌ Database not available")
+        return False
+    
+    project_id = st.session_state.get('current_project_id')
+    if not project_id:
+        st.error("❌ No project selected")
+        return False
+    
+    try:
+        # Load RAW data
+        df_raw = None
+        for src_label in ('raw', 'original'):
+            try:
+                df_temp = db.load_timeseries_data(project_id=project_id, data_source=src_label)
+                if df_temp is not None and len(df_temp) > 0:
+                    df_raw = df_temp
+                    break
+            except Exception:
+                continue
+        
+        if df_raw is None or len(df_raw) == 0:
+            st.error("❌ No raw data found. Please upload data on Page 2.")
+            return False
+        
+        # Load CLEANED data
+        df_cleaned = None
+        try:
+            df_cleaned = db.load_timeseries_data(project_id=project_id, data_source='cleaned')
+        except Exception:
+            df_cleaned = None
+        
+        # Combine
+        if df_cleaned is not None and len(df_cleaned) > 0:
+            df_all = pd.concat([df_raw, df_cleaned], ignore_index=True)
+        else:
+            df_all = df_raw.copy()
+        
+        # Store in session state
+        st.session_state.df_long = df_all
+        st.session_state.data_loaded = True
+        
+        # Load parameters
+        try:
+            parameters = db.get_project_parameters(project_id)
+            if parameters:
+                st.session_state.project_parameters = parameters
+                st.session_state.value_columns = [p['parameter_name'] for p in parameters]
+            else:
+                st.session_state.value_columns = sorted(df_all['variable'].unique().tolist())
+        except Exception:
+            st.session_state.value_columns = sorted(df_all['variable'].unique().tolist())
+        
+        # Time column
+        time_col = 'timestamp' if 'timestamp' in df_all.columns else 'time'
+        st.session_state.time_column = time_col
+        
+        return True
+        
+    except Exception as e:
+        st.error(f"❌ Error loading data: {str(e)}")
+        return False
+
+
+
 def main():
+    # Check project
+    if not st.session_state.get('current_project_id'):
+        st.warning("⚠️ Please select a project")
+        if st.button("← Go to Home"):
+            st.switch_page("pages/01_Home.py")
+        st.stop()
+    
+    # Reset and load data on first page load
+    if not st.session_state.get('page7_data_loaded', False):
+        reset_page_session_state()
+        
+        with st.spinner("📊 Loading project data from database..."):
+            success = load_project_data_from_database()
+            
+            if not success:
+                if st.button("📁 Go to Upload Page"):
+                    st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
+                st.stop()
+            
+            st.session_state.page7_data_loaded = True
+    
+
     """Main page function"""
     
     # Initialize state
