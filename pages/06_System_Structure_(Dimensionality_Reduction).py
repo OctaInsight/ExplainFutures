@@ -196,6 +196,9 @@ def generate_transformed_data_if_missing(method_type, method_data, df_wide, feat
             # Get PCA model from session state or method_data
             model = st.session_state.get('pca_model') or method_data.get('model')
             if model is not None:
+                # Store model in method_data for persistence
+                method_data['model'] = model
+                
                 # Transform the data
                 transformed = model.transform(X)
                 n_components = method_data.get('n_components', transformed.shape[1])
@@ -217,6 +220,9 @@ def generate_transformed_data_if_missing(method_type, method_data, df_wide, feat
         elif method_type == 'factor_analysis':
             model = st.session_state.get('fa_model') or method_data.get('model')
             if model is not None:
+                # Store model in method_data for persistence
+                method_data['model'] = model
+                
                 transformed = model.transform(X)
                 n_factors = method_data.get('n_factors', transformed.shape[1])
                 
@@ -236,6 +242,9 @@ def generate_transformed_data_if_missing(method_type, method_data, df_wide, feat
         elif method_type == 'ica':
             model = st.session_state.get('ica_model') or method_data.get('model')
             if model is not None:
+                # Store model in method_data for persistence
+                method_data['model'] = model
+                
                 transformed = model.transform(X)
                 n_components = method_data.get('n_components', transformed.shape[1])
                 
@@ -284,12 +293,48 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         if df_wide is not None and feature_cols is not None:
             method_data = generate_transformed_data_if_missing(method_type, method_data, df_wide, feature_cols)
         
-        # Prepare component names
+        # CRITICAL FIX: Auto-generate output_variables and input_variables if missing
         output_variables = method_data.get('output_variables', [])
+        input_variables = method_data.get('input_variables', [])
+        
+        # If output_variables not defined, create from transformed data or n_components
+        if not output_variables:
+            st.warning(f"⚠️ No output_variables in {method_type} results. Auto-generating...")
+            
+            if method_type == 'pca':
+                n_comp = method_data.get('n_components', 3)
+                output_variables = [f'PC{i+1}' for i in range(n_comp)]
+            elif method_type == 'factor_analysis':
+                n_factors = method_data.get('n_factors', 3)
+                output_variables = [f'Factor{i+1}' for i in range(n_factors)]
+            elif method_type == 'ica':
+                n_comp = method_data.get('n_components', 3)
+                output_variables = [f'IC{i+1}' for i in range(n_comp)]
+            elif method_type == 'clustering':
+                n_clusters = method_data.get('n_clusters', 3)
+                output_variables = [f'Cluster{i+1}' for i in range(n_clusters)]
+            
+            method_data['output_variables'] = output_variables
+            st.info(f"✅ Created output_variables: {output_variables}")
+        
+        # If input_variables not defined, use 'features' key or feature_cols
+        if not input_variables:
+            if 'features' in method_data:
+                input_variables = method_data['features']
+            elif feature_cols is not None:
+                input_variables = list(feature_cols)
+            else:
+                input_variables = []
+            
+            method_data['input_variables'] = input_variables
+            st.info(f"✅ Created input_variables: {len(input_variables)} features")
         
         if not output_variables:
-            st.warning(f"⚠️ No output variables defined for {method_type}")
+            st.error(f"❌ Could not determine output variables for {method_type}")
             return False, "No output variables to save"
+        
+        # Update session state with the corrected method_data
+        st.session_state.reduction_results[method_type] = method_data
         
         if renamed_components:
             # Apply renamed components
@@ -297,7 +342,21 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
             for orig_name in output_variables:
                 new_name = renamed_components.get(orig_name, orig_name)
                 original_to_renamed[orig_name] = new_name
+            
+            # Update output_variables list
             output_variables = [original_to_renamed[v] for v in output_variables]
+            
+            # IMPORTANT: Also rename columns in transformed_data if it exists
+            if 'transformed_data' in method_data and method_data['transformed_data'] is not None:
+                df_transformed = method_data['transformed_data']
+                time_col = st.session_state.get('time_column', 'timestamp')
+                
+                # Rename columns (except time column)
+                rename_dict = {old: new for old, new in original_to_renamed.items() if old in df_transformed.columns}
+                if rename_dict:
+                    df_transformed = df_transformed.rename(columns=rename_dict)
+                    method_data['transformed_data'] = df_transformed
+                    st.info(f"✅ Renamed columns in transformed_data: {list(rename_dict.values())}")
         
         input_variables = method_data.get('input_variables', [])
         
@@ -379,17 +438,9 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                 # Prepare data in long format for batch insert
                 records = []
                 
-                # Get original column names from transformed data
-                original_cols = [col for col in df_transformed.columns if col != time_col]
-                
-                for i, final_var_name in enumerate(output_variables):
-                    # Map back to original column name in transformed_data
-                    if i < len(original_cols):
-                        original_col = original_cols[i]
-                    else:
-                        continue
-                    
-                    if original_col in df_transformed.columns:
+                # Now that we've renamed columns in transformed_data, we can directly use output_variables
+                for var in output_variables:
+                    if var in df_transformed.columns:
                         for idx, row in df_transformed.iterrows():
                             timestamp_val = row[time_col]
                             if hasattr(timestamp_val, 'isoformat'):
@@ -399,15 +450,17 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                             else:
                                 ts_str = pd.Timestamp(timestamp_val).isoformat()
                             
-                            value_val = row[original_col]
+                            value_val = row[var]
                             if pd.notna(value_val):
                                 records.append({
                                     'project_id': project_id,
                                     'timestamp': ts_str,
-                                    'variable': final_var_name,  # Use renamed variable
+                                    'variable': var,  # Variable name is already correct
                                     'value': float(value_val),
                                     'data_source': method_type
                                 })
+                    else:
+                        st.warning(f"⚠️ Column '{var}' not found in transformed_data. Available: {list(df_transformed.columns)}")
                 
                 # Batch insert timeseries data
                 if records:
