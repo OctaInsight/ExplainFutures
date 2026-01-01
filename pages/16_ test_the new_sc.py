@@ -1,7 +1,7 @@
 """
-Page 10: Scenario Analysis (NLP) - COMPLETE v3.1
+Page 10: Scenario Analysis (NLP) - PRODUCTION v3.2
 Enhanced with Phase 1-3 improvements + Full Database Integration
-- Proper project/user data loading
+- Proper authentication and project checks
 - Load existing scenarios or create new
 - Fully editable tables and fields
 - Save to database with progress tracking and project statistics
@@ -45,82 +45,63 @@ from core.nlp.schema import Scenario, ScenarioItem
 initialize_session_state()
 config = get_config()
 
-render_app_sidebar()
 
 if not st.session_state.get('authenticated', False):
     st.warning("⚠️ Please log in to continue")
-    time.sleep(1)
+    st.info("Redirecting to login page...")
+    time.sleep(2)
     st.switch_page("App.py")
     st.stop()
 
 
+if not st.session_state.get('user_id'):
+    st.error("⚠️ User session not found. Please log in again.")
+    st.info("Redirecting to login page...")
+    time.sleep(2)
+    st.switch_page("App.py")
+    st.stop()
+
+
+if not st.session_state.get('project_id'):
+    st.warning("⚠️ No project selected. Please select or create a project first.")
+    st.info("Redirecting to Home page...")
+    time.sleep(2)
+    st.switch_page("pages/01_Home.py")
+    st.stop()
+
+
+render_app_sidebar()
+
+
 def get_supabase_client():
-    """Get Supabase client"""
-    from supabase import create_client
-    return create_client(
-        st.secrets["SUPABASE_URL"],
-        st.secrets["SUPABASE_SERVICE_KEY"]
-    )
-
-
-def load_project_and_user_data():
-    """
-    Load project and user data from database
-    Populate session state with project_id, user_id, and project details
-    """
+    """Get Supabase client using existing connection method"""
     try:
-        supabase = get_supabase_client()
+        if hasattr(st.session_state, 'supabase') and st.session_state.supabase:
+            return st.session_state.supabase
         
-        user_id = st.session_state.get('user_id')
-        if not user_id:
-            auth_user = supabase.auth.get_user()
-            if auth_user and auth_user.user:
-                user_id = auth_user.user.id
-                st.session_state.user_id = user_id
-        
-        if not user_id:
-            return False, "Could not determine user ID"
-        
-        user_result = supabase.table('users').select('*').eq('user_id', user_id).execute()
-        if user_result.data:
-            st.session_state.user_data = user_result.data[0]
-        
-        project_id = st.session_state.get('project_id')
-        
-        if not project_id:
-            projects_result = supabase.table('projects')\
-                .select('*')\
-                .eq('owner_id', user_id)\
-                .eq('status', 'active')\
-                .order('last_accessed', desc=True)\
-                .limit(1)\
-                .execute()
-            
-            if projects_result.data:
-                project_id = projects_result.data[0]['project_id']
-                st.session_state.project_id = project_id
-                st.session_state.project_data = projects_result.data[0]
-            else:
-                return False, "No active project found. Please create or select a project first."
-        else:
-            project_result = supabase.table('projects').select('*').eq('project_id', project_id).execute()
-            if project_result.data:
-                st.session_state.project_data = project_result.data[0]
-            else:
-                return False, "Project not found"
-        
-        supabase.table('projects')\
-            .update({'last_accessed': datetime.now().isoformat()})\
-            .eq('project_id', project_id)\
-            .execute()
-        
-        return True, "Success"
-        
+        from core.database import get_supabase_client as get_db_client
+        client = get_db_client()
+        st.session_state.supabase = client
+        return client
     except Exception as e:
-        return False, f"Error loading project data: {str(e)}"
+        st.error(f"Database connection error: {str(e)}")
+        return None
 
 
-def check_existing_scenarios(project_id: str) -> Tuple[bool, int, List[Dict]]:
+def load_project_data(project_id: str, supabase):
+    """Load project data from database"""
+    try:
+        result = supabase.table('projects').select('*').eq('project_id', project_id).execute()
+        if result.data:
+            st.session_state.project_data = result.data[0]
+            return True
+        return False
+    except Exception as e:
+        st.error(f"Error loading project: {str(e)}")
+        return False
+
+
+def check_existing_scenarios(project_id: str, supabase) -> Tuple[bool, int, List[Dict]]:
     """
     Check if project has existing scenarios
     
@@ -129,8 +110,6 @@ def check_existing_scenarios(project_id: str) -> Tuple[bool, int, List[Dict]]:
     (has_scenarios, count, scenario_list)
     """
     try:
-        supabase = get_supabase_client()
-        
         result = supabase.table('scenarios')\
             .select('scenario_id, title, horizon, baseline_year, created_at')\
             .eq('project_id', project_id)\
@@ -146,11 +125,9 @@ def check_existing_scenarios(project_id: str) -> Tuple[bool, int, List[Dict]]:
         return False, 0, []
 
 
-def load_scenarios_from_database(project_id: str) -> List[Dict]:
+def load_scenarios_from_database(project_id: str, supabase) -> List[Dict]:
     """Load complete scenarios with all Phase 2 fields from database"""
     try:
-        supabase = get_supabase_client()
-        
         scenarios_result = supabase.table('scenarios')\
             .select('*')\
             .eq('project_id', project_id)\
@@ -248,7 +225,7 @@ def calculate_project_statistics(scenarios: List[Dict]) -> Dict:
     }
 
 
-def save_scenarios_to_database(scenarios: List[Dict], project_id: str, user_id: str, mode: str = 'update') -> bool:
+def save_scenarios_to_database(scenarios: List[Dict], project_id: str, user_id: str, supabase, mode: str = 'update') -> bool:
     """
     Save scenarios to database with Phase 2 fields and update project statistics
     
@@ -260,6 +237,7 @@ def save_scenarios_to_database(scenarios: List[Dict], project_id: str, user_id: 
         Project UUID
     user_id : str
         User UUID
+    supabase : Supabase client
     mode : str
         'update' to replace existing or 'append' to add new
     
@@ -268,8 +246,6 @@ def save_scenarios_to_database(scenarios: List[Dict], project_id: str, user_id: 
     success : bool
     """
     try:
-        supabase = get_supabase_client()
-        
         if mode == 'update':
             existing_result = supabase.table('scenarios')\
                 .select('scenario_id')\
@@ -367,7 +343,7 @@ def save_scenarios_to_database(scenarios: List[Dict], project_id: str, user_id: 
             .eq('project_id', project_id)\
             .execute()
         
-        update_project_progress(project_id, 'scenarios_analyzed', 7)
+        update_project_progress(project_id, 'scenarios_analyzed', 7, supabase)
         
         return True
         
@@ -377,11 +353,9 @@ def save_scenarios_to_database(scenarios: List[Dict], project_id: str, user_id: 
         return False
 
 
-def update_project_progress(project_id: str, step_key: str, percent_increase: int):
+def update_project_progress(project_id: str, step_key: str, percent_increase: int, supabase):
     """Update project progress steps"""
     try:
-        supabase = get_supabase_client()
-        
         result = supabase.table('project_progress_steps')\
             .select('step_percent')\
             .eq('project_id', project_id)\
@@ -593,27 +567,26 @@ st.markdown("---")
 initialize_scenario_state()
 
 
-success, message = load_project_and_user_data()
+supabase = get_supabase_client()
 
-if not success:
-    st.error(f"⚠️ {message}")
-    st.info("💡 Please ensure you have selected or created a project before accessing this page.")
-    
-    if st.button("🔄 Retry Loading Project"):
-        st.rerun()
-    
+if not supabase:
+    st.error("⚠️ Database connection failed")
     st.stop()
 
 
 project_id = st.session_state.get('project_id')
 user_id = st.session_state.get('user_id')
+
+
+if 'project_data' not in st.session_state:
+    load_project_data(project_id, supabase)
+
 project_data = st.session_state.get('project_data', {})
-user_data = st.session_state.get('user_data', {})
+
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📊 Current Project")
 st.sidebar.markdown(f"**Project:** {project_data.get('project_name', 'Unknown')}")
-st.sidebar.markdown(f"**Owner:** {user_data.get('full_name', user_data.get('username', 'Unknown'))}")
 st.sidebar.markdown(f"**Status:** {project_data.get('status', 'Unknown')}")
 
 if project_data.get('baseline_year'):
@@ -628,7 +601,7 @@ if not st.session_state.load_mode_selected:
     st.markdown("## 🔍 Check Existing Scenarios")
     
     with st.spinner("Checking for existing scenarios..."):
-        has_scenarios, scenario_count, scenario_list = check_existing_scenarios(project_id)
+        has_scenarios, scenario_count, scenario_list = check_existing_scenarios(project_id, supabase)
     
     if has_scenarios:
         st.info(f"📊 **Found {scenario_count} existing scenario(s) for this project**")
@@ -645,7 +618,7 @@ if not st.session_state.load_mode_selected:
         with col1:
             if st.button("📥 **Load & Update Existing**", use_container_width=True, type="primary"):
                 with st.spinner("Loading scenarios from database..."):
-                    loaded_scenarios = load_scenarios_from_database(project_id)
+                    loaded_scenarios = load_scenarios_from_database(project_id, supabase)
                     if loaded_scenarios:
                         st.session_state.detected_scenarios = loaded_scenarios
                         st.session_state.scenarios_processed = True
@@ -981,6 +954,7 @@ if st.session_state.scenarios_processed and st.session_state.detected_scenarios:
                     st.session_state.detected_scenarios,
                     project_id,
                     user_id,
+                    supabase,
                     st.session_state.save_mode
                 )
                 
