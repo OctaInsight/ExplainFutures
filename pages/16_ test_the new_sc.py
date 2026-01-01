@@ -1,7 +1,7 @@
 """
 Page 10: Scenario Analysis (NLP) - PRODUCTION v3.2
 Enhanced with Phase 1-3 improvements + Full Database Integration
-- Proper authentication and project checks
+- Proper authentication and project checks (using Page 2 pattern)
 - Load existing scenarios or create new
 - Fully editable tables and fields
 - Save to database with progress tracking and project statistics
@@ -21,18 +21,28 @@ from typing import Dict, List, Optional, Tuple
 import plotly.graph_objects as go
 import plotly.express as px
 
+# Page configuration - MUST be first Streamlit command
 st.set_page_config(
     page_title="Scenario Analysis (NLP)",
     page_icon=str(Path("assets/logo_small.png")),
     layout="wide"
 )
 
+# Authentication check - using Page 2 pattern
+if not st.session_state.get('authenticated', False):
+    st.warning("⚠️ Please log in to continue")
+    time.sleep(1)
+    st.switch_page("App.py")
+    st.stop()
+
+# Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from core.config import get_config, initialize_session_state
 from core.utils import display_error, display_success, display_warning, display_info
 from core.shared_sidebar import render_app_sidebar
+from core.database.supabase_manager import get_db_manager
 
 from core.nlp.lang_detect import detect_language
 from core.nlp.scenario_segment import segment_scenarios
@@ -42,66 +52,23 @@ from core.nlp.mapping import suggest_variable_mapping, create_mapping
 from core.nlp.clean_text import generate_cleaned_scenario_text
 from core.nlp.schema import Scenario, ScenarioItem
 
+# Initialize
 initialize_session_state()
 config = get_config()
 
+# Get database manager - using Page 2 pattern
+try:
+    db = get_db_manager()
+    DB_AVAILABLE = True
+except:
+    DB_AVAILABLE = False
+    st.error("⚠️ Database not available")
 
-if not st.session_state.get('authenticated', False):
-    st.warning("⚠️ Please log in to continue")
-    st.info("Redirecting to login page...")
-    time.sleep(2)
-    st.switch_page("App.py")
-    st.stop()
-
-
-if not st.session_state.get('user_id'):
-    st.error("⚠️ User session not found. Please log in again.")
-    st.info("Redirecting to login page...")
-    time.sleep(2)
-    st.switch_page("App.py")
-    st.stop()
-
-
-if not st.session_state.get('project_id'):
-    st.warning("⚠️ No project selected. Please select or create a project first.")
-    st.info("Redirecting to Home page...")
-    time.sleep(2)
-    st.switch_page("pages/01_Home.py")
-    st.stop()
-
-
+# Render shared sidebar
 render_app_sidebar()
 
 
-def get_supabase_client():
-    """Get Supabase client using existing connection method"""
-    try:
-        if hasattr(st.session_state, 'supabase') and st.session_state.supabase:
-            return st.session_state.supabase
-        
-        from core.database import get_supabase_client as get_db_client
-        client = get_db_client()
-        st.session_state.supabase = client
-        return client
-    except Exception as e:
-        st.error(f"Database connection error: {str(e)}")
-        return None
-
-
-def load_project_data(project_id: str, supabase):
-    """Load project data from database"""
-    try:
-        result = supabase.table('projects').select('*').eq('project_id', project_id).execute()
-        if result.data:
-            st.session_state.project_data = result.data[0]
-            return True
-        return False
-    except Exception as e:
-        st.error(f"Error loading project: {str(e)}")
-        return False
-
-
-def check_existing_scenarios(project_id: str, supabase) -> Tuple[bool, int, List[Dict]]:
+def check_existing_scenarios(project_id: str) -> Tuple[bool, int, List[Dict]]:
     """
     Check if project has existing scenarios
     
@@ -109,8 +76,11 @@ def check_existing_scenarios(project_id: str, supabase) -> Tuple[bool, int, List
     --------
     (has_scenarios, count, scenario_list)
     """
+    if not DB_AVAILABLE:
+        return False, 0, []
+    
     try:
-        result = supabase.table('scenarios')\
+        result = db.client.table('scenarios')\
             .select('scenario_id, title, horizon, baseline_year, created_at')\
             .eq('project_id', project_id)\
             .execute()
@@ -125,10 +95,13 @@ def check_existing_scenarios(project_id: str, supabase) -> Tuple[bool, int, List
         return False, 0, []
 
 
-def load_scenarios_from_database(project_id: str, supabase) -> List[Dict]:
+def load_scenarios_from_database(project_id: str) -> List[Dict]:
     """Load complete scenarios with all Phase 2 fields from database"""
+    if not DB_AVAILABLE:
+        return []
+    
     try:
-        scenarios_result = supabase.table('scenarios')\
+        scenarios_result = db.client.table('scenarios')\
             .select('*')\
             .eq('project_id', project_id)\
             .order('created_at', desc=False)\
@@ -140,7 +113,7 @@ def load_scenarios_from_database(project_id: str, supabase) -> List[Dict]:
         scenarios = []
         
         for scenario_row in scenarios_result.data:
-            params_result = supabase.table('scenario_parameters')\
+            params_result = db.client.table('scenario_parameters')\
                 .select('*')\
                 .eq('scenario_id', scenario_row['scenario_id'])\
                 .execute()
@@ -197,121 +170,99 @@ def load_scenarios_from_database(project_id: str, supabase) -> List[Dict]:
         return []
 
 
-def calculate_project_statistics(scenarios: List[Dict]) -> Dict:
+def save_scenarios_to_database(
+    scenarios: List[Dict],
+    project_id: str,
+    user_id: str,
+    mode: str = 'append'
+) -> Tuple[bool, str]:
     """
-    Calculate project-level statistics from scenarios
-    
-    Returns:
-    --------
-    dict with baseline_year, scenario_target_year, total_scenarios
-    """
-    if not scenarios:
-        return {
-            'baseline_year': None,
-            'scenario_target_year': None,
-            'total_scenarios': 0
-        }
-    
-    baseline_years = [s.get('baseline_year') for s in scenarios if s.get('baseline_year')]
-    target_years = [s.get('horizon') for s in scenarios if s.get('horizon')]
-    
-    earliest_baseline = min(baseline_years) if baseline_years else None
-    latest_target = max(target_years) if target_years else None
-    
-    return {
-        'baseline_year': earliest_baseline,
-        'scenario_target_year': latest_target,
-        'total_scenarios': len(scenarios)
-    }
-
-
-def save_scenarios_to_database(scenarios: List[Dict], project_id: str, user_id: str, supabase, mode: str = 'update') -> bool:
-    """
-    Save scenarios to database with Phase 2 fields and update project statistics
+    Save scenarios to database with full Phase 2 fields and project statistics
     
     Parameters:
     -----------
-    scenarios : list
-        List of scenario dictionaries
+    scenarios : List[Dict]
+        List of scenario dictionaries with items
     project_id : str
-        Project UUID
+        Current project ID
     user_id : str
-        User UUID
-    supabase : Supabase client
+        Current user ID
     mode : str
-        'update' to replace existing or 'append' to add new
+        'append' (add to existing) or 'replace' (delete then insert)
     
     Returns:
     --------
-    success : bool
+    (success: bool, message: str)
     """
+    if not DB_AVAILABLE:
+        return False, "Database not available"
+    
     try:
-        if mode == 'update':
-            existing_result = supabase.table('scenarios')\
+        if mode == 'replace':
+            existing_scenarios = db.client.table('scenarios')\
                 .select('scenario_id')\
                 .eq('project_id', project_id)\
                 .execute()
             
-            for old_scenario in existing_result.data:
-                supabase.table('scenario_parameters')\
+            for scenario in existing_scenarios.data:
+                db.client.table('scenario_parameters')\
                     .delete()\
-                    .eq('scenario_id', old_scenario['scenario_id'])\
+                    .eq('scenario_id', scenario['scenario_id'])\
                     .execute()
-                
-                supabase.table('scenarios')\
-                    .delete()\
-                    .eq('scenario_id', old_scenario['scenario_id'])\
-                    .execute()
+            
+            db.client.table('scenarios')\
+                .delete()\
+                .eq('project_id', project_id)\
+                .execute()
+        
+        saved_count = 0
+        min_baseline = None
+        max_target = None
         
         for scenario in scenarios:
-            scenario_id = scenario.get('id')
-            if not scenario_id or not scenario.get('from_database'):
-                scenario_id = str(uuid.uuid4())
+            scenario_id = scenario.get('id') or str(uuid.uuid4())
             
             scenario_data = {
                 'scenario_id': scenario_id,
                 'project_id': project_id,
-                'created_by': user_id,
-                'title': scenario['title'],
-                'description': scenario.get('text', '')[:500],
+                'user_id': user_id,
+                'title': scenario.get('title', 'Untitled Scenario'),
+                'description': scenario.get('text', ''),
+                'source_text': scenario.get('text', ''),
                 'horizon': scenario.get('horizon'),
                 'baseline_year': scenario.get('baseline_year'),
                 'time_confidence': scenario.get('time_confidence'),
-                'source_text': scenario.get('text', ''),
-                'extraction_config': {
-                    'ml_enabled': st.session_state.get('enable_ml_extraction', True),
-                    'ml_threshold': st.session_state.get('ml_confidence_threshold', 0.5)
-                },
-                'ml_enabled': st.session_state.get('enable_ml_extraction', True),
-                'ml_threshold': st.session_state.get('ml_confidence_threshold', 0.5),
-                'total_items_extracted': len(scenario.get('items', [])),
-                'high_confidence_items': sum(1 for i in scenario.get('items', []) if i.get('confidence', 0) > 0.8),
-                'extraction_version': 'v3.0',
+                'created_at': datetime.now().isoformat(),
                 'updated_at': datetime.now().isoformat()
             }
             
-            supabase.table('scenarios').upsert(scenario_data).execute()
+            db.client.table('scenarios').insert(scenario_data).execute()
+            
+            if scenario.get('baseline_year'):
+                if min_baseline is None or scenario['baseline_year'] < min_baseline:
+                    min_baseline = scenario['baseline_year']
+            
+            if scenario.get('horizon'):
+                if max_target is None or scenario['horizon'] > max_target:
+                    max_target = scenario['horizon']
             
             for item in scenario.get('items', []):
-                param_id = item.get('id')
-                if not param_id:
-                    param_id = str(uuid.uuid4())
+                param_id = item.get('id') or str(uuid.uuid4())
                 
                 param_data = {
                     'scenario_param_id': param_id,
                     'scenario_id': scenario_id,
-                    'project_id': project_id,
-                    'parameter_name': item['parameter'],
-                    'parameter_canonical': item.get('parameter_canonical', item['parameter']),
-                    'parameter_original': item.get('parameter_original', item['parameter']),
-                    'category': item.get('category'),
-                    'value': float(item['value']) if item.get('value') is not None else None,
-                    'unit': item.get('unit'),
-                    'direction': item.get('direction'),
-                    'value_type': item.get('value_type'),
+                    'parameter_name': item.get('parameter', 'Unknown'),
+                    'parameter_canonical': item.get('parameter_canonical', item.get('parameter', 'Unknown')),
+                    'parameter_original': item.get('parameter_original', item.get('parameter', 'Unknown')),
+                    'category': item.get('category', 'other'),
+                    'value': item.get('value'),
+                    'unit': item.get('unit', ''),
+                    'direction': item.get('direction', 'target'),
+                    'value_type': item.get('value_type', 'absolute_target'),
                     'baseline_year': item.get('baseline_year'),
                     'target_year': item.get('target_year'),
-                    'time_expression': item.get('time_expression'),
+                    'time_expression': item.get('time_expression', ''),
                     'time_confidence': item.get('time_confidence'),
                     'value_min': item.get('value_min'),
                     'value_max': item.get('value_max'),
@@ -319,705 +270,220 @@ def save_scenarios_to_database(scenarios: List[Dict], project_id: str, user_id: 
                     'target_value': item.get('target_value'),
                     'is_range': item.get('is_range', False),
                     'is_rate': item.get('is_rate', False),
-                    'rate_period': item.get('rate_period'),
+                    'rate_period': item.get('rate_period', ''),
                     'confidence': item.get('confidence'),
-                    'extraction_method': item.get('extraction_method'),
-                    'source_sentence': item.get('source_sentence'),
+                    'extraction_method': item.get('extraction_method', 'legacy'),
+                    'source_sentence': item.get('source_sentence', ''),
                     'unification_confidence': item.get('unification_confidence'),
-                    'template_used': item.get('template')
+                    'template_used': item.get('template', ''),
+                    'created_at': datetime.now().isoformat(),
+                    'updated_at': datetime.now().isoformat()
                 }
                 
-                supabase.table('scenario_parameters').upsert(param_data).execute()
-        
-        stats = calculate_project_statistics(scenarios)
-        
-        project_updates = {
-            'baseline_year': stats['baseline_year'],
-            'scenario_target_year': stats['scenario_target_year'],
-            'total_scenarios': stats['total_scenarios'],
-            'updated_at': datetime.now().isoformat()
-        }
-        
-        supabase.table('projects')\
-            .update(project_updates)\
-            .eq('project_id', project_id)\
-            .execute()
-        
-        update_project_progress(project_id, 'scenarios_analyzed', 7, supabase)
-        
-        return True
-        
-    except Exception as e:
-        st.error(f"Error saving to database: {str(e)}")
-        st.exception(e)
-        return False
-
-
-def update_project_progress(project_id: str, step_key: str, percent_increase: int, supabase):
-    """Update project progress steps"""
-    try:
-        result = supabase.table('project_progress_steps')\
-            .select('step_percent')\
-            .eq('project_id', project_id)\
-            .eq('step_key', step_key)\
-            .execute()
-        
-        if result.data:
-            current_percent = result.data[0]['step_percent']
-            new_percent = min(100, current_percent + percent_increase)
+                db.client.table('scenario_parameters').insert(param_data).execute()
             
-            supabase.table('project_progress_steps')\
-                .update({'step_percent': new_percent, 'updated_at': datetime.now().isoformat()})\
+            saved_count += 1
+        
+        project_updates = {}
+        if min_baseline is not None:
+            project_updates['baseline_year'] = min_baseline
+        if max_target is not None:
+            project_updates['target_year'] = max_target
+        project_updates['total_scenarios'] = saved_count if mode == 'replace' else None
+        
+        if project_updates:
+            if mode == 'append':
+                existing_count_result = db.client.table('scenarios')\
+                    .select('scenario_id', count='exact')\
+                    .eq('project_id', project_id)\
+                    .execute()
+                project_updates['total_scenarios'] = existing_count_result.count
+            
+            db.client.table('projects')\
+                .update(project_updates)\
                 .eq('project_id', project_id)\
-                .eq('step_key', step_key)\
-                .execute()
-        else:
-            supabase.table('project_progress_steps')\
-                .insert({
-                    'project_id': project_id,
-                    'step_key': step_key,
-                    'step_percent': percent_increase
-                })\
                 .execute()
         
+        db.upsert_progress_step(project_id, "scenarios_analyzed", 7)
+        db.recompute_and_update_project_progress(project_id)
+        
+        mode_text = "replaced" if mode == 'replace' else "saved"
+        return True, f"Successfully {mode_text} {saved_count} scenario(s)"
+        
     except Exception as e:
-        st.warning(f"Could not update progress: {str(e)}")
-
-
-def format_value_with_semantics(item: Dict) -> str:
-    """Format value display based on semantic type"""
-    value_type = item.get('value_type', 'absolute')
-    value = item.get('value')
-    unit = item.get('unit', '')
-    
-    if item.get('is_range'):
-        min_val = item.get('value_min', '')
-        max_val = item.get('value_max', '')
-        return f"{min_val}-{max_val} {unit}"
-    elif item.get('is_rate'):
-        rate_period = item.get('rate_period', '')
-        return f"{value} {unit} {rate_period}"
-    elif value_type == 'delta':
-        sign = '+' if value and value > 0 else ''
-        return f"Δ{sign}{value} {unit}"
-    elif item.get('base_value') and item.get('target_value'):
-        return f"{item['base_value']} → {item['target_value']} {unit}"
-    else:
-        return f"{value} {unit}" if value is not None else "N/A"
-
-
-def format_time_display(item: Dict) -> str:
-    """Format time information for display"""
-    baseline = item.get('baseline_year')
-    target = item.get('target_year')
-    expr = item.get('time_expression', '')
-    
-    if baseline and target:
-        return f"{baseline}→{target}"
-    elif target:
-        return f"by {target}"
-    elif expr:
-        return expr
-    else:
-        return "N/A"
-
-
-def format_value_type(value_type: str) -> str:
-    """Format value type with icon"""
-    icons = {
-        'delta': '📈',
-        'absolute_target': '🎯',
-        'range': '📊',
-        'rate': '⏱️',
-        'percent_point': '📍',
-        'direction_only': '➡️'
-    }
-    icon = icons.get(value_type, '❓')
-    return f"{icon} {value_type.replace('_', ' ').title()}"
-
-
-def format_extraction_method(method: str) -> str:
-    """Format extraction method with icon"""
-    icons = {
-        'hybrid_both': '🔀',
-        'optionb_only': '📝',
-        'gliner_only': '🤖',
-        'optionb': '📝',
-        'legacy': '🔙'
-    }
-    icon = icons.get(method, '❓')
-    short_name = method.replace('_only', '').replace('hybrid_', '').replace('_both', '')
-    return f"{icon} {short_name}"
+        return False, f"Error saving scenarios: {str(e)}"
 
 
 def initialize_scenario_state():
     """Initialize session state for scenario analysis"""
-    if "scenario_text_input" not in st.session_state:
-        st.session_state.scenario_text_input = ""
-    if "detected_scenarios" not in st.session_state:
+    if 'detected_scenarios' not in st.session_state:
         st.session_state.detected_scenarios = []
-    if "scenarios_processed" not in st.session_state:
+    if 'scenarios_processed' not in st.session_state:
         st.session_state.scenarios_processed = False
-    if "scenario_mappings" not in st.session_state:
-        st.session_state.scenario_mappings = {}
-    if "enable_ml_extraction" not in st.session_state:
-        st.session_state.enable_ml_extraction = True
-    if "ml_confidence_threshold" not in st.session_state:
-        st.session_state.ml_confidence_threshold = 0.5
-    if "load_mode_selected" not in st.session_state:
-        st.session_state.load_mode_selected = False
-    if "save_mode" not in st.session_state:
-        st.session_state.save_mode = 'update'
+    if 'scenario_text_input' not in st.session_state:
+        st.session_state.scenario_text_input = ""
+    if 'enable_ml_extraction' not in st.session_state:
+        st.session_state.enable_ml_extraction = False
+    if 'ml_confidence_threshold' not in st.session_state:
+        st.session_state.ml_confidence_threshold = 0.7
 
 
-if 'nlp_models_loaded' not in st.session_state:
-    loading_placeholder = st.empty()
+def render_scenario_table(scenario: Dict, scenario_idx: int):
+    """Render editable table for a single scenario"""
+    st.markdown(f"### {scenario['title']}")
     
-    with loading_placeholder.container():
-        col1, col2, col3 = st.columns([1, 2, 1])
-        with col2:
-            st.markdown("### 🤖 Initializing NLP Module")
-            st.info("⏳ **Please wait** - Preparing language models...")
-            st.caption("First-time setup in progress...")
+    col_info1, col_info2, col_info3 = st.columns(3)
+    with col_info1:
+        st.caption(f"📅 Baseline Year: {scenario.get('baseline_year', 'N/A')}")
+    with col_info2:
+        st.caption(f"🎯 Target Year: {scenario.get('horizon', 'N/A')}")
+    with col_info3:
+        if scenario.get('time_confidence'):
+            st.caption(f"✓ Time Confidence: {scenario.get('time_confidence', 0):.2f}")
+    
+    if not scenario.get('items'):
+        st.info("No parameters extracted for this scenario")
+        return
+    
+    df = pd.DataFrame(scenario['items'])
+    
+    display_columns = [
+        'parameter_canonical', 'value', 'unit', 'direction',
+        'value_type', 'baseline_year', 'target_year',
+        'confidence', 'category'
+    ]
+    
+    available_cols = [col for col in display_columns if col in df.columns]
+    df_display = df[available_cols].copy()
+    
+    rename_map = {
+        'parameter_canonical': 'Parameter',
+        'value': 'Value',
+        'unit': 'Unit',
+        'direction': 'Direction',
+        'value_type': 'Value Type',
+        'baseline_year': 'Baseline Year',
+        'target_year': 'Target Year',
+        'confidence': 'Confidence',
+        'category': 'Category'
+    }
+    df_display = df_display.rename(columns=rename_map)
+    
+    edited_df = st.data_editor(
+        df_display,
+        use_container_width=True,
+        num_rows="dynamic",
+        key=f"scenario_table_{scenario_idx}",
+        column_config={
+            "Confidence": st.column_config.NumberColumn(
+                format="%.2f",
+                min_value=0.0,
+                max_value=1.0
+            ),
+            "Value": st.column_config.NumberColumn(
+                format="%.2f"
+            )
+        }
+    )
+    
+    reverse_rename = {v: k for k, v in rename_map.items()}
+    edited_df = edited_df.rename(columns=reverse_rename)
+    
+    for idx, row in edited_df.iterrows():
+        for col in edited_df.columns:
+            if col in scenario['items'][idx]:
+                scenario['items'][idx][col] = row[col]
 
 
-@st.cache_resource(show_spinner=False)
-def load_nlp_models():
-    """Load all NLP models with progress tracking"""
-    import spacy
-    
-    models = {}
-    
-    try:
-        models['spacy'] = spacy.load('en_core_web_sm')
-    except OSError:
-        models['spacy'] = None
-    
-    try:
-        from core.nlp.ml_extractor import load_gliner_model
-        models['gliner'] = load_gliner_model()
-    except Exception:
-        models['gliner'] = None
-    
-    return models
-
-
-if 'nlp_models_loaded' not in st.session_state:
-    if 'loading_placeholder' in locals():
-        loading_placeholder.empty()
-    
-    col1, col2, col3 = st.columns([1, 2, 1])
-    
-    with col2:
-        st.markdown("### 🤖 Loading NLP Models")
-        st.info("**First-time setup** - Loading language models and AI extractors")
-        st.caption("⏱️ Estimated time: 20-30 seconds | Future page visits will be instant!")
-        
-        progress_bar = st.progress(0)
-        status_text = st.empty()
-        detail_text = st.empty()
-        
-        status_text.markdown("**Step 1/3:** Loading spaCy Language Model")
-        detail_text.text("📦 Initializing English language processor...")
-        progress_bar.progress(10)
-        time.sleep(0.3)
-        
-        detail_text.text("📦 Loading linguistic patterns and rules...")
-        progress_bar.progress(30)
-        
-        status_text.markdown("**Step 2/3:** Loading AI Extraction Models")
-        detail_text.text("🤖 Loading transformer-based extractors (if available)...")
-        progress_bar.progress(40)
-        
-        nlp_models = load_nlp_models()
-        progress_bar.progress(70)
-        
-        status_text.markdown("**Step 3/3:** Initializing NLP Components")
-        detail_text.text("⚙️ Setting up parameter extraction pipelines...")
-        progress_bar.progress(85)
-        time.sleep(0.2)
-        
-        detail_text.text("⚙️ Preparing ensemble extraction methods...")
-        progress_bar.progress(95)
-        time.sleep(0.2)
-        
-        progress_bar.progress(100)
-        detail_text.text("✅ All components ready!")
-        time.sleep(0.5)
-        
-        status_text.empty()
-        detail_text.empty()
-        progress_bar.empty()
-        
-        st.session_state.nlp_models = nlp_models
-        st.session_state.nlp_models_loaded = True
-        
-        st.success("✅ **NLP Models Loaded Successfully**")
-        st.info("💡 Models are now cached. Page refreshes will be instant.")
-        time.sleep(1.0)
-        st.rerun()
-else:
-    nlp_models = st.session_state.nlp_models
-
-
-st.title("📝 Scenario Analysis (NLP)")
-st.markdown("*Analyze scenario text and extract structured parameters*")
+# Main page logic
+st.title("📊 Scenario Analysis (NLP)")
+st.markdown("*Natural Language Processing for Scenario Parameter Extraction*")
 st.markdown("---")
 
+# Check if project is selected
+if not st.session_state.get('current_project_id'):
+    st.warning("⚠️ No project selected")
+    st.info("Please select or create a project from the Home page")
+    
+    if st.button("← Go to Home"):
+        st.switch_page("pages/01_Home.py")
+    st.stop()
+
+# Initialize state
 initialize_scenario_state()
 
-
-supabase = get_supabase_client()
-
-if not supabase:
-    st.error("⚠️ Database connection failed")
-    st.stop()
-
-
-project_id = st.session_state.get('project_id')
+project_id = st.session_state.current_project_id
 user_id = st.session_state.get('user_id')
 
+# Check for existing scenarios
+if DB_AVAILABLE:
+    has_existing, existing_count, existing_list = check_existing_scenarios(project_id)
+else:
+    has_existing = False
+    existing_count = 0
+    existing_list = []
 
-if 'project_data' not in st.session_state:
-    load_project_data(project_id, supabase)
-
-project_data = st.session_state.get('project_data', {})
-
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📊 Current Project")
-st.sidebar.markdown(f"**Project:** {project_data.get('project_name', 'Unknown')}")
-st.sidebar.markdown(f"**Status:** {project_data.get('status', 'Unknown')}")
-
-if project_data.get('baseline_year'):
-    st.sidebar.markdown(f"**Baseline Year:** {project_data['baseline_year']}")
-if project_data.get('scenario_target_year'):
-    st.sidebar.markdown(f"**Target Year:** {project_data['scenario_target_year']}")
-if project_data.get('total_scenarios'):
-    st.sidebar.markdown(f"**Total Scenarios:** {project_data['total_scenarios']}")
-
-
-if not st.session_state.load_mode_selected:
-    st.markdown("## 🔍 Check Existing Scenarios")
+# Display existing scenarios info
+if has_existing:
+    st.info(f"📋 This project has {existing_count} existing scenario(s)")
     
-    with st.spinner("Checking for existing scenarios..."):
-        has_scenarios, scenario_count, scenario_list = check_existing_scenarios(project_id, supabase)
+    col_load, col_new = st.columns(2)
     
-    if has_scenarios:
-        st.info(f"📊 **Found {scenario_count} existing scenario(s) for this project**")
-        
-        with st.expander("👀 View Existing Scenarios", expanded=True):
-            for s in scenario_list:
-                baseline_info = f" (Baseline: {s.get('baseline_year')})" if s.get('baseline_year') else ""
-                st.markdown(f"- **{s['title']}** - Target: {s.get('horizon', 'N/A')}{baseline_info} - Created: {s['created_at'][:10]}")
-        
-        st.markdown("### What would you like to do?")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("📥 **Load & Update Existing**", use_container_width=True, type="primary"):
-                with st.spinner("Loading scenarios from database..."):
-                    loaded_scenarios = load_scenarios_from_database(project_id, supabase)
-                    if loaded_scenarios:
-                        st.session_state.detected_scenarios = loaded_scenarios
-                        st.session_state.scenarios_processed = True
-                        st.session_state.save_mode = 'update'
-                        st.session_state.load_mode_selected = True
-                        st.success(f"✅ Loaded {len(loaded_scenarios)} scenarios")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("Failed to load scenarios")
-        
-        with col2:
-            if st.button("➕ **Create New Scenarios**", use_container_width=True):
-                st.session_state.detected_scenarios = []
-                st.session_state.scenarios_processed = False
-                st.session_state.save_mode = 'append'
-                st.session_state.load_mode_selected = True
-                st.info("✅ Ready to create new scenarios")
-                time.sleep(1)
-                st.rerun()
-        
-        st.markdown("---")
-        st.caption("💡 **Load & Update**: Replace existing scenarios with edited versions")
-        st.caption("💡 **Create New**: Add new scenarios while keeping existing ones")
-    
-    else:
-        st.success("✨ **No existing scenarios found.** Ready to create your first scenarios!")
-        
-        if st.button("🚀 **Start Creating Scenarios**", use_container_width=True, type="primary"):
-            st.session_state.detected_scenarios = []
-            st.session_state.scenarios_processed = False
-            st.session_state.save_mode = 'append'
-            st.session_state.load_mode_selected = True
-            st.rerun()
-    
-    st.stop()
-
-
-st.markdown("## 📊 Current Mode")
-mode_display = "🔄 **Update Mode**" if st.session_state.save_mode == 'update' else "➕ **Append Mode**"
-mode_desc = "Editing existing scenarios - will replace on save" if st.session_state.save_mode == 'update' else "Creating new scenarios - will add to existing on save"
-
-col_mode1, col_mode2 = st.columns([3, 1])
-with col_mode1:
-    st.info(f"{mode_display}: {mode_desc}")
-with col_mode2:
-    if st.button("🔄 Switch Mode"):
-        st.session_state.save_mode = 'append' if st.session_state.save_mode == 'update' else 'update'
-        st.rerun()
-
-st.markdown("---")
-
-
-if st.session_state.scenarios_processed and st.session_state.detected_scenarios:
-    st.markdown("## ✏️ Step 1: Edit Scenario Details")
-    
-    for scenario_idx, scenario in enumerate(st.session_state.detected_scenarios):
-        with st.expander(f"📋 Scenario {scenario_idx + 1}: {scenario['title']}", expanded=True):
-            
-            col1, col2, col3 = st.columns([2, 1, 1])
-            
-            with col1:
-                new_title = st.text_input(
-                    "Scenario Title",
-                    value=scenario['title'],
-                    key=f"title_{scenario_idx}"
-                )
-                if new_title != scenario['title']:
-                    st.session_state.detected_scenarios[scenario_idx]['title'] = new_title
-            
-            with col2:
-                new_horizon = st.number_input(
-                    "Target Year",
-                    min_value=2020,
-                    max_value=2100,
-                    value=int(scenario.get('horizon', 2050)) if scenario.get('horizon') else 2050,
-                    key=f"horizon_{scenario_idx}"
-                )
-                if new_horizon != scenario.get('horizon'):
-                    st.session_state.detected_scenarios[scenario_idx]['horizon'] = new_horizon
-            
-            with col3:
-                new_baseline = st.number_input(
-                    "Baseline Year",
-                    min_value=2000,
-                    max_value=2100,
-                    value=int(scenario.get('baseline_year', 2024)) if scenario.get('baseline_year') else 2024,
-                    key=f"baseline_{scenario_idx}"
-                )
-                if new_baseline != scenario.get('baseline_year'):
-                    st.session_state.detected_scenarios[scenario_idx]['baseline_year'] = new_baseline
-            
-            new_text = st.text_area(
-                "Scenario Description",
-                value=scenario.get('text', ''),
-                height=100,
-                key=f"text_{scenario_idx}"
-            )
-            if new_text != scenario.get('text'):
-                st.session_state.detected_scenarios[scenario_idx]['text'] = new_text
-    
-    st.markdown("---")
-    
-    st.markdown("## 📊 Step 2: Review & Edit Parameters")
-    
-    for scenario_idx, scenario in enumerate(st.session_state.detected_scenarios):
-        st.markdown(f"### {scenario['title']}")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric("Target Year", scenario.get('horizon', 'N/A'))
-        with col2:
-            st.metric("Baseline Year", scenario.get('baseline_year', 'N/A'))
-        with col3:
-            time_conf = scenario.get('time_confidence', 0)
-            time_color = "🟢" if time_conf > 0.8 else "🟡" if time_conf > 0.6 else "🔴"
-            st.metric("Time Confidence", f"{time_color} {time_conf:.0%}" if time_conf > 0 else "N/A")
-        with col4:
-            baseline = scenario.get('baseline_year')
-            horizon = scenario.get('horizon')
-            time_range = f"{baseline} → {horizon}" if baseline and horizon else "N/A"
-            st.metric("Time Range", time_range)
-        
-        items = scenario.get('items', [])
-        
-        if not items:
-            st.info("No parameters detected")
-            
-            if st.button(f"➕ Add Parameter Manually", key=f"add_param_{scenario_idx}"):
-                new_item = {
-                    'id': str(uuid.uuid4()),
-                    'parameter': 'New Parameter',
-                    'parameter_canonical': 'New Parameter',
-                    'category': 'other',
-                    'value': 0.0,
-                    'unit': '%',
-                    'direction': 'target',
-                    'value_type': 'absolute_target',
-                    'confidence': 1.0,
-                    'extraction_method': 'manual'
-                }
-                st.session_state.detected_scenarios[scenario_idx]['items'].append(new_item)
-                st.rerun()
-        else:
-            rows = []
-            for item_idx, item in enumerate(items):
-                conf = item.get('confidence', 0)
-                conf_icon = "🟢" if conf > 0.8 else "🟡" if conf > 0.6 else "🔴"
-                
-                value_display = format_value_with_semantics(item)
-                time_display = format_time_display(item)
-                
-                row = {
-                    'idx': item_idx,
-                    'Status': conf_icon,
-                    'Parameter': item.get('parameter_canonical', item.get('parameter', 'Unknown')),
-                    'Category': item.get('category', 'N/A'),
-                    'Direction': item.get('direction', 'N/A'),
-                    'Value': item.get('value', 0),
-                    'Unit': item.get('unit', ''),
-                    'Value Type': item.get('value_type', 'N/A'),
-                    'Time': time_display,
-                    'Confidence': conf,
-                    'Method': item.get('extraction_method', 'N/A')
-                }
-                rows.append(row)
-            
-            df = pd.DataFrame(rows)
-            
-            edited_df = st.data_editor(
-                df,
-                hide_index=True,
-                use_container_width=True,
-                num_rows="dynamic",
-                column_config={
-                    "idx": None,
-                    "Status": st.column_config.TextColumn("", width="small"),
-                    "Parameter": st.column_config.TextColumn("Parameter", width="medium"),
-                    "Category": st.column_config.SelectboxColumn(
-                        "Category",
-                        options=['economy', 'environment', 'social', 'other'],
-                        width="small"
-                    ),
-                    "Direction": st.column_config.SelectboxColumn(
-                        "Direction",
-                        options=['increase', 'decrease', 'target', 'stable', 'double', 'halve'],
-                        width="small"
-                    ),
-                    "Value": st.column_config.NumberColumn("Value", format="%.2f"),
-                    "Unit": st.column_config.TextColumn("Unit", width="small"),
-                    "Value Type": st.column_config.SelectboxColumn(
-                        "Type",
-                        options=['absolute_target', 'delta', 'range', 'rate', 'percent_point'],
-                        width="small"
-                    ),
-                    "Time": st.column_config.TextColumn("Time", width="medium"),
-                    "Confidence": st.column_config.NumberColumn("Conf.", format="%.2f"),
-                    "Method": st.column_config.TextColumn("Method", width="small")
-                },
-                key=f"param_table_{scenario_idx}"
-            )
-            
-            if len(edited_df) != len(df):
-                if len(edited_df) > len(df):
-                    for new_idx in range(len(df), len(edited_df)):
-                        new_row = edited_df.iloc[new_idx]
-                        new_item = {
-                            'id': str(uuid.uuid4()),
-                            'parameter': new_row['Parameter'],
-                            'parameter_canonical': new_row['Parameter'],
-                            'category': new_row['Category'],
-                            'direction': new_row['Direction'],
-                            'value': new_row['Value'],
-                            'unit': new_row['Unit'],
-                            'value_type': new_row['Value Type'],
-                            'confidence': new_row['Confidence'],
-                            'extraction_method': 'manual'
-                        }
-                        st.session_state.detected_scenarios[scenario_idx]['items'].append(new_item)
-                    st.rerun()
-                
-                elif len(edited_df) < len(df):
-                    removed_indices = set(df['idx']) - set(edited_df['idx'])
-                    for removed_idx in sorted(removed_indices, reverse=True):
-                        del st.session_state.detected_scenarios[scenario_idx]['items'][removed_idx]
-                    st.rerun()
-            
-            for edit_idx, edit_row in edited_df.iterrows():
-                if edit_idx < len(items):
-                    orig_idx = int(edit_row['idx'])
-                    st.session_state.detected_scenarios[scenario_idx]['items'][orig_idx].update({
-                        'parameter': edit_row['Parameter'],
-                        'parameter_canonical': edit_row['Parameter'],
-                        'category': edit_row['Category'],
-                        'direction': edit_row['Direction'],
-                        'value': edit_row['Value'],
-                        'unit': edit_row['Unit'],
-                        'value_type': edit_row['Value Type'],
-                        'confidence': edit_row['Confidence']
-                    })
-            
-            with st.expander("🔍 Advanced Parameter Details", expanded=False):
-                for item_idx, item in enumerate(items):
-                    st.markdown(f"**{item.get('parameter_canonical', item.get('parameter'))}**")
-                    
-                    col_a, col_b, col_c = st.columns(3)
-                    
-                    with col_a:
-                        st.text(f"Original: {item.get('parameter_original', 'N/A')}")
-                        st.text(f"Category: {item.get('category', 'N/A')}")
-                        
-                        new_target_year = st.number_input(
-                            "Target Year",
-                            min_value=2000,
-                            max_value=2100,
-                            value=int(item.get('target_year', 2050)) if item.get('target_year') else 2050,
-                            key=f"target_year_{scenario_idx}_{item_idx}"
-                        )
-                        if new_target_year != item.get('target_year'):
-                            st.session_state.detected_scenarios[scenario_idx]['items'][item_idx]['target_year'] = new_target_year
-                    
-                    with col_b:
-                        st.text(f"Value Type: {item.get('value_type', 'N/A')}")
-                        
-                        if item.get('is_range'):
-                            new_min = st.number_input(
-                                "Min Value",
-                                value=float(item.get('value_min', 0)),
-                                key=f"min_{scenario_idx}_{item_idx}"
-                            )
-                            new_max = st.number_input(
-                                "Max Value",
-                                value=float(item.get('value_max', 0)),
-                                key=f"max_{scenario_idx}_{item_idx}"
-                            )
-                            if new_min != item.get('value_min'):
-                                st.session_state.detected_scenarios[scenario_idx]['items'][item_idx]['value_min'] = new_min
-                            if new_max != item.get('value_max'):
-                                st.session_state.detected_scenarios[scenario_idx]['items'][item_idx]['value_max'] = new_max
-                        
-                        if item.get('is_rate'):
-                            new_rate_period = st.text_input(
-                                "Rate Period",
-                                value=item.get('rate_period', 'per year'),
-                                key=f"rate_period_{scenario_idx}_{item_idx}"
-                            )
-                            if new_rate_period != item.get('rate_period'):
-                                st.session_state.detected_scenarios[scenario_idx]['items'][item_idx]['rate_period'] = new_rate_period
-                    
-                    with col_c:
-                        st.text(f"Confidence: {item.get('confidence', 0):.2f}")
-                        st.text(f"Method: {item.get('extraction_method', 'N/A')}")
-                    
-                    source_text = st.text_area(
-                        "Source Sentence",
-                        value=item.get('source_sentence', ''),
-                        height=60,
-                        key=f"source_{scenario_idx}_{item_idx}"
-                    )
-                    if source_text != item.get('source_sentence'):
-                        st.session_state.detected_scenarios[scenario_idx]['items'][item_idx]['source_sentence'] = source_text
-                    
-                    st.markdown("---")
-        
-        st.markdown("---")
-    
-    st.markdown("---")
-    st.markdown("## 💾 Step 3: Save to Database")
-    
-    stats = calculate_project_statistics(st.session_state.detected_scenarios)
-    
-    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-    with col_stat1:
-        st.metric("Total Scenarios", stats['total_scenarios'])
-    with col_stat2:
-        st.metric("Baseline Year", stats['baseline_year'] if stats['baseline_year'] else "N/A")
-    with col_stat3:
-        st.metric("Target Year", stats['scenario_target_year'] if stats['scenario_target_year'] else "N/A")
-    with col_stat4:
-        total_params = sum(len(s.get('items', [])) for s in st.session_state.detected_scenarios)
-        st.metric("Total Parameters", total_params)
-    
-    col_save1, col_save2, col_save3 = st.columns([2, 1, 1])
-    
-    with col_save1:
-        st.info(f"**Save Mode**: {mode_display}")
-    
-    with col_save2:
-        if st.button("💾 **SAVE TO DATABASE**", use_container_width=True, type="primary"):
-            with st.spinner("Saving to database..."):
-                success = save_scenarios_to_database(
-                    st.session_state.detected_scenarios,
-                    project_id,
-                    user_id,
-                    supabase,
-                    st.session_state.save_mode
-                )
-                
-                if success:
-                    st.success("✅ **Scenarios saved successfully!**")
-                    st.balloons()
-                    
-                    for scenario in st.session_state.detected_scenarios:
-                        scenario['from_database'] = True
-                    
-                    st.session_state.project_data['baseline_year'] = stats['baseline_year']
-                    st.session_state.project_data['scenario_target_year'] = stats['scenario_target_year']
-                    st.session_state.project_data['total_scenarios'] = stats['total_scenarios']
-                    
-                    time.sleep(2)
+    with col_load:
+        if st.button("📥 Load Existing Scenarios", use_container_width=True, type="primary"):
+            with st.spinner("Loading scenarios from database..."):
+                loaded_scenarios = load_scenarios_from_database(project_id)
+                if loaded_scenarios:
+                    st.session_state.detected_scenarios = loaded_scenarios
+                    st.session_state.scenarios_processed = True
+                    st.success(f"✅ Loaded {len(loaded_scenarios)} scenario(s)")
+                    time.sleep(1)
                     st.rerun()
                 else:
-                    st.error("❌ Failed to save scenarios")
+                    st.error("❌ No scenarios could be loaded")
     
-    with col_save3:
-        if st.button("🔄 Reset & Start Over", use_container_width=True):
+    with col_new:
+        if st.button("➕ Create New Scenarios", use_container_width=True):
             st.session_state.detected_scenarios = []
             st.session_state.scenarios_processed = False
-            st.session_state.load_mode_selected = False
+            st.session_state.scenario_text_input = ""
             st.rerun()
+    
+    st.markdown("---")
 
-else:
-    st.markdown("## 📝 Step 1: Input Scenario Text")
+# ML Settings
+with st.expander("⚙️ ML Extraction Settings", expanded=False):
+    st.markdown("### Machine Learning Configuration")
     
-    st.markdown("### ⚙️ Extraction Settings")
+    ml_enabled = st.checkbox(
+        "Enable ML-based extraction",
+        value=st.session_state.enable_ml_extraction,
+        help="Use machine learning models for parameter extraction (requires additional dependencies)"
+    )
+    if ml_enabled != st.session_state.enable_ml_extraction:
+        st.session_state.enable_ml_extraction = ml_enabled
     
-    col_set1, col_set2 = st.columns(2)
-    
-    with col_set1:
-        enable_ml = st.checkbox(
-            "🤖 Enable ML Extraction (GLiNER)",
-            value=st.session_state.enable_ml_extraction,
-            help="Use transformer-based model for parameter extraction"
-        )
-        if enable_ml != st.session_state.enable_ml_extraction:
-            st.session_state.enable_ml_extraction = enable_ml
-    
-    with col_set2:
+    if st.session_state.enable_ml_extraction:
         ml_threshold = st.slider(
             "ML Confidence Threshold",
             min_value=0.3,
             max_value=0.9,
             value=st.session_state.ml_confidence_threshold,
             step=0.05,
-            help="Minimum confidence to accept ML extractions"
+            help="Minimum confidence score for ML predictions"
         )
         if ml_threshold != st.session_state.ml_confidence_threshold:
             st.session_state.ml_confidence_threshold = ml_threshold
-    
-    st.markdown("---")
-    
-    st.markdown("### 📄 Enter Scenario Text")
-    
-    scenario_text = st.text_area(
-        "Paste your scenario text here",
-        value=st.session_state.scenario_text_input,
-        height=300,
-        placeholder="""Example:
+
+st.markdown("---")
+
+st.markdown("### 📄 Enter Scenario Text")
+
+scenario_text = st.text_area(
+    "Paste your scenario text here",
+    value=st.session_state.scenario_text_input,
+    height=300,
+    placeholder="""Example:
 
 Scenario 1: Green Growth (by 2050)
 GDP increases by 25%.
@@ -1028,47 +494,96 @@ Scenario 2: Business as Usual (by 2050)
 GDP increases by 15%.
 CO2 emissions increase by 10%.
 Renewable energy reaches 35%."""
-    )
-    
-    if scenario_text != st.session_state.scenario_text_input:
-        st.session_state.scenario_text_input = scenario_text
-    
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
-    
-    with col_btn1:
-        if st.button("🔍 **Extract Parameters**", use_container_width=True, type="primary", disabled=not scenario_text.strip()):
-            with st.spinner("Extracting parameters from scenarios..."):
-                try:
-                    segments = segment_scenarios(scenario_text)
-                    
-                    extracted_scenarios = extract_parameters_from_scenarios(
-                        segments,
-                        enable_ml=st.session_state.enable_ml_extraction,
-                        ml_confidence_threshold=st.session_state.ml_confidence_threshold
-                    )
-                    
-                    st.session_state.detected_scenarios = extracted_scenarios
-                    st.session_state.scenarios_processed = True
-                    
-                    st.success(f"✅ Extracted {len(extracted_scenarios)} scenarios")
-                    time.sleep(1)
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Error during extraction: {str(e)}")
-                    st.exception(e)
-    
-    with col_btn2:
-        if st.button("🗑️ Clear", use_container_width=True):
-            st.session_state.scenario_text_input = ""
-            st.session_state.detected_scenarios = []
-            st.session_state.scenarios_processed = False
-            st.rerun()
+)
 
+if scenario_text != st.session_state.scenario_text_input:
+    st.session_state.scenario_text_input = scenario_text
+
+col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 2])
+
+with col_btn1:
+    if st.button("🔍 **Extract Parameters**", use_container_width=True, type="primary", disabled=not scenario_text.strip()):
+        with st.spinner("Extracting parameters from scenarios..."):
+            try:
+                segments = segment_scenarios(scenario_text)
+                
+                extracted_scenarios = extract_parameters_from_scenarios(
+                    segments,
+                    enable_ml=st.session_state.enable_ml_extraction,
+                    ml_confidence_threshold=st.session_state.ml_confidence_threshold
+                )
+                
+                st.session_state.detected_scenarios = extracted_scenarios
+                st.session_state.scenarios_processed = True
+                
+                st.success(f"✅ Extracted {len(extracted_scenarios)} scenarios")
+                time.sleep(1)
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error during extraction: {str(e)}")
+                st.exception(e)
+
+with col_btn2:
+    if st.button("🗑️ Clear", use_container_width=True):
+        st.session_state.scenario_text_input = ""
+        st.session_state.detected_scenarios = []
+        st.session_state.scenarios_processed = False
+        st.rerun()
 
 st.markdown("---")
 
+# Display extracted/loaded scenarios
+if st.session_state.scenarios_processed and st.session_state.detected_scenarios:
+    st.markdown("## 📋 Extracted Scenarios")
+    
+    st.info(f"✅ {len(st.session_state.detected_scenarios)} scenario(s) ready")
+    
+    for idx, scenario in enumerate(st.session_state.detected_scenarios):
+        with st.expander(f"**{scenario['title']}**", expanded=(idx == 0)):
+            render_scenario_table(scenario, idx)
+    
+    st.markdown("---")
+    
+    st.markdown("### 💾 Save to Database")
+    
+    col_save1, col_save2 = st.columns([1, 1])
+    
+    with col_save1:
+        save_mode = st.radio(
+            "Save mode:",
+            options=['append', 'replace'],
+            format_func=lambda x: '➕ Append to existing scenarios' if x == 'append' else '🔄 Replace all existing scenarios',
+            horizontal=False
+        )
+    
+    with col_save2:
+        st.markdown("")
+        st.markdown("")
+        if st.button("💾 **Save Scenarios**", use_container_width=True, type="primary"):
+            if not user_id:
+                st.error("❌ User ID not found. Please log in again.")
+            else:
+                with st.spinner(f"Saving scenarios ({save_mode})..."):
+                    success, message = save_scenarios_to_database(
+                        st.session_state.detected_scenarios,
+                        project_id,
+                        user_id,
+                        mode=save_mode
+                    )
+                    
+                    if success:
+                        st.success(f"✅ {message}")
+                        st.balloons()
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {message}")
 
+else:
+    st.info("👆 Enter scenario text above and click 'Extract Parameters' to begin")
+
+# Debug sections
 with st.expander("🔬 Phase 2 Enhanced Fields (Debug)", expanded=False):
     st.caption("View time extraction and value semantics details")
     
@@ -1107,7 +622,6 @@ with st.expander("🔬 Phase 2 Enhanced Fields (Debug)", expanded=False):
                 st.markdown("---")
     else:
         st.info("No scenarios to display")
-
 
 with st.expander("🧪 Phase 3 Evaluation Harness (Debug)", expanded=False):
     st.caption("Run regression tests and quality metrics on gold test cases")
@@ -1197,7 +711,6 @@ with st.expander("🧪 Phase 3 Evaluation Harness (Debug)", expanded=False):
                 except Exception as e:
                     st.error(f"❌ Evaluation failed: {str(e)}")
                     st.exception(e)
-
 
 st.markdown("---")
 st.caption("💡 **Tip**: All tables and fields are editable. Click any cell to modify values.")
