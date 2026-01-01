@@ -124,11 +124,12 @@ def load_project_data_from_database():
         return False
     
     try:
-        df_raw = db.load_timeseries_data(project_id, source='raw')
+        # FIXED: Changed source= to data_source=
+        df_raw = db.load_timeseries_data(project_id, data_source='raw')
         if df_raw is None or len(df_raw) == 0:
-            df_raw = db.load_timeseries_data(project_id, source='original')
+            df_raw = db.load_timeseries_data(project_id, data_source='original')
         
-        df_cleaned = db.load_timeseries_data(project_id, source='cleaned')
+        df_cleaned = db.load_timeseries_data(project_id, data_source='cleaned')
         
         if df_raw is not None and len(df_raw) > 0:
             df_all = pd.concat([df_raw, df_cleaned]) if df_cleaned is not None and len(df_cleaned) > 0 else df_raw
@@ -284,6 +285,12 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                 'created_at': datetime.now().isoformat(),
                 'updated_at': datetime.now().isoformat()
             }).execute()
+        
+        # ADDED: Update project progress tracking
+        # Add "dim_reduction_done" step with 10% contribution
+        db.upsert_progress_step(project_id, "dim_reduction_done", 10)
+        # Recompute total project progress
+        db.recompute_and_update_project_progress(project_id)
         
         return True, f"✅ Saved {len(output_variables)} components to database"
     
