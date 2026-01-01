@@ -419,17 +419,17 @@ def main():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("← Back to Data Health", use_container_width=True):
-            st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
+        if st.button("← Back to Data Cleaning and Preprocess", use_container_width=True):
+            st.switch_page("pages/03_Preprocessing.py")
     
     with col2:
         st.markdown("**Continue Workflow →**")
     
     with col3:
-        if st.button("Go to Scenarios →", type="primary", use_container_width=True):
+        if st.button("Go to Variable Relationships →", type="primary", use_container_width=True):
             # Mark this step as complete before moving on
             mark_visualization_complete()
-            st.switch_page("pages/05_Scenario_Definition.py")
+            st.switch_page("pages/05_Variable_Relationships.py")
 
 
 def render_single_variable_plot(variables):
