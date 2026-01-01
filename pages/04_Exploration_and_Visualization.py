@@ -92,29 +92,55 @@ def load_data_from_database():
 
 
 def get_available_variables():
-    """Get all available variables (original + cleaned if available)"""
+    """
+    Get all available variables (original + cleaned if available)
+    Returns variables that have actual data in df_long
+    """
     # Check if we have data in session state
     if st.session_state.get('df_long') is None:
         return [], [], [], False
     
     df_long = st.session_state.df_long
-    original_vars = sorted(df_long['variable'].unique().tolist())
     
-    # Check if cleaned data exists
-    has_cleaned_data = (
-        st.session_state.get('preprocessing_applied', False) and 
-        st.session_state.get('df_clean') is not None
-    )
+    # Get all unique variables from the actual data
+    unique_vars = df_long['variable'].unique()
+    all_vars_in_data = sorted(unique_vars.tolist() if hasattr(unique_vars, 'tolist') else list(unique_vars))
     
-    if has_cleaned_data:
-        df_clean = st.session_state.df_clean
-        all_vars = sorted(df_clean['variable'].unique().tolist())
-        cleaned_vars = [v for v in all_vars if v not in original_vars]
-    else:
-        all_vars = original_vars
-        cleaned_vars = []
+    # Separate raw vs cleaned variables
+    # Raw variables are those without cleaning suffixes
+    cleaned_suffixes = ['_missing', '_outlier', '_transform', '_cleaned', '_filled', 
+                       '_interpolated', '_normalized', '_scaled', '_imputed']
     
-    return all_vars, original_vars, cleaned_vars, has_cleaned_data
+    cleaned_vars = [v for v in all_vars_in_data 
+                   if any(suffix in v.lower() for suffix in cleaned_suffixes)]
+    original_vars = [v for v in all_vars_in_data if v not in cleaned_vars]
+    
+    has_cleaned_data = len(cleaned_vars) > 0
+    
+    return all_vars_in_data, original_vars, cleaned_vars, has_cleaned_data
+
+
+def get_total_parameter_count():
+    """
+    Get total parameter count from parameters table (like Page 3)
+    This includes ALL parameters, even those without data
+    """
+    try:
+        from core.database.supabase_manager import get_db_manager
+        db = get_db_manager()
+        project_id = st.session_state.get('current_project_id')
+        
+        if not project_id:
+            return 0
+        
+        parameters = db.get_project_parameters(project_id)
+        return len(parameters) if parameters else 0
+    except:
+        # Fallback to counting unique variables in data
+        df_long = st.session_state.get('df_long')
+        if df_long is not None:
+            return len(df_long['variable'].unique())
+        return 0
 
 
 def get_data_for_variable(variable):
@@ -238,9 +264,11 @@ def load_project_data_from_database():
                 st.session_state.project_parameters = parameters
                 st.session_state.value_columns = [p['parameter_name'] for p in parameters]
             else:
-                st.session_state.value_columns = sorted(df_all['variable'].unique().tolist())
+                unique_vars = df_all['variable'].unique()
+                st.session_state.value_columns = sorted(unique_vars.tolist() if hasattr(unique_vars, 'tolist') else list(unique_vars))
         except Exception:
-            st.session_state.value_columns = sorted(df_all['variable'].unique().tolist())
+            unique_vars = df_all['variable'].unique()
+            st.session_state.value_columns = sorted(unique_vars.tolist() if hasattr(unique_vars, 'tolist') else list(unique_vars))
         
         # Time column
         time_col = 'timestamp' if 'timestamp' in df_all.columns else 'time'
@@ -342,10 +370,11 @@ def main():
     with st.expander("ℹ️ Current Dataset Info"):
         col1, col2, col3, col4 = st.columns(4)
         
-        col1.metric("Total Variables", len(all_vars))
-        col1.caption(f"Original: {len(original_vars)}")
+        total_params = get_total_parameter_count()
+        col1.metric("Total Parameters", total_params)
+        col1.caption(f"With data: {len(all_vars)}")
         if cleaned_vars:
-            col1.caption(f"Cleaned/Transformed: {len(cleaned_vars)}")
+            col1.caption(f"Cleaned: {len(cleaned_vars)}")
         
         # Use cleaned data if available, otherwise original
         df_to_show = st.session_state.df_clean if has_cleaned_data else st.session_state.df_long
@@ -375,17 +404,17 @@ def main():
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("← Back to Data Cleaning & Preprocessing", use_container_width=True):
-            st.switch_page("pages/03_Preprocessing.py")
+        if st.button("← Back to Data Health", use_container_width=True):
+            st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
     
     with col2:
         st.markdown("**Continue Workflow →**")
     
     with col3:
-        if st.button("Go to Variable Relationships →", type="primary", use_container_width=True):
+        if st.button("Go to Scenarios →", type="primary", use_container_width=True):
             # Mark this step as complete before moving on
             mark_visualization_complete()
-            st.switch_page("pages/05_Variable_Relationships.py")
+            st.switch_page("pages/05_Scenario_Definition.py")
 
 
 def render_single_variable_plot(variables):
