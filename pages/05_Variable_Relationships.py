@@ -174,9 +174,11 @@ def load_project_data_from_database():
                 st.session_state.project_parameters = parameters
                 st.session_state.value_columns = [p['parameter_name'] for p in parameters]
             else:
-                st.session_state.value_columns = sorted(df_all['variable'].unique().tolist())
+                unique_vars = df_all['variable'].unique()
+                st.session_state.value_columns = sorted(unique_vars.tolist() if hasattr(unique_vars, 'tolist') else list(unique_vars))
         except Exception:
-            st.session_state.value_columns = sorted(df_all['variable'].unique().tolist())
+            unique_vars = df_all['variable'].unique()
+            st.session_state.value_columns = sorted(unique_vars.tolist() if hasattr(unique_vars, 'tolist') else list(unique_vars))
         
         # Time column
         time_col = 'timestamp' if 'timestamp' in df_all.columns else 'time'
@@ -219,6 +221,28 @@ def load_project_data_from_database():
         st.error(f"❌ Error loading data: {str(e)}")
         return False
 
+
+def get_total_parameter_count():
+    """
+    Get total parameter count from parameters table (like Page 3)
+    This includes ALL parameters, even those without data
+    """
+    try:
+        from core.database.supabase_manager import get_db_manager
+        db = get_db_manager()
+        project_id = st.session_state.get('current_project_id')
+        
+        if not project_id:
+            return 0
+        
+        parameters = db.get_project_parameters(project_id)
+        return len(parameters) if parameters else 0
+    except:
+        # Fallback to counting unique variables in data
+        df_long = st.session_state.get('df_long')
+        if df_long is not None:
+            return len(df_long['variable'].unique())
+        return 0
 
 
 def main():
@@ -666,12 +690,22 @@ def render_relationships_page():
     initialize_plot_configs()
     
     df_long = st.session_state.get("df_clean", st.session_state.df_long)
-    variables = sorted(df_long['variable'].unique().tolist())
+    
+    # Get unique variables - handle both numpy array and list returns
+    unique_vars = df_long['variable'].unique()
+    if hasattr(unique_vars, 'tolist'):
+        variables = sorted(unique_vars.tolist())
+    else:
+        variables = sorted(list(unique_vars))
     
     st.success("✅ Data loaded and ready for relationship analysis")
     
     col1, col2, col3 = st.columns(3)
-    col1.metric("Available Variables", len(variables))
+    
+    total_params = get_total_parameter_count()
+    col1.metric("Total Parameters", total_params)
+    col1.caption(f"With data: {len(variables)}")
+    
     col2.metric("Data Points", len(df_long))
     col3.metric("Possible Pairs", len(variables) * (len(variables) - 1))
     
