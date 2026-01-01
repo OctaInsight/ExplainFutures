@@ -91,7 +91,7 @@ def load_nlp_models():
         # Model not installed - will be handled by the modules
         models['spacy'] = None
     
-    # Try to load GLiNER if available
+    # PHASE 1: Try to load GLiNER if available (cached)
     try:
         from core.nlp.ml_extractor import load_gliner_model
         models['gliner'] = load_gliner_model()
@@ -197,6 +197,12 @@ def initialize_scenario_state():
         st.session_state.scenarios_processed = False
     if "scenario_mappings" not in st.session_state:
         st.session_state.scenario_mappings = {}
+    
+    # PHASE 1: ML extraction controls
+    if "enable_ml_extraction" not in st.session_state:
+        st.session_state.enable_ml_extraction = True  # Enabled by default
+    if "ml_confidence_threshold" not in st.session_state:
+        st.session_state.ml_confidence_threshold = 0.5  # Default threshold
     if "cleaned_scenarios" not in st.session_state:
         st.session_state.cleaned_scenarios = {}
     if "show_comparison_table" not in st.session_state:
@@ -1039,6 +1045,48 @@ Renewable energy reaches 40% by 2040.""",
     
     st.markdown("---")
     
+    # === PHASE 1: ML EXTRACTION CONTROLS ===
+    st.subheader("⚙️ Extraction Settings")
+    
+    col_ml1, col_ml2 = st.columns([1, 1])
+    
+    with col_ml1:
+        # Check if GLiNER is available
+        try:
+            from core.nlp.ml_extractor import is_gliner_available
+            gliner_available = is_gliner_available()
+        except:
+            gliner_available = False
+        
+        enable_ml = st.checkbox(
+            "🤖 Enable ML Extraction (GLiNER)",
+            value=st.session_state.enable_ml_extraction,
+            help="Use AI-powered extraction for better accuracy. Disable for faster, rules-only processing.",
+            disabled=not gliner_available,
+            key="enable_ml_checkbox"
+        )
+        st.session_state.enable_ml_extraction = enable_ml
+        
+        if not gliner_available:
+            st.caption("⚠️ GLiNER not available. Run: `pip install gliner`")
+    
+    with col_ml2:
+        if enable_ml and gliner_available:
+            ml_threshold = st.slider(
+                "ML Confidence Threshold",
+                min_value=0.3,
+                max_value=0.9,
+                value=st.session_state.ml_confidence_threshold,
+                step=0.05,
+                help="Higher = fewer but more accurate results. Lower = more results but may include false positives.",
+                key="ml_threshold_slider"
+            )
+            st.session_state.ml_confidence_threshold = ml_threshold
+            
+            st.caption(f"Current: {ml_threshold:.2f} ({'Conservative' if ml_threshold > 0.6 else 'Balanced' if ml_threshold > 0.4 else 'Aggressive'})")
+    
+    st.markdown("---")
+    
     # === PROCESS BUTTON ===
     col1, col2, col3 = st.columns([1, 2, 1])
     
@@ -1088,103 +1136,47 @@ Renewable energy reaches 40% by 2040.""",
                 
                 st.success(f"✅ Detected {len(scenarios)} scenario(s): {', '.join(extraction_summary)}")
                 
-                # Step 3: Extract parameters from each scenario using ENSEMBLE METHODS
-                st.info("🔎 Extracting parameters with 5 different methods...")
+                # Step 3: Extract parameters from each scenario 
+                st.info(f"🔎 Extracting parameters... (ML: {'ON' if st.session_state.enable_ml_extraction else 'OFF'})")
                 
-                # Import ensemble extraction from core.nlp
-                from core.nlp.ensemble_extraction import (
-                    extract_parameters_ensemble,
-                    normalize_across_scenarios
+                # Use the improved parameter extraction
+                scenarios_with_params = extract_parameters_from_scenarios(
+                    scenarios,
+                    enable_ml=st.session_state.enable_ml_extraction,
+                    ml_confidence_threshold=st.session_state.ml_confidence_threshold
                 )
                 
-                # Track extraction stats
-                method_stats = {
-                    'template': 0,
-                    'regex': 0,
-                    'semantic': 0,
-                    'statistical': 0,
-                    'gliner': 0
-                }
+                # Auto-assign categories to extracted items
+                for scenario in scenarios_with_params:
+                    for item in scenario.get('items', []):
+                        if 'category' not in item or not item['category']:
+                            param_name = item.get('parameter_canonical', item.get('parameter', ''))
+                            item['category'] = categorize_parameter(param_name)
                 
-                total_consensus = 0
-                total_single_method = 0
-                
-                scenarios_with_params = []
-                
-                # Extract from each scenario
-                for scenario in scenarios:
-                    scenario_text = scenario.get('text', '')
-                    
-                    # Run ensemble extraction
-                    unified_df = extract_parameters_ensemble(scenario_text)
-                    
-                    # Convert to items format
-                    items = []
-                    
-                    for _, row in unified_df.iterrows():
-                        # Count methods
-                        methods_used = row['methods_used'].split(', ')
-                        for method in methods_used:
-                            if method in method_stats:
-                                method_stats[method] += 1
-                        
-                        # Track consensus
-                        if row['extraction_count'] >= 2:
-                            total_consensus += 1
-                        else:
-                            total_single_method += 1
-                        
-                        item = {
-                            'parameter': row['parameter'],
-                            'parameter_canonical': row['parameter_normalized'],
-                            'category': categorize_parameter(row['parameter_normalized']),  # AUTO-ASSIGN category!
-                            'direction': row['direction'],
-                            'value': row['value'],
-                            'unit': row['unit'],
-                            'value_type': 'percent' if row['unit'] == '%' else 'absolute',
-                            'confidence': row['confidence_score'],
-                            'confidence_level': row['confidence_level'],
-                            'extraction_count': row['extraction_count'],
-                            'extraction_method': row['methods_used'],
-                            'decision_method': row['decision_method'],
-                            'source_sentence': row['source_sentences'][0] if row['source_sentences'] else '',
-                            'all_sources': row['source_sentences']
-                        }
-                        
-                        items.append(item)
-                    
-                    scenario['items'] = items
-                    scenarios_with_params.append(scenario)
-                
-                # CRITICAL: Cross-scenario normalization
-                st.info("🔄 Normalizing parameters across all scenarios...")
-                scenarios_with_params = normalize_across_scenarios(scenarios_with_params)
-                
-                total_params = sum(len(s['items']) for s in scenarios_with_params)
+                total_params = sum(len(s.get('items', [])) for s in scenarios_with_params)
                 
                 # Show extraction statistics
                 st.success(f"✅ Extracted {total_params} parameter(s) across all scenarios")
                 
+                # Count extraction methods used
+                method_counts = {}
+                for scenario in scenarios_with_params:
+                    for item in scenario.get('items', []):
+                        method = item.get('extraction_method', 'unknown')
+                        method_counts[method] = method_counts.get(method, 0) + 1
+                
                 with st.expander("📊 Extraction Statistics", expanded=False):
-                    col1, col2, col3 = st.columns(3)
+                    col1, col2 = st.columns(2)
                     
                     with col1:
                         st.metric("Total Parameters", total_params)
-                        st.metric("High Confidence (2+ methods)", total_consensus)
-                        st.metric("Single Method", total_single_method)
+                        st.metric("Scenarios Analyzed", len(scenarios_with_params))
                     
                     with col2:
                         st.markdown("**Extractions by Method:**")
-                        for method, count in sorted(method_stats.items(), key=lambda x: x[1], reverse=True):
+                        for method, count in sorted(method_counts.items(), key=lambda x: x[1], reverse=True):
                             if count > 0:
-                                st.markdown(f"- {method.title()}: {count}")
-                    
-                    with col3:
-                        st.markdown("**Quality Metrics:**")
-                        if total_params > 0:
-                            consensus_pct = round(100 * total_consensus / total_params)
-                            st.markdown(f"- Consensus: {consensus_pct}%")
-                            st.markdown(f"- Methods Used: {len([m for m, c in method_stats.items() if c > 0])}/5")
+                                st.markdown(f"- {method.replace('_', ' ').title()}: {count}")
                 
                 # Store results
                 st.session_state.detected_scenarios = scenarios_with_params
@@ -1198,6 +1190,147 @@ Renewable energy reaches 40% by 2040.""",
                 st.session_state.scenario_parameters = scenarios_with_params
                 
                 st.success("🎉 Analysis complete! Review and edit parameters below.")
+                
+                # PHASE 2: Add debug view for enhanced fields
+                with st.expander("🔬 Phase 2 Enhanced Fields (Debug)", expanded=False):
+                    st.caption("View time extraction and value semantics details")
+                    
+                    for scenario in scenarios_with_params:
+                        st.markdown(f"**{scenario['title']}**")
+                        
+                        # Show scenario-level time info
+                        if scenario.get('baseline_year') or scenario.get('horizon'):
+                            st.text(f"⏰ Scenario time: {scenario.get('baseline_year', 'N/A')} → {scenario.get('horizon', 'N/A')}")
+                        
+                        # Show item-level details
+                        for item in scenario.get('items', []):
+                            param = item.get('parameter_canonical', item.get('parameter', 'Unknown'))
+                            st.markdown(f"**{param}**")
+                            
+                            cols = st.columns(3)
+                            with cols[0]:
+                                st.text(f"Value Type: {item.get('value_type', 'N/A')}")
+                                if item.get('is_range'):
+                                    st.text(f"Range: {item.get('value_min', 'N/A')}-{item.get('value_max', 'N/A')}")
+                                if item.get('is_rate'):
+                                    st.text(f"Rate: {item.get('rate_period', 'N/A')}")
+                            
+                            with cols[1]:
+                                time_expr = item.get('time_expression', '')
+                                if time_expr:
+                                    st.text(f"Time: {time_expr}")
+                                if item.get('baseline_year'):
+                                    st.text(f"Baseline: {item['baseline_year']}")
+                                if item.get('target_year'):
+                                    st.text(f"Target: {item['target_year']}")
+                            
+                            with cols[2]:
+                                st.text(f"Confidence: {item.get('confidence', 0):.2f}")
+                                st.text(f"Method: {item.get('extraction_method', 'N/A')}")
+                            
+                            st.markdown("---")
+                
+                # PHASE 3: Add evaluation harness UI
+                with st.expander("🧪 Phase 3 Evaluation Harness (Debug)", expanded=False):
+                    st.caption("Run regression tests and quality metrics on gold test cases")
+                    
+                    st.markdown("### Run Evaluation")
+                    st.info("⚙️ This will test the extraction pipeline against gold standard test cases")
+                    
+                    col_eval1, col_eval2, col_eval3 = st.columns([2, 2, 1])
+                    
+                    with col_eval1:
+                        eval_enable_ml = st.checkbox(
+                            "Enable ML for evaluation",
+                            value=st.session_state.enable_ml_extraction,
+                            key="eval_enable_ml",
+                            help="Run evaluation with ML extraction enabled"
+                        )
+                    
+                    with col_eval2:
+                        eval_threshold = st.slider(
+                            "ML Threshold for evaluation",
+                            min_value=0.3,
+                            max_value=0.9,
+                            value=st.session_state.ml_confidence_threshold,
+                            step=0.05,
+                            key="eval_threshold",
+                            help="ML confidence threshold for evaluation"
+                        )
+                    
+                    with col_eval3:
+                        if st.button("▶️ Run Tests", use_container_width=True):
+                            with st.spinner("Running evaluation..."):
+                                try:
+                                    # Import evaluation module
+                                    import sys
+                                    from pathlib import Path
+                                    
+                                    # Add tests directory to path
+                                    tests_dir = Path(__file__).parent.parent / "tests"
+                                    if str(tests_dir) not in sys.path:
+                                        sys.path.insert(0, str(tests_dir))
+                                    
+                                    from evaluate_extraction import run_evaluation, generate_report
+                                    
+                                    # Run evaluation
+                                    metrics, results = run_evaluation(
+                                        enable_ml=eval_enable_ml,
+                                        ml_threshold=eval_threshold,
+                                        verbose=False
+                                    )
+                                    
+                                    # Display results
+                                    st.markdown("### Evaluation Results")
+                                    
+                                    # Summary metrics
+                                    col_m1, col_m2, col_m3 = st.columns(3)
+                                    with col_m1:
+                                        st.metric("Overall Pass Rate", f"{metrics.overall_pass_rate():.1%}")
+                                    with col_m2:
+                                        st.metric("Tests Passed", f"{metrics.passed_cases}/{metrics.total_cases}")
+                                    with col_m3:
+                                        failed = metrics.total_cases - metrics.passed_cases
+                                        st.metric("Tests Failed", failed, delta=-failed if failed > 0 else 0)
+                                    
+                                    # Show failed cases
+                                    failed_results = [r for r in results if not r['passed']]
+                                    if failed_results:
+                                        st.markdown("### ❌ Failed Cases")
+                                        for result in failed_results[:5]:  # Show first 5
+                                            with st.expander(f"{result['case_id']}: {result['description']}", expanded=False):
+                                                st.markdown("**Errors:**")
+                                                for error in result['errors']:
+                                                    st.text(f"• {error}")
+                                    else:
+                                        st.success("✅ All tests passed!")
+                                    
+                                    # Show warnings
+                                    cases_with_warnings = [r for r in results if r['warnings']]
+                                    if cases_with_warnings:
+                                        st.markdown("### ⚠️ Warnings")
+                                        with st.expander(f"{len(cases_with_warnings)} cases with warnings", expanded=False):
+                                            for result in cases_with_warnings[:5]:
+                                                st.markdown(f"**{result['case_id']}:**")
+                                                for warning in result['warnings']:
+                                                    st.text(f"• {warning}")
+                                    
+                                    # Download report
+                                    report = generate_report(metrics, results)
+                                    st.download_button(
+                                        label="📥 Download Full Report",
+                                        data=report,
+                                        file_name="evaluation_report.txt",
+                                        mime="text/plain"
+                                    )
+                                    
+                                except ImportError as e:
+                                    st.error(f"❌ Could not import evaluation module: {e}")
+                                    st.info("Make sure `tests/evaluate_extraction.py` exists in your project directory")
+                                except Exception as e:
+                                    st.error(f"❌ Evaluation failed: {str(e)}")
+                                    st.exception(e)
+                
                 st.rerun()
     
     # === STEP 2: REVIEW DETECTED SCENARIOS ===
