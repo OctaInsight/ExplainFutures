@@ -102,6 +102,10 @@ def get_available_variables():
     
     df_long = st.session_state.df_long
     
+    # Check if 'variable' column exists
+    if 'variable' not in df_long.columns:
+        return [], [], [], False
+    
     # Get all unique variables from the actual data
     unique_vars = df_long['variable'].unique()
     all_vars_in_data = sorted(unique_vars.tolist() if hasattr(unique_vars, 'tolist') else list(unique_vars))
@@ -257,6 +261,11 @@ def load_project_data_from_database():
         st.session_state.df_long = df_all
         st.session_state.data_loaded = True
         
+        # Validate data structure
+        if 'variable' not in df_all.columns:
+            st.error(f"❌ Data format error: 'variable' column not found. Columns: {df_all.columns.tolist()}")
+            return False
+        
         # Load parameters
         try:
             parameters = db.get_project_parameters(project_id)
@@ -376,13 +385,19 @@ def main():
         if cleaned_vars:
             col1.caption(f"Cleaned: {len(cleaned_vars)}")
         
-        # Use cleaned data if available, otherwise original
-        df_to_show = st.session_state.df_clean if has_cleaned_data else st.session_state.df_long
+        # Use df_long which contains both raw and cleaned data
+        df_to_show = st.session_state.df_long
         col2.metric("Data Points", len(df_to_show))
         
-        time_range = f"{df_to_show['timestamp'].min().date()} to {df_to_show['timestamp'].max().date()}"
-        col3.caption("Time Range")
-        col3.write(time_range)
+        # Check if timestamp column exists
+        time_col = st.session_state.get('time_column', 'timestamp')
+        if time_col in df_to_show.columns:
+            time_range = f"{df_to_show[time_col].min().date()} to {df_to_show[time_col].max().date()}"
+            col3.caption("Time Range")
+            col3.write(time_range)
+        else:
+            col3.caption("Time Range")
+            col3.write("N/A")
         
         if st.session_state.get('uploaded_file_name'):
             col4.caption("Source File")
