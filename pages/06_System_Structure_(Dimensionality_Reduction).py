@@ -317,10 +317,6 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         if not project_id or not user_id:
             return False, "Missing project or user ID"
         
-        # DEBUG: Show what's in method_data
-        st.info(f"🔍 Checking {method_type} data...")
-        st.write(f"**Keys in method_data:** {list(method_data.keys())}")
-        
         # Try to generate transformed data if missing
         if df_wide is not None and feature_cols is not None:
             method_data = generate_transformed_data_if_missing(method_type, method_data, df_wide, feature_cols)
@@ -331,8 +327,6 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         
         # If output_variables not defined, create from transformed data or n_components
         if not output_variables:
-            st.warning(f"⚠️ No output_variables in {method_type} results. Auto-generating...")
-            
             if method_type == 'pca':
                 n_comp = method_data.get('n_components', 3)
                 output_variables = [f'PC{i+1}' for i in range(n_comp)]
@@ -347,7 +341,6 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                 output_variables = [f'Cluster{i+1}' for i in range(n_clusters)]
             
             method_data['output_variables'] = output_variables
-            st.info(f"✅ Created output_variables: {output_variables}")
         
         # If input_variables not defined, use 'features' key or feature_cols
         if not input_variables:
@@ -359,7 +352,6 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                 input_variables = []
             
             method_data['input_variables'] = input_variables
-            st.info(f"✅ Created input_variables: {len(input_variables)} features")
         
         if not output_variables:
             st.error(f"❌ Could not determine output variables for {method_type}")
@@ -390,7 +382,6 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                 if rename_dict:
                     df_transformed = df_transformed.rename(columns=rename_dict)
                     method_data['transformed_data'] = df_transformed
-                    st.info(f"✅ Applied user renames: {list(rename_dict.values())}")
         
         input_variables = method_data.get('input_variables', [])
         
@@ -404,10 +395,7 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         # If data already exists for these variables with this data_source, skip saving
         if any(var in existing_ts_vars for var in output_variables):
             overlap = [var for var in output_variables if var in existing_ts_vars]
-            st.warning(f"⚠️ Timeseries data already exists for {overlap}. Skipping duplicate save.")
-            st.info("💡 If you want to save new data, rename the components differently or delete old data first.")
-            
-            # Still save metadata and parameters, but skip timeseries
+            st.warning(f"⚠️ Data already exists for {len(overlap)} variable(s). Skipping duplicate timeseries save.")
             skip_timeseries = True
         else:
             skip_timeseries = False
@@ -430,7 +418,6 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                     while new_var in existing_param_names or new_var in existing_ts_vars:
                         counter += 1
                         new_var = f"{var}_v{counter}"
-                    st.warning(f"⚠️ Parameter '{var}' already exists. Saving as '{new_var}'")
                     final_output_variables.append(new_var)
                     name_mapping[original_var] = new_var
                 else:
@@ -451,7 +438,6 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                 if rename_dict:
                     df_transformed = df_transformed.rename(columns=rename_dict)
                     method_data['transformed_data'] = df_transformed
-                    st.info(f"✅ Renamed columns in transformed_data: {list(rename_dict.values())}")
         else:
             # Keep original names if skipping
             for var in output_variables:
@@ -495,19 +481,14 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         }
         
         result = db.client.table('dimensionality_reduction_results').insert(reduction_data).execute()
-        st.info(f"✅ Saved metadata to dimensionality_reduction_results table")
         
         # IMPROVED: Save timeseries data for new components
         total_inserted = 0
         if skip_timeseries:
-            st.info("ℹ️ Skipping timeseries save - data already exists for these variables")
+            pass  # Silently skip
         elif 'transformed_data' in method_data and method_data['transformed_data'] is not None:
             df_transformed = method_data['transformed_data']
             time_col = st.session_state.get('time_column', 'timestamp')
-            
-            st.write(f"**Transformed data shape:** {df_transformed.shape}")
-            st.write(f"**Transformed data columns:** {list(df_transformed.columns)}")
-            st.write(f"**Output variables to save:** {output_variables}")
             
             if time_col in df_transformed.columns and len(output_variables) > 0:
                 # Prepare data in long format for batch insert
@@ -534,8 +515,6 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                                     'value': float(value_val),
                                     'data_source': method_type
                                 })
-                    else:
-                        st.warning(f"⚠️ Column '{var}' not found in transformed_data. Available: {list(df_transformed.columns)}")
                 
                 # Batch insert timeseries data
                 if records:
@@ -546,15 +525,13 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                             db.client.table('timeseries_data').insert(batch).execute()
                             total_inserted += len(batch)
                         except Exception as e:
-                            st.error(f"⚠️ Error inserting batch {i//batch_size + 1}: {str(e)}")
-                    
-                    st.info(f"✅ Saved {total_inserted} timeseries records to timeseries_data table")
+                            st.error(f"⚠️ Error inserting batch: {str(e)}")
                 else:
-                    st.warning("⚠️ No timeseries data to save (empty records list)")
+                    pass  # Empty records - silent
             else:
-                st.warning(f"⚠️ Cannot save timeseries: time column '{time_col}' not found or no output variables")
+                pass  # Missing time column or variables - silent
         else:
-            st.warning("⚠️ No transformed_data found in method results")
+            pass  # No transformed data - silent
         
         # IMPROVED: Save parameters metadata
         params_saved = 0
@@ -598,28 +575,28 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
             except Exception as e:
                 st.error(f"⚠️ Error saving parameter '{var}': {str(e)}")
         
-        if params_saved > 0:
-            st.info(f"✅ Saved {params_saved} new parameters to parameters table")
-        if params_skipped > 0:
-            st.info(f"ℹ️ Updated {params_skipped} existing parameters (no duplicates created)")
-        
         # Update project progress tracking (only if we actually saved something new)
         if total_inserted > 0 or params_saved > 0:
             db.upsert_progress_step(project_id, "dim_reduction_done", 10)
             db.recompute_and_update_project_progress(project_id)
         
         # Create detailed success message
-        msg_parts = []
+        success_parts = []
         if total_inserted > 0:
-            msg_parts.append(f"{total_inserted} data points")
-        if params_saved > 0:
-            msg_parts.append(f"{params_saved} new parameters")
-        if params_skipped > 0:
-            msg_parts.append(f"{params_skipped} updated parameters")
-        if skip_timeseries:
-            msg_parts.append("(timeseries skipped - already exists)")
+            success_parts.append(f"{len(output_variables)} components")
+            success_parts.append(f"{total_inserted} data points")
+        elif params_saved > 0:
+            success_parts.append(f"{params_saved} new components (metadata only)")
+        elif params_skipped > 0:
+            success_parts.append(f"{params_skipped} components (updated metadata)")
         
-        final_msg = f"✅ Saved: {', '.join(msg_parts)}" if msg_parts else "✅ Metadata saved"
+        if skip_timeseries:
+            success_parts.append("timeseries already exists")
+        
+        if success_parts:
+            final_msg = f"✅ Saved: {', '.join(success_parts)}"
+        else:
+            final_msg = "✅ Metadata saved"
         
         return True, final_msg
     
@@ -831,16 +808,22 @@ def handle_summary(df_wide, feature_cols, all_feature_cols):
     # Show summary
     for method, results in st.session_state.reduction_results.items():
         with st.expander(f"📊 {method.upper()} Results", expanded=False):
-            st.write(f"**Keys in results:** {list(results.keys())}")
+            # Show summary info
+            if 'n_components' in results:
+                st.write(f"**Components:** {results['n_components']}")
+            if 'n_factors' in results:
+                st.write(f"**Factors:** {results['n_factors']}")
+            if 'explained_variance' in results and results['explained_variance'] is not None:
+                total_var = sum(results['explained_variance']) if isinstance(results['explained_variance'], list) else results.get('total_variance_explained', 0)
+                st.write(f"**Total Variance Explained:** {float(total_var)*100:.1f}%")
             
-            # Show if transformed_data exists
+            # Show data availability
             if 'transformed_data' in results and results['transformed_data'] is not None:
-                st.success("✅ Has transformed data")
-                st.write(f"Shape: {results['transformed_data'].shape}")
+                st.success("✅ Data ready to save")
             else:
-                st.warning("⚠️ No transformed data - will try to regenerate on save")
+                st.info("ℹ️ Will generate data on save")
             
-            st.json({k: v for k, v in results.items() if k != 'transformed_data'})
+            st.json({k: v for k, v in results.items() if k not in ['transformed_data', 'model']})
 
 
 def main():
@@ -891,14 +874,6 @@ def main():
     all_feature_cols = [col for col in df_wide.columns if col != time_col]
     
     st.success(f"✅ Data loaded: {len(original_vars)} variables ({len(raw_vars)} original + {len(cleaned_vars)} cleaned)")
-    
-    # DEBUG: Show session state status
-    with st.expander("🔍 Debug: Session State Status", expanded=False):
-        st.write(f"**reduction_results keys:** {list(st.session_state.reduction_results.keys())}")
-        st.write(f"**component_names:** {st.session_state.component_names}")
-        st.write(f"**pca_model exists:** {st.session_state.pca_model is not None}")
-        st.write(f"**fa_model exists:** {st.session_state.fa_model is not None}")
-        st.write(f"**ica_model exists:** {st.session_state.ica_model is not None}")
     
     # COLLAPSIBLE SECTION 1: What is Dimensionality Reduction
     with st.expander("ℹ️ What is Dimensionality Reduction?", expanded=False):
