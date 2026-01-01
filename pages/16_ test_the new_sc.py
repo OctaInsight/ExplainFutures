@@ -329,7 +329,7 @@ def initialize_scenario_state():
 
 
 def render_scenario_table(scenario: Dict, scenario_idx: int):
-    """Render editable table for a single scenario"""
+    """Render editable table for a single scenario with parameter names"""
     st.markdown(f"### {scenario['title']}")
     
     col_info1, col_info2, col_info3 = st.columns(3)
@@ -347,17 +347,24 @@ def render_scenario_table(scenario: Dict, scenario_idx: int):
     
     df = pd.DataFrame(scenario['items'])
     
+    # Include parameter name/canonical as first column, then other fields
     display_columns = [
-        'parameter_canonical', 'value', 'unit', 'direction',
-        'value_type', 'baseline_year', 'target_year',
-        'confidence', 'category'
+        'parameter_canonical',  # Parameter name - FIRST COLUMN
+        'value', 
+        'unit', 
+        'direction',
+        'value_type', 
+        'baseline_year', 
+        'target_year',
+        'confidence', 
+        'category'
     ]
     
     available_cols = [col for col in display_columns if col in df.columns]
     df_display = df[available_cols].copy()
     
     rename_map = {
-        'parameter_canonical': 'Parameter',
+        'parameter_canonical': 'Parameter Name',
         'value': 'Value',
         'unit': 'Unit',
         'direction': 'Direction',
@@ -375,6 +382,10 @@ def render_scenario_table(scenario: Dict, scenario_idx: int):
         num_rows="dynamic",
         key=f"scenario_table_{scenario_idx}",
         column_config={
+            "Parameter Name": st.column_config.TextColumn(
+                help="Name of the parameter",
+                width="medium"
+            ),
             "Confidence": st.column_config.NumberColumn(
                 format="%.2f",
                 min_value=0.0,
@@ -393,6 +404,76 @@ def render_scenario_table(scenario: Dict, scenario_idx: int):
         for col in edited_df.columns:
             if col in scenario['items'][idx]:
                 scenario['items'][idx][col] = row[col]
+
+
+def render_comparison_table(scenarios: List[Dict]):
+    """
+    Render a comparison table showing all scenarios side-by-side
+    Parameters in rows, scenarios in columns
+    """
+    st.markdown("## 📊 Scenario Comparison Table")
+    st.caption("Compare parameter values across all scenarios")
+    
+    if not scenarios or len(scenarios) == 0:
+        st.info("No scenarios to compare")
+        return
+    
+    # Collect all unique parameters across all scenarios
+    all_params = {}
+    
+    for scenario in scenarios:
+        for item in scenario.get('items', []):
+            param_name = item.get('parameter_canonical', item.get('parameter', 'Unknown'))
+            if param_name not in all_params:
+                all_params[param_name] = {
+                    'unit': item.get('unit', ''),
+                    'category': item.get('category', 'other')
+                }
+    
+    # Build comparison data
+    comparison_data = []
+    
+    for param_name in sorted(all_params.keys()):
+        row = {
+            'Parameter': param_name,
+            'Unit': all_params[param_name]['unit'],
+            'Category': all_params[param_name]['category']
+        }
+        
+        # Add value from each scenario
+        for scenario in scenarios:
+            scenario_title = scenario.get('title', 'Untitled')
+            
+            # Find this parameter in this scenario
+            param_value = None
+            for item in scenario.get('items', []):
+                item_param = item.get('parameter_canonical', item.get('parameter', 'Unknown'))
+                if item_param == param_name:
+                    param_value = item.get('value')
+                    break
+            
+            row[scenario_title] = param_value if param_value is not None else '-'
+        
+        comparison_data.append(row)
+    
+    # Create DataFrame
+    df_comparison = pd.DataFrame(comparison_data)
+    
+    # Display as editable table
+    st.dataframe(
+        df_comparison,
+        use_container_width=True,
+        height=min(600, len(comparison_data) * 35 + 38)  # Auto-height based on rows
+    )
+    
+    # Export button
+    csv = df_comparison.to_csv(index=False)
+    st.download_button(
+        label="📥 Download Comparison Table (CSV)",
+        data=csv,
+        file_name="scenario_comparison.csv",
+        mime="text/csv"
+    )
 
 
 # Main page logic
@@ -545,7 +626,29 @@ if st.session_state.scenarios_processed and st.session_state.detected_scenarios:
     
     st.markdown("---")
     
+    # Add comparison table
+    if len(st.session_state.detected_scenarios) > 1:
+        render_comparison_table(st.session_state.detected_scenarios)
+        st.markdown("---")
+    
     st.markdown("### 💾 Save to Database")
+    
+    # Show existing scenarios info
+    if has_existing and existing_count > 0:
+        st.info(f"📋 Database currently contains {existing_count} scenario(s) for this project")
+        
+        with st.expander("📂 View Existing Scenarios in Database", expanded=False):
+            for sc in existing_list:
+                col1, col2, col3 = st.columns([3, 2, 2])
+                with col1:
+                    st.text(f"• {sc.get('title', 'Untitled')}")
+                with col2:
+                    st.text(f"Horizon: {sc.get('horizon', 'N/A')}")
+                with col3:
+                    created = sc.get('created_at', '')
+                    if created:
+                        created_date = created.split('T')[0] if 'T' in created else created
+                        st.text(f"Created: {created_date}")
     
     col_save1, col_save2 = st.columns([1, 1])
     
@@ -554,8 +657,12 @@ if st.session_state.scenarios_processed and st.session_state.detected_scenarios:
             "Save mode:",
             options=['append', 'replace'],
             format_func=lambda x: '➕ Append to existing scenarios' if x == 'append' else '🔄 Replace all existing scenarios',
-            horizontal=False
+            horizontal=False,
+            help="Append adds new scenarios to existing ones. Replace deletes all existing scenarios first."
         )
+        
+        if save_mode == 'replace' and has_existing:
+            st.warning(f"⚠️ This will delete {existing_count} existing scenario(s) from the database")
     
     with col_save2:
         st.markdown("")
@@ -582,137 +689,3 @@ if st.session_state.scenarios_processed and st.session_state.detected_scenarios:
 
 else:
     st.info("👆 Enter scenario text above and click 'Extract Parameters' to begin")
-
-# Debug sections
-with st.expander("🔬 Phase 2 Enhanced Fields (Debug)", expanded=False):
-    st.caption("View time extraction and value semantics details")
-    
-    if st.session_state.detected_scenarios:
-        for scenario in st.session_state.detected_scenarios:
-            st.markdown(f"**{scenario['title']}**")
-            
-            if scenario.get('baseline_year') or scenario.get('horizon'):
-                st.text(f"⏰ Scenario time: {scenario.get('baseline_year', 'N/A')} → {scenario.get('horizon', 'N/A')}")
-            
-            for item in scenario.get('items', []):
-                param = item.get('parameter_canonical', item.get('parameter', 'Unknown'))
-                st.markdown(f"**{param}**")
-                
-                cols = st.columns(3)
-                with cols[0]:
-                    st.text(f"Value Type: {item.get('value_type', 'N/A')}")
-                    if item.get('is_range'):
-                        st.text(f"Range: {item.get('value_min', 'N/A')}-{item.get('value_max', 'N/A')}")
-                    if item.get('is_rate'):
-                        st.text(f"Rate: {item.get('rate_period', 'N/A')}")
-                
-                with cols[1]:
-                    time_expr = item.get('time_expression', '')
-                    if time_expr:
-                        st.text(f"Time: {time_expr}")
-                    if item.get('baseline_year'):
-                        st.text(f"Baseline: {item['baseline_year']}")
-                    if item.get('target_year'):
-                        st.text(f"Target: {item['target_year']}")
-                
-                with cols[2]:
-                    st.text(f"Confidence: {item.get('confidence', 0):.2f}")
-                    st.text(f"Method: {item.get('extraction_method', 'N/A')}")
-                
-                st.markdown("---")
-    else:
-        st.info("No scenarios to display")
-
-with st.expander("🧪 Phase 3 Evaluation Harness (Debug)", expanded=False):
-    st.caption("Run regression tests and quality metrics on gold test cases")
-    
-    st.markdown("### Run Evaluation")
-    st.info("⚙️ This will test the extraction pipeline against gold standard test cases")
-    
-    col_eval1, col_eval2, col_eval3 = st.columns([2, 2, 1])
-    
-    with col_eval1:
-        eval_enable_ml = st.checkbox(
-            "Enable ML for evaluation",
-            value=st.session_state.enable_ml_extraction,
-            key="eval_enable_ml",
-            help="Run evaluation with ML extraction enabled"
-        )
-    
-    with col_eval2:
-        eval_threshold = st.slider(
-            "ML Threshold for evaluation",
-            min_value=0.3,
-            max_value=0.9,
-            value=st.session_state.ml_confidence_threshold,
-            step=0.05,
-            key="eval_threshold",
-            help="ML confidence threshold for evaluation"
-        )
-    
-    with col_eval3:
-        if st.button("▶️ Run Tests", use_container_width=True):
-            with st.spinner("Running evaluation..."):
-                try:
-                    tests_dir = Path(__file__).parent.parent / "tests"
-                    if str(tests_dir) not in sys.path:
-                        sys.path.insert(0, str(tests_dir))
-                    
-                    from evaluate_extraction import run_evaluation, generate_report
-                    
-                    metrics, results = run_evaluation(
-                        enable_ml=eval_enable_ml,
-                        ml_threshold=eval_threshold,
-                        verbose=False
-                    )
-                    
-                    st.markdown("### Evaluation Results")
-                    
-                    col_m1, col_m2, col_m3 = st.columns(3)
-                    with col_m1:
-                        st.metric("Overall Pass Rate", f"{metrics.overall_pass_rate():.1%}")
-                    with col_m2:
-                        st.metric("Tests Passed", f"{metrics.passed_cases}/{metrics.total_cases}")
-                    with col_m3:
-                        failed = metrics.total_cases - metrics.passed_cases
-                        st.metric("Tests Failed", failed, delta=-failed if failed > 0 else 0)
-                    
-                    failed_results = [r for r in results if not r['passed']]
-                    if failed_results:
-                        st.markdown("### ❌ Failed Cases")
-                        for result in failed_results[:5]:
-                            with st.expander(f"{result['case_id']}: {result['description']}", expanded=False):
-                                st.markdown("**Errors:**")
-                                for error in result['errors']:
-                                    st.text(f"• {error}")
-                    else:
-                        st.success("✅ All tests passed!")
-                    
-                    cases_with_warnings = [r for r in results if r['warnings']]
-                    if cases_with_warnings:
-                        st.markdown("### ⚠️ Warnings")
-                        with st.expander(f"{len(cases_with_warnings)} cases with warnings", expanded=False):
-                            for result in cases_with_warnings[:5]:
-                                st.markdown(f"**{result['case_id']}:**")
-                                for warning in result['warnings']:
-                                    st.text(f"• {warning}")
-                    
-                    report = generate_report(metrics, results)
-                    st.download_button(
-                        label="📥 Download Full Report",
-                        data=report,
-                        file_name="evaluation_report.txt",
-                        mime="text/plain"
-                    )
-                    
-                except ImportError as e:
-                    st.error(f"❌ Could not import evaluation module: {e}")
-                    st.info("Make sure `tests/evaluate_extraction.py` exists in your project directory")
-                except Exception as e:
-                    st.error(f"❌ Evaluation failed: {str(e)}")
-                    st.exception(e)
-
-st.markdown("---")
-st.caption("💡 **Tip**: All tables and fields are editable. Click any cell to modify values.")
-st.caption("🔄 Project statistics (baseline year, target year, total scenarios) are automatically updated on save.")
-st.caption("📊 Progress tracking: Each save adds 7% to 'scenarios_analyzed' step.")
