@@ -336,6 +336,20 @@ python-dateutil>=2.8.2
     
     # Continue with normal functionality
     render_relationships_page()
+    
+    # Navigation buttons at the bottom
+    st.markdown("---")
+    st.markdown("### 🧭 Navigation")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("⬅️ Go Back to Data Visualization", type="secondary", use_container_width=True):
+            st.switch_page("pages/04_Exploration_and_Visualization.py")
+    
+    with col2:
+        if st.button("➡️ Go to System Structure (Dimensionality Reduction)", type="primary", use_container_width=True):
+            st.switch_page("pages/06_System_Structure_(Dimensionality_Reduction).py")
 
 
 def initialize_plot_configs():
