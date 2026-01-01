@@ -174,56 +174,33 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         if not project_id or not user_id:
             return False, "Missing project or user ID"
         
-        # Check if results already exist
-        existing = db.client.table('dimensionality_reduction_results').select('*').eq(
-            'project_id', project_id
-        ).eq('method_type', method_type).order('created_at', desc=True).limit(1).execute()
-        
         # Prepare component names
         output_variables = method_data.get('output_variables', [])
         if renamed_components:
             output_variables = [renamed_components.get(v, v) for v in output_variables]
         
-        # Check if input variables match (parameter names involved)
         input_variables = method_data.get('input_variables', [])
         
-        if existing.data and len(existing.data) > 0:
-            old_record = existing.data[0]
-            old_inputs = set(old_record.get('input_variables', []))
-            new_inputs = set(input_variables)
-            
-            if old_inputs == new_inputs:
-                # Same variables - ask user
-                st.warning(f"⚠️ A {method_type} analysis with the same variables already exists (created {old_record['created_at']})")
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("🔄 Overwrite", key=f"overwrite_{method_type}"):
-                        # Delete old record
-                        db.client.table('dimensionality_reduction_results').delete().eq(
-                            'result_id', old_record['result_id']
-                        ).execute()
-                        
-                        # Delete old timeseries
-                        for var in old_record.get('output_variables', []):
-                            db.client.table('timeseries_data').delete().eq(
-                                'project_id', project_id
-                            ).eq('variable', var).eq('data_source', method_type).execute()
-                            
-                            db.client.table('parameters').delete().eq(
-                                'project_id', project_id
-                            ).eq('parameter_name', var).execute()
-                        
-                        st.info("✅ Old data deleted. Proceeding with save...")
-                    else:
-                        return False, "User needs to confirm overwrite"
-                
-                with col2:
-                    new_suffix = st.text_input("Or save with suffix:", value="_v2", key=f"suffix_{method_type}")
-                    if st.button("💾 Save as New", key=f"save_new_{method_type}"):
-                        # Add suffix to output variables
-                        output_variables = [f"{v}{new_suffix}" for v in output_variables]
-                        method_data['output_variables'] = output_variables
+        # Check for existing parameters and avoid naming conflicts
+        existing_params = db.get_project_parameters(project_id)
+        existing_names = {p['parameter_name'] for p in existing_params}
+        
+        # Adjust output variable names if they already exist
+        final_output_variables = []
+        for var in output_variables:
+            if var in existing_names:
+                # Add suffix to make it unique
+                counter = 1
+                new_var = f"{var}_v{counter}"
+                while new_var in existing_names:
+                    counter += 1
+                    new_var = f"{var}_v{counter}"
+                st.warning(f"⚠️ Parameter '{var}' already exists. Saving as '{new_var}'")
+                final_output_variables.append(new_var)
+            else:
+                final_output_variables.append(var)
+        
+        output_variables = final_output_variables
         
         # Convert any numpy arrays to lists before saving
         def safe_convert(value):
@@ -263,53 +240,112 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         }
         
         result = db.client.table('dimensionality_reduction_results').insert(reduction_data).execute()
+        st.info(f"✅ Saved metadata to dimensionality_reduction_results table")
         
-        # Save timeseries data
+        # IMPROVED: Save timeseries data for new components
         if 'transformed_data' in method_data and method_data['transformed_data'] is not None:
             df_transformed = method_data['transformed_data']
             time_col = st.session_state.get('time_column', 'timestamp')
             
-            if time_col in df_transformed.columns:
+            if time_col in df_transformed.columns and len(output_variables) > 0:
+                # Prepare data in long format for batch insert
+                records = []
+                
                 for var in output_variables:
                     if var in df_transformed.columns:
                         for idx, row in df_transformed.iterrows():
-                            db.client.table('timeseries_data').insert({
-                                'project_id': project_id,
-                                'timestamp': row[time_col].isoformat() if hasattr(row[time_col], 'isoformat') else str(row[time_col]),
-                                'variable': var,
-                                'value': float(row[var]),
-                                'data_source': method_type,
-                                'created_at': datetime.now().isoformat()
-                            }).execute()
+                            timestamp_val = row[time_col]
+                            if hasattr(timestamp_val, 'isoformat'):
+                                ts_str = timestamp_val.isoformat()
+                            elif isinstance(timestamp_val, str):
+                                ts_str = timestamp_val
+                            else:
+                                ts_str = pd.Timestamp(timestamp_val).isoformat()
+                            
+                            value_val = row[var]
+                            if pd.notna(value_val):
+                                records.append({
+                                    'project_id': project_id,
+                                    'timestamp': ts_str,
+                                    'variable': var,
+                                    'value': float(value_val),
+                                    'data_source': method_type
+                                })
+                
+                # Batch insert timeseries data
+                if records:
+                    batch_size = 1000
+                    total_inserted = 0
+                    for i in range(0, len(records), batch_size):
+                        batch = records[i:i + batch_size]
+                        try:
+                            db.client.table('timeseries_data').insert(batch).execute()
+                            total_inserted += len(batch)
+                        except Exception as e:
+                            st.error(f"⚠️ Error inserting batch {i//batch_size + 1}: {str(e)}")
+                    
+                    st.info(f"✅ Saved {total_inserted} timeseries records to timeseries_data table")
+                else:
+                    st.warning("⚠️ No timeseries data to save (empty transformed data)")
+            else:
+                st.warning(f"⚠️ Cannot save timeseries: time column '{time_col}' not found or no output variables")
+        else:
+            st.warning("⚠️ No transformed_data found in method results")
         
-        # Save parameters metadata
+        # IMPROVED: Save parameters metadata
+        params_saved = 0
         for i, var in enumerate(output_variables):
-            description = f"{method_data.get('method_name', method_type)} component {i+1}"
-            if method_type == 'pca' and 'explained_variance' in method_data and method_data['explained_variance'] is not None:
-                ev = method_data['explained_variance']
-                if isinstance(ev, (list, np.ndarray)) and len(ev) > i:
-                    description += f" - Explains {float(ev[i])*100:.1f}% variance"
-            
-            db.client.table('parameters').insert({
-                'project_id': project_id,
-                'parameter_name': var,
-                'data_type': f"{method_type}_component",
-                'description': description,
-                'created_at': datetime.now().isoformat(),
-                'updated_at': datetime.now().isoformat()
-            }).execute()
+            try:
+                description = f"{method_data.get('method_name', method_type)} component {i+1}"
+                
+                # Add variance info for PCA
+                if method_type == 'pca' and 'explained_variance' in method_data and method_data['explained_variance'] is not None:
+                    ev = method_data['explained_variance']
+                    if isinstance(ev, (list, np.ndarray)) and len(ev) > i:
+                        variance_pct = float(ev[i]) * 100
+                        description += f" - Explains {variance_pct:.1f}% variance"
+                
+                # Check if parameter already exists (shouldn't because we renamed above, but double-check)
+                existing_check = db.client.table('parameters').select('parameter_id').eq(
+                    'project_id', project_id
+                ).eq('parameter_name', var).execute()
+                
+                if existing_check.data and len(existing_check.data) > 0:
+                    # Update existing parameter
+                    db.client.table('parameters').update({
+                        'data_type': f"{method_type}_component",
+                        'description': description,
+                        'updated_at': datetime.now().isoformat()
+                    }).eq('parameter_id', existing_check.data[0]['parameter_id']).execute()
+                else:
+                    # Insert new parameter
+                    db.client.table('parameters').insert({
+                        'project_id': project_id,
+                        'parameter_name': var,
+                        'data_type': f"{method_type}_component",
+                        'description': description,
+                        'unit': None,
+                        'created_at': datetime.now().isoformat(),
+                        'updated_at': datetime.now().isoformat()
+                    }).execute()
+                
+                params_saved += 1
+            except Exception as e:
+                st.error(f"⚠️ Error saving parameter '{var}': {str(e)}")
         
-        # ADDED: Update project progress tracking
-        # Add "dim_reduction_done" step with 10% contribution
+        st.info(f"✅ Saved {params_saved} parameters to parameters table")
+        
+        # Update project progress tracking
         db.upsert_progress_step(project_id, "dim_reduction_done", 10)
-        # Recompute total project progress
         db.recompute_and_update_project_progress(project_id)
         
-        return True, f"✅ Saved {len(output_variables)} components to database"
+        return True, f"✅ Saved {len(output_variables)} components with {total_inserted if 'total_inserted' in locals() else 0} data points"
     
     except Exception as e:
         import traceback
-        return False, f"Error: {str(e)}\n{traceback.format_exc()}"
+        error_msg = f"Error: {str(e)}\n{traceback.format_exc()}"
+        st.error(error_msg)
+        return False, error_msg
 
 
 def handle_correlation_filtering(df_wide, feature_cols):
@@ -665,7 +701,7 @@ def main():
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # CHANGED: Removed checkbox, user must select from dropdown
+        # User must select from dropdown
         feature_cols = st.multiselect(
             "Select variables for analysis:",
             options=all_feature_cols,
@@ -687,7 +723,6 @@ def main():
     st.markdown("---")
     st.subheader("📊 Step 2: Run Dimensionality Reduction Analysis")
     
-    # CHANGED: Renamed last tab from "Summary & Save" to "Summary"
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🔗 Correlation Filtering",
         "🧮 PCA Analysis",
@@ -698,7 +733,6 @@ def main():
     ])
     
     with tab1:
-        # REMOVED duplicate title - tab name is enough
         handle_correlation_filtering(df_wide, feature_cols)
     
     with tab2:
@@ -716,7 +750,7 @@ def main():
     with tab6:
         handle_summary(df_wide, feature_cols, all_feature_cols)
     
-    # MOVED: Save button outside tabs
+    # Save button outside tabs
     st.markdown("---")
     st.subheader("💾 Save Results to Database")
     
@@ -725,6 +759,8 @@ def main():
     - **Timeseries data** for new components (PC1, Factor1, etc.) to `timeseries_data` table
     - **Parameter metadata** for new components to `parameters` table
     - **Reduction details** (loadings, equations, variance) to `dimensionality_reduction_results` table
+    
+    **Note:** If a component name already exists, it will be saved with a version suffix (e.g., PC1_v2)
     """)
     
     if st.button("💾 Save All Results to Database", type="primary", use_container_width=True):
