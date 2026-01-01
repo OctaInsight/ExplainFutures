@@ -1,6 +1,12 @@
 """
 ML-based Extraction Module using GLiNER
 Zero-shot Named Entity Recognition for scenario analysis
+
+PHASE 1 IMPROVEMENTS:
+- Configurable confidence thresholds to reduce false positives
+- Safer default direction inference (target/unknown instead of increase)
+- Strict proximity rules for value/direction attachment
+- Model caching support
 """
 
 import re
@@ -12,11 +18,11 @@ try:
     from gliner import GLiNER
     GLINER_AVAILABLE = True
     
-    # Load model (lazy loading - only when first used)
+    # Global model cache (lazy loading)
     _gliner_model = None
     
     def get_gliner_model():
-        """Lazy load GLiNER model"""
+        """Lazy load GLiNER model - cached globally"""
         global _gliner_model
         if _gliner_model is None:
             try:
@@ -26,14 +32,25 @@ try:
                 return None
         return _gliner_model
     
+    def load_gliner_model():
+        """Load GLiNER model (for streamlit caching)"""
+        return get_gliner_model()
+    
 except ImportError:
     GLINER_AVAILABLE = False
     
     def get_gliner_model():
         return None
+    
+    def load_gliner_model():
+        return None
 
 
-def extract_with_gliner(text: str) -> List[Dict]:
+def extract_with_gliner(
+    text: str, 
+    confidence_threshold: float = 0.5,
+    enable_ml: bool = True
+) -> List[Dict]:
     """
     Extract parameters using GLiNER zero-shot NER
     
@@ -41,6 +58,12 @@ def extract_with_gliner(text: str) -> List[Dict]:
     -----------
     text : str
         Text to extract from
+    confidence_threshold : float
+        Minimum confidence for extraction (0.0-1.0)
+        Higher = fewer but more accurate results
+        Default: 0.5 (was 0.4 in original)
+    enable_ml : bool
+        Whether ML extraction is enabled
         
     Returns:
     --------
@@ -48,7 +71,7 @@ def extract_with_gliner(text: str) -> List[Dict]:
         Extracted parameter items
     """
     
-    if not GLINER_AVAILABLE:
+    if not enable_ml or not GLINER_AVAILABLE:
         return []
     
     model = get_gliner_model()
@@ -73,7 +96,7 @@ def extract_with_gliner(text: str) -> List[Dict]:
         entities = model.predict_entities(
             text, 
             labels=labels, 
-            threshold=0.4  # Lower threshold to catch more
+            threshold=confidence_threshold  # PHASE 1: Configurable threshold
         )
     except Exception as e:
         print(f"GLiNER extraction error: {e}")
@@ -101,9 +124,13 @@ def extract_with_gliner(text: str) -> List[Dict]:
         direction = None
         value_type = 'direction_only'
         
-        # Look for percentage value near this indicator (within 100 chars)
+        # PHASE 1: STRICT PROXIMITY - only attach if within same atomic statement (50 chars)
+        proximity_limit = 50  # Reduced from 100
+        
+        # Look for percentage value near this indicator
         for pct in percentages:
-            if abs(pct['start'] - param_end) < 100:  # Within 100 chars
+            distance = abs(pct['start'] - param_end)
+            if distance < proximity_limit:
                 # Extract numeric value from percentage text
                 pct_text = pct['text']
                 match = re.search(r'(\d+\.?\d*)', pct_text)
@@ -116,41 +143,46 @@ def extract_with_gliner(text: str) -> List[Dict]:
         # If no percentage, look for numeric value + unit
         if value is None:
             for num in numbers:
-                if abs(num['start'] - param_end) < 100:
+                distance = abs(num['start'] - param_end)
+                if distance < proximity_limit:
                     num_text = num['text']
                     match = re.search(r'(\d+\.?\d*)', num_text)
                     if match:
                         value = float(match.group(1))
                         value_type = 'absolute'
                         
-                        # Find associated unit
+                        # Find associated unit (must be very close)
                         for u in units:
-                            if abs(u['start'] - num['end']) < 20:  # Unit right after number
+                            if abs(u['start'] - num['end']) < 15:  # Unit must be within 15 chars
                                 unit = u['text'].lower()
                                 break
                         break
         
-        # Find direction
+        # Find direction (strict proximity)
         for d in directions:
-            if abs(d['start'] - param_start) < 50 or abs(d['start'] - param_end) < 50:
+            distance_start = abs(d['start'] - param_start)
+            distance_end = abs(d['start'] - param_end)
+            if distance_start < 30 or distance_end < 30:  # Must be within 30 chars
                 direction = classify_gliner_direction(d['text'])
                 break
         
-        # If no explicit direction found, infer from context
+        # PHASE 1: If no explicit direction found, use safer default
         if direction is None:
-            direction = infer_direction(text, param_start, param_end)
+            direction = infer_direction_safe(text, param_start, param_end)
         
-        # Create item
-        items.append({
-            'parameter': param_name,
-            'direction': direction or 'target',
-            'value': value,
-            'unit': unit,
-            'value_type': value_type,
-            'confidence': indicator['score'],
-            'source_sentence': text,
-            'extraction_method': 'gliner'
-        })
+        # Only add item if we have reasonable confidence
+        # PHASE 1: Require either value OR clear direction
+        if value is not None or direction in ['increase', 'decrease', 'stable', 'double', 'halve']:
+            items.append({
+                'parameter': param_name,
+                'direction': direction or 'target',  # Safe default
+                'value': value,
+                'unit': unit,
+                'value_type': value_type,
+                'confidence': indicator['score'],
+                'source_sentence': text,
+                'extraction_method': 'gliner'
+            })
     
     return items
 
@@ -172,15 +204,19 @@ def classify_gliner_direction(direction_text: str) -> str:
     elif 'halve' in text_lower or 'half' in text_lower:
         return 'halve'
     else:
-        return 'increase'  # default
+        return 'target'  # PHASE 1: Changed from 'increase' to safer 'target'
 
 
-def infer_direction(text: str, start: int, end: int) -> Optional[str]:
-    """Infer direction from surrounding context"""
+def infer_direction_safe(text: str, start: int, end: int) -> Optional[str]:
+    """
+    Infer direction from surrounding context with safe defaults
     
-    # Get text around the parameter (50 chars before and after)
-    context_start = max(0, start - 50)
-    context_end = min(len(text), end + 50)
+    PHASE 1: Returns 'unknown' instead of assuming 'increase'
+    """
+    
+    # Get text around the parameter (30 chars before and after - tighter than before)
+    context_start = max(0, start - 30)
+    context_end = min(len(text), end + 30)
     context = text[context_start:context_end].lower()
     
     # Check for direction keywords
@@ -193,10 +229,16 @@ def infer_direction(text: str, start: int, end: int) -> Optional[str]:
     elif any(word in context for word in ['stable', 'constant', 'remain']):
         return 'stable'
     
+    # PHASE 1: Return None (unknown) instead of making assumptions
     return None
 
 
-def hybrid_extract(text: str, optionb_items: List[Dict]) -> List[Dict]:
+def hybrid_extract(
+    text: str, 
+    optionb_items: List[Dict],
+    confidence_threshold: float = 0.5,
+    enable_ml: bool = True
+) -> List[Dict]:
     """
     Hybrid extraction combining Option B + GLiNER
     
@@ -206,6 +248,10 @@ def hybrid_extract(text: str, optionb_items: List[Dict]) -> List[Dict]:
         Text to extract from
     optionb_items : List[Dict]
         Items already extracted by Option B (templates + spaCy + regex)
+    confidence_threshold : float
+        Minimum confidence for GLiNER extraction
+    enable_ml : bool
+        Whether ML extraction is enabled
         
     Returns:
     --------
@@ -214,12 +260,13 @@ def hybrid_extract(text: str, optionb_items: List[Dict]) -> List[Dict]:
     """
     
     # Extract with GLiNER
-    gliner_items = extract_with_gliner(text)
+    gliner_items = extract_with_gliner(text, confidence_threshold, enable_ml)
     
     if not gliner_items:
-        # GLiNER not available or failed - just return Option B results
+        # GLiNER not available or disabled - just return Option B results
         for item in optionb_items:
-            item['extraction_method'] = 'optionb'
+            if 'extraction_method' not in item:
+                item['extraction_method'] = 'optionb'
         return optionb_items
     
     # Merge results using smart strategy
