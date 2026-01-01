@@ -8,6 +8,9 @@ import pandas as pd
 import numpy as np
 import sys
 from pathlib import Path
+import json
+from datetime import datetime
+import time
 
 # Page configuration - MUST be first Streamlit command
 st.set_page_config(
@@ -592,6 +595,223 @@ def fit_ml_model(x, y, model_type='random_forest'):
         return None, None, None
 
 
+def save_correlation_to_database(project_id, user_id, x_variable, y_variable, 
+                                 analysis_type, method_name, 
+                                 coefficient=None, p_value=None,
+                                 data_points_used=None):
+    """Save correlation results to database"""
+    try:
+        from core.database.supabase_manager import get_db_manager
+        db = get_db_manager()
+        
+        data = {
+            'project_id': project_id,
+            'user_id': user_id,
+            'x_variable': x_variable,
+            'y_variable': y_variable,
+            'analysis_type': analysis_type,
+            'method_name': method_name,
+            'coefficient': float(coefficient) if coefficient is not None else None,
+            'p_value': float(p_value) if p_value is not None else None,
+            'data_points_used': int(data_points_used) if data_points_used is not None else None,
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        result = db.client.table('correlation_equations').upsert(
+            data,
+            on_conflict='project_id,x_variable,y_variable,analysis_type,method_name'
+        ).execute()
+        
+        return True, "Saved successfully"
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
+
+def save_regression_to_database(project_id, user_id, x_variable, y_variable,
+                                analysis_type, method_name, equation,
+                                r_squared=None, rmse=None, mae=None,
+                                data_points_used=None):
+    """Save regression results to database"""
+    try:
+        from core.database.supabase_manager import get_db_manager
+        db = get_db_manager()
+        
+        data = {
+            'project_id': project_id,
+            'user_id': user_id,
+            'x_variable': x_variable,
+            'y_variable': y_variable,
+            'analysis_type': analysis_type,
+            'method_name': method_name,
+            'equation': equation,
+            'r_squared': float(r_squared) if r_squared is not None else None,
+            'rmse': float(rmse) if rmse is not None else None,
+            'mae': float(mae) if mae is not None else None,
+            'data_points_used': int(data_points_used) if data_points_used is not None else None,
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        result = db.client.table('correlation_equations').upsert(
+            data,
+            on_conflict='project_id,x_variable,y_variable,analysis_type,method_name'
+        ).execute()
+        
+        return True, "Saved successfully"
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
+
+def save_ml_prediction_to_database(project_id, user_id, x_variable, y_variable,
+                                   analysis_type, method_name, model_description,
+                                   r_squared=None, rmse=None, mae=None,
+                                   additional_metrics=None,
+                                   data_points_used=None):
+    """Save ML prediction results to database"""
+    try:
+        from core.database.supabase_manager import get_db_manager
+        db = get_db_manager()
+        
+        data = {
+            'project_id': project_id,
+            'user_id': user_id,
+            'x_variable': x_variable,
+            'y_variable': y_variable,
+            'analysis_type': analysis_type,
+            'method_name': method_name,
+            'model_description': model_description,
+            'r_squared': float(r_squared) if r_squared is not None else None,
+            'rmse': float(rmse) if rmse is not None else None,
+            'mae': float(mae) if mae is not None else None,
+            'additional_metrics': json.dumps(additional_metrics) if additional_metrics else None,
+            'data_points_used': int(data_points_used) if data_points_used is not None else None,
+            'created_at': datetime.now().isoformat(),
+            'updated_at': datetime.now().isoformat()
+        }
+        
+        result = db.client.table('correlation_equations').upsert(
+            data,
+            on_conflict='project_id,x_variable,y_variable,analysis_type,method_name'
+        ).execute()
+        
+        return True, "Saved successfully"
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
+
+def save_plot_equations(plot_id, plot_data, x_data, y_data):
+    """Save all equations from a single plot"""
+    project_id = st.session_state.get('current_project_id')
+    user_id = st.session_state.get('user_id')
+    
+    if not project_id or not user_id:
+        return False, "Missing project or user ID"
+    
+    results = []
+    errors = []
+    
+    x_var = plot_data.get('x_var') or plot_data.get('x_vars')
+    y_var = plot_data.get('y_var') or plot_data.get('y_vars')
+    
+    if isinstance(x_var, list):
+        x_var = '+'.join(x_var)
+    if isinstance(y_var, list):
+        y_var = '+'.join(y_var)
+    
+    data_points = len(x_data)
+    
+    if plot_data.get('show_corr'):
+        corr_method = plot_data.get('corr_method', 'pearson')
+        coef, p_value = calculate_correlation(x_data, y_data, corr_method)
+        
+        if coef is not None:
+            success, msg = save_correlation_to_database(
+                project_id=project_id,
+                user_id=user_id,
+                x_variable=x_var,
+                y_variable=y_var,
+                analysis_type='correlation',
+                method_name=corr_method,
+                coefficient=coef,
+                p_value=p_value,
+                data_points_used=data_points
+            )
+            
+            if success:
+                results.append(f"✅ {corr_method.capitalize()} correlation")
+            else:
+                errors.append(f"❌ {corr_method.capitalize()}: {msg}")
+    
+    if plot_data.get('show_regression'):
+        regression_type = plot_data.get('regression_type', 'linear')
+        _, _, equation, metrics = fit_regression_model(x_data, y_data, regression_type)
+        
+        if equation and metrics:
+            success, msg = save_regression_to_database(
+                project_id=project_id,
+                user_id=user_id,
+                x_variable=x_var,
+                y_variable=y_var,
+                analysis_type='regression',
+                method_name=regression_type,
+                equation=equation,
+                r_squared=metrics.get('R²'),
+                rmse=metrics.get('RMSE'),
+                mae=metrics.get('MAE'),
+                data_points_used=data_points
+            )
+            
+            if success:
+                results.append(f"✅ {regression_type.replace('_', ' ').title()} regression")
+            else:
+                errors.append(f"❌ Regression: {msg}")
+    
+    if plot_data.get('show_ml'):
+        ml_type = plot_data.get('ml_model_type', 'random_forest')
+        _, _, ml_metrics = fit_ml_model(x_data, y_data, ml_type)
+        
+        if ml_metrics:
+            additional = {}
+            if 'Feature Importance' in ml_metrics:
+                additional['feature_importance'] = ml_metrics['Feature Importance']
+            if 'N Trees' in ml_metrics:
+                additional['n_trees'] = ml_metrics['N Trees']
+            if 'N Neighbors' in ml_metrics:
+                additional['n_neighbors'] = ml_metrics['N Neighbors']
+            
+            success, msg = save_ml_prediction_to_database(
+                project_id=project_id,
+                user_id=user_id,
+                x_variable=x_var,
+                y_variable=y_var,
+                analysis_type='ml_prediction',
+                method_name=ml_type,
+                model_description=ml_metrics.get('Model', ml_type),
+                r_squared=ml_metrics.get('R²'),
+                rmse=ml_metrics.get('RMSE'),
+                mae=ml_metrics.get('MAE'),
+                additional_metrics=additional,
+                data_points_used=data_points
+            )
+            
+            if success:
+                results.append(f"✅ {ml_type.replace('_', ' ').title()} ML model")
+            else:
+                errors.append(f"❌ ML Model: {msg}")
+    
+    if results:
+        success_msg = "\n".join(results)
+        if errors:
+            error_msg = "\n".join(errors)
+            return True, f"{success_msg}\n\n{error_msg}"
+        return True, success_msg
+    elif errors:
+        return False, "\n".join(errors)
+    else:
+        return False, "No equations to save (enable at least one analysis type)"
+
+
 def create_scatter_plot(x_data, y_data, x_label, y_label, config):
     """Create an interactive scatter plot"""
     import plotly.graph_objects as go
@@ -968,6 +1188,44 @@ def render_single_plot(df_long, variables, plot_id):
                 filename_prefix=f"relationship_plot_{plot_id}",
                 show_formats=['png', 'pdf', 'html']
             )
+        
+        # Save Equations Button
+        st.markdown("---")
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.caption("💾 Save correlation, regression, or ML equations from this plot to the database")
+        
+        with col2:
+            if st.button("💾 Save Equations", key=f"save_eq_{plot_id}", type="primary", use_container_width=True):
+                try:
+                    # Prepare plot config for save function
+                    save_plot_config = {
+                        'x_var': plot_data.get('x_label', 'x'),
+                        'y_var': plot_data.get('y_label', 'y'),
+                        'show_corr': plot_data.get('show_correlation', False),
+                        'corr_method': plot_data.get('corr_method'),
+                        'show_regression': plot_data.get('show_regression', False),
+                        'regression_type': plot_data.get('regression_type'),
+                        'show_ml': plot_data.get('show_ml', False),
+                        'ml_model_type': plot_data.get('ml_model_type')
+                    }
+                    
+                    success, message = save_plot_equations(
+                        plot_id, 
+                        save_plot_config, 
+                        plot_data['x_data'], 
+                        plot_data['y_data']
+                    )
+                    
+                    if success:
+                        st.success(message)
+                        st.balloons()
+                    else:
+                        st.error(message)
+                except Exception as e:
+                    st.error(f"❌ Save error: {str(e)}")
         
         st.markdown("#### 📊 Statistical Analysis")
         
