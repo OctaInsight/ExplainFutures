@@ -167,6 +167,11 @@ def load_project_data_from_database():
         st.session_state.df_long = df_all
         st.session_state.data_loaded = True
         
+        # Validate data structure
+        if 'variable' not in df_all.columns:
+            st.error(f"❌ Data format error: 'variable' column not found. Columns: {df_all.columns.tolist()}")
+            return False
+        
         # Load parameters
         try:
             parameters = db.get_project_parameters(project_id)
@@ -689,7 +694,20 @@ def render_relationships_page():
     
     initialize_plot_configs()
     
-    df_long = st.session_state.get("df_clean", st.session_state.df_long)
+    # Get dataframe with proper fallback
+    df_long = st.session_state.get("df_long")
+    
+    if df_long is None or len(df_long) == 0:
+        st.error("❌ No data available. Please load data first.")
+        if st.button("📁 Go to Upload Page"):
+            st.switch_page("pages/02_Data_Import_&_Diagnostics.py")
+        st.stop()
+    
+    # Check if 'variable' column exists
+    if 'variable' not in df_long.columns:
+        st.error("❌ Data format error: 'variable' column not found")
+        st.info(f"Available columns: {', '.join(df_long.columns.tolist())}")
+        st.stop()
     
     # Get unique variables - handle both numpy array and list returns
     unique_vars = df_long['variable'].unique()
