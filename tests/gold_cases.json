@@ -1,0 +1,489 @@
+{
+  "metadata": {
+    "version": "1.0",
+    "description": "Gold test cases for ExplainFutures NLP extraction pipeline",
+    "created": "2026-01-01",
+    "phases": "Covers Phase 1 & Phase 2 features"
+  },
+  "test_cases": [
+    {
+      "id": "basic_percent_increase",
+      "description": "Simple percentage increase with year",
+      "text": "GDP increases by 20% by 2040.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "title": null,
+            "horizon": 2040,
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 20.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": 2040,
+                "baseline_year": null,
+                "is_range": false,
+                "is_rate": false
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "multiple_params_same_year",
+      "description": "Multiple parameters with same target year",
+      "text": "Scenario 1: Green Growth (by 2050)\nGDP increases by 25%.\nCO2 emissions decrease by 40%.\nRenewable energy reaches 70%.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "title": "Green Growth",
+            "horizon": 2050,
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 25.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": 2050
+              },
+              {
+                "parameter": "CO2 emissions",
+                "direction": "decrease",
+                "value": 40.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": 2050
+              },
+              {
+                "parameter": "Renewable energy",
+                "direction": "target",
+                "value": 70.0,
+                "unit": "%",
+                "value_type": "absolute_target",
+                "target_year": 2050
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "time_range",
+      "description": "Time range from-to",
+      "text": "GDP grows from 10% to 25% from 2030 to 2050.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 15.0,
+                "unit": "%",
+                "value_type": "delta",
+                "baseline_year": 2030,
+                "target_year": 2050,
+                "base_value": 10.0,
+                "target_value": 25.0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "value_range",
+      "description": "Value range between X and Y",
+      "text": "GDP increases between 10-15% by 2040.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value_type": "range",
+                "value_min": 10.0,
+                "value_max": 15.0,
+                "unit": "%",
+                "target_year": 2040,
+                "is_range": true
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "rate_per_year",
+      "description": "Rate expression per year",
+      "text": "GDP grows at 2% per year.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 2.0,
+                "unit": "%",
+                "value_type": "rate",
+                "is_rate": true,
+                "rate_period": "per year"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "percentage_points",
+      "description": "Percentage point vs percent",
+      "text": "Unemployment decreases by 5 percentage points by 2035.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "items": [
+              {
+                "parameter": "Unemployment",
+                "direction": "decrease",
+                "value": 5.0,
+                "unit": "pp",
+                "value_type": "percent_point",
+                "target_year": 2035
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "absolute_values",
+      "description": "Absolute values with units",
+      "text": "CO2 emissions reach 5 MtCO2 by 2045.\nRenewable energy capacity hits 100 GW in 2040.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "items": [
+              {
+                "parameter": "CO2 emissions",
+                "direction": "target",
+                "value": 5.0,
+                "unit": "MtCO2",
+                "value_type": "absolute_target",
+                "target_year": 2045
+              },
+              {
+                "parameter": "Renewable energy capacity",
+                "direction": "target",
+                "value": 100.0,
+                "unit": "GW",
+                "value_type": "absolute_target",
+                "target_year": 2040
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "double_halve",
+      "description": "Double and halve directions",
+      "text": "GDP doubles by 2050.\nEmissions halve by 2045.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "double",
+                "value": 100.0,
+                "unit": "%",
+                "target_year": 2050
+              },
+              {
+                "parameter": "Emissions",
+                "direction": "halve",
+                "value": -50.0,
+                "unit": "%",
+                "target_year": 2045
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "two_scenarios",
+      "description": "Two distinct scenarios",
+      "text": "Scenario A: Optimistic (2040)\nGDP increases by 30%.\n\nScenario B: Conservative (2040)\nGDP increases by 15%.",
+      "expected": {
+        "num_scenarios": 2,
+        "scenarios": [
+          {
+            "title": "Optimistic",
+            "horizon": 2040,
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 30.0,
+                "unit": "%",
+                "value_type": "delta"
+              }
+            ]
+          },
+          {
+            "title": "Conservative",
+            "horizon": 2040,
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 15.0,
+                "unit": "%",
+                "value_type": "delta"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "colon_format",
+      "description": "Colon format parameters",
+      "text": "Scenario: Baseline (2035)\nGDP: 20%\nEmissions: 5 MtCO2\nRenewable Energy: 60%",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "title": "Baseline",
+            "horizon": 2035,
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "target",
+                "value": 20.0,
+                "unit": "%",
+                "value_type": "absolute_target"
+              },
+              {
+                "parameter": "Emissions",
+                "direction": "target",
+                "value": 5.0,
+                "unit": "MtCO2",
+                "value_type": "absolute_target"
+              },
+              {
+                "parameter": "Renewable Energy",
+                "direction": "target",
+                "value": 60.0,
+                "unit": "%",
+                "value_type": "absolute_target"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "bullet_points",
+      "description": "Bullet point list format",
+      "text": "Goals for 2045:\n- GDP increases by 25%\n- CO2 emissions decrease by 50%\n- Renewable energy reaches 80%",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "horizon": 2045,
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 25.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": 2045
+              },
+              {
+                "parameter": "CO2 emissions",
+                "direction": "decrease",
+                "value": 50.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": 2045
+              },
+              {
+                "parameter": "Renewable energy",
+                "direction": "target",
+                "value": 80.0,
+                "unit": "%",
+                "value_type": "absolute_target",
+                "target_year": 2045
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "delta_vs_target",
+      "description": "Delta (by) vs target (to/reaches) distinction",
+      "text": "GDP increases by 20%.\nRenewable energy reaches 50%.\nEmissions fall to 10 MtCO2.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 20.0,
+                "unit": "%",
+                "value_type": "delta"
+              },
+              {
+                "parameter": "Renewable energy",
+                "direction": "target",
+                "value": 50.0,
+                "unit": "%",
+                "value_type": "absolute_target"
+              },
+              {
+                "parameter": "Emissions",
+                "direction": "decrease",
+                "value": 10.0,
+                "unit": "MtCO2",
+                "value_type": "absolute_target"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "complex_scenario",
+      "description": "Complex realistic scenario",
+      "text": "Scenario: Sustainable Transition (by 2050)\n\nBy 2050, GDP has continued to grow, increasing by around 40 percent. CO2 emissions have decreased significantly, falling by approximately 60 percent from current levels. Renewable energy share reaches 75% of total energy production. Employment in green sectors doubles. Public investment increases from 2% to 5% of GDP.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "title": "Sustainable Transition",
+            "horizon": 2050,
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 40.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": 2050
+              },
+              {
+                "parameter": "CO2 emissions",
+                "direction": "decrease",
+                "value": 60.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": 2050
+              },
+              {
+                "parameter": "Renewable energy",
+                "direction": "target",
+                "value": 75.0,
+                "unit": "%",
+                "value_type": "absolute_target",
+                "target_year": 2050
+              },
+              {
+                "parameter": "Employment",
+                "direction": "double",
+                "value": 100.0,
+                "unit": "%",
+                "target_year": 2050
+              },
+              {
+                "parameter": "Public investment",
+                "direction": "increase",
+                "base_value": 2.0,
+                "target_value": 5.0,
+                "value": 3.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": 2050
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "edge_case_no_year",
+      "description": "Parameters without explicit year",
+      "text": "GDP increases by 15%.\nEmissions decrease by 25%.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "horizon": null,
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 15.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": null
+              },
+              {
+                "parameter": "Emissions",
+                "direction": "decrease",
+                "value": 25.0,
+                "unit": "%",
+                "value_type": "delta",
+                "target_year": null
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "cagr_rate",
+      "description": "CAGR rate expression",
+      "text": "GDP CAGR 3% from 2030 to 2050.",
+      "expected": {
+        "num_scenarios": 1,
+        "scenarios": [
+          {
+            "items": [
+              {
+                "parameter": "GDP",
+                "direction": "increase",
+                "value": 3.0,
+                "unit": "%",
+                "value_type": "rate",
+                "is_rate": true,
+                "rate_period": "CAGR",
+                "baseline_year": 2030,
+                "target_year": 2050
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
