@@ -192,6 +192,36 @@ def generate_transformed_data_if_missing(method_type, method_data, df_wide, feat
         # Get feature data
         X = df_wide[feature_cols].fillna(0)  # Fill NaN with 0 for transformation
         
+        # Check if transformed data exists under different key names
+        if method_type == 'factor_analysis' and 'factors' in method_data:
+            # FA modules often store transformed data as 'factors'
+            factors_data = method_data['factors']
+            if isinstance(factors_data, (pd.DataFrame, np.ndarray)):
+                st.info("✅ Found transformed data in 'factors' key")
+                
+                if isinstance(factors_data, np.ndarray):
+                    n_factors = method_data.get('n_factors', factors_data.shape[1])
+                    output_vars = method_data.get('output_variables', [f'Factor{i+1}' for i in range(n_factors)])
+                    df_transformed = pd.DataFrame(
+                        factors_data[:, :n_factors],
+                        columns=output_vars,
+                        index=df_wide.index
+                    )
+                else:
+                    df_transformed = factors_data.copy()
+                
+                df_transformed[time_col] = df_wide[time_col].values
+                method_data['transformed_data'] = df_transformed
+                st.success(f"✅ Converted 'factors' to transformed_data")
+                return method_data
+        
+        if method_type == 'ica' and 'components' in method_data:
+            # ICA might store as 'components' 
+            components_data = method_data['components']
+            # Note: 'components' in ICA is usually the unmixing matrix, not transformed data
+            # We need the actual transformed signals
+            pass
+        
         if method_type == 'pca':
             # Get PCA model from session state or method_data
             model = st.session_state.get('pca_model') or method_data.get('model')
@@ -237,7 +267,8 @@ def generate_transformed_data_if_missing(method_type, method_data, df_wide, feat
                 method_data['transformed_data'] = df_transformed
                 st.success(f"✅ Generated {n_factors} factors")
             else:
-                st.error("❌ Factor Analysis model not found")
+                st.error("❌ Factor Analysis model not found. The module needs to save the fitted model to session state.")
+                st.info("💡 Try re-running Factor Analysis to generate the model.")
                 
         elif method_type == 'ica':
             model = st.session_state.get('ica_model') or method_data.get('model')
@@ -259,7 +290,8 @@ def generate_transformed_data_if_missing(method_type, method_data, df_wide, feat
                 method_data['transformed_data'] = df_transformed
                 st.success(f"✅ Generated {n_components} independent components")
             else:
-                st.error("❌ ICA model not found")
+                st.error("❌ ICA model not found. The module needs to save the fitted model to session state.")
+                st.info("💡 Try re-running ICA to generate the model.")
                 
         elif method_type == 'clustering':
             # Clustering doesn't produce transformed data, just assignments
@@ -336,6 +368,7 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         # Update session state with the corrected method_data
         st.session_state.reduction_results[method_type] = method_data
         
+        # IMPORTANT: Apply user's custom names FIRST (before checking for duplicates)
         if renamed_components:
             # Apply renamed components
             original_to_renamed = {}
@@ -346,43 +379,83 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
             # Update output_variables list
             output_variables = [original_to_renamed[v] for v in output_variables]
             
-            # IMPORTANT: Also rename columns in transformed_data if it exists
+            # Also rename columns in transformed_data if it exists
             if 'transformed_data' in method_data and method_data['transformed_data'] is not None:
                 df_transformed = method_data['transformed_data']
                 time_col = st.session_state.get('time_column', 'timestamp')
                 
                 # Rename columns (except time column)
-                rename_dict = {old: new for old, new in original_to_renamed.items() if old in df_transformed.columns}
+                rename_dict = {old: new for old, new in original_to_renamed.items() 
+                             if old in df_transformed.columns and old != new}
+                if rename_dict:
+                    df_transformed = df_transformed.rename(columns=rename_dict)
+                    method_data['transformed_data'] = df_transformed
+                    st.info(f"✅ Applied user renames: {list(rename_dict.values())}")
+        
+        input_variables = method_data.get('input_variables', [])
+        
+        # Check for existing timeseries data to avoid duplicates
+        existing_timeseries = db.client.table('timeseries_data').select('variable').eq(
+            'project_id', project_id
+        ).eq('data_source', method_type).execute()
+        
+        existing_ts_vars = {row['variable'] for row in (existing_timeseries.data or [])}
+        
+        # If data already exists for these variables with this data_source, skip saving
+        if any(var in existing_ts_vars for var in output_variables):
+            overlap = [var for var in output_variables if var in existing_ts_vars]
+            st.warning(f"⚠️ Timeseries data already exists for {overlap}. Skipping duplicate save.")
+            st.info("💡 If you want to save new data, rename the components differently or delete old data first.")
+            
+            # Still save metadata and parameters, but skip timeseries
+            skip_timeseries = True
+        else:
+            skip_timeseries = False
+        
+        # Check for existing parameters (for metadata only)
+        existing_params = db.get_project_parameters(project_id)
+        existing_param_names = {p['parameter_name'] for p in existing_params}
+        
+        # Adjust output variable names if they already exist IN PARAMETERS
+        # But only if we're not skipping timeseries (if we skip, keep original names)
+        final_output_variables = []
+        name_mapping = {}  # Original -> Final name mapping
+        
+        if not skip_timeseries:
+            for var in output_variables:
+                original_var = var
+                if var in existing_param_names:
+                    counter = 1
+                    new_var = f"{var}_v{counter}"
+                    while new_var in existing_param_names or new_var in existing_ts_vars:
+                        counter += 1
+                        new_var = f"{var}_v{counter}"
+                    st.warning(f"⚠️ Parameter '{var}' already exists. Saving as '{new_var}'")
+                    final_output_variables.append(new_var)
+                    name_mapping[original_var] = new_var
+                else:
+                    final_output_variables.append(var)
+                    name_mapping[original_var] = var
+            
+            output_variables = final_output_variables
+            
+            # CRITICAL FIX: Also rename columns in transformed_data DataFrame
+            if name_mapping and 'transformed_data' in method_data and method_data['transformed_data'] is not None:
+                df_transformed = method_data['transformed_data']
+                time_col = st.session_state.get('time_column', 'timestamp')
+                
+                # Create rename dict for columns that exist
+                rename_dict = {old: new for old, new in name_mapping.items() 
+                             if old in df_transformed.columns and old != new}
+                
                 if rename_dict:
                     df_transformed = df_transformed.rename(columns=rename_dict)
                     method_data['transformed_data'] = df_transformed
                     st.info(f"✅ Renamed columns in transformed_data: {list(rename_dict.values())}")
-        
-        input_variables = method_data.get('input_variables', [])
-        
-        # Check for existing parameters and avoid naming conflicts
-        existing_params = db.get_project_parameters(project_id)
-        existing_names = {p['parameter_name'] for p in existing_params}
-        
-        # Adjust output variable names if they already exist
-        final_output_variables = []
-        name_mapping = {}  # Original -> Final name mapping
-        for var in output_variables:
-            original_var = var
-            if var in existing_names:
-                counter = 1
-                new_var = f"{var}_v{counter}"
-                while new_var in existing_names:
-                    counter += 1
-                    new_var = f"{var}_v{counter}"
-                st.warning(f"⚠️ Parameter '{var}' already exists. Saving as '{new_var}'")
-                final_output_variables.append(new_var)
-                name_mapping[original_var] = new_var
-            else:
-                final_output_variables.append(var)
-                name_mapping[original_var] = var
-        
-        output_variables = final_output_variables
+        else:
+            # Keep original names if skipping
+            for var in output_variables:
+                name_mapping[var] = var
         
         # Convert any numpy arrays to lists before saving
         def safe_convert(value):
@@ -426,7 +499,9 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         
         # IMPROVED: Save timeseries data for new components
         total_inserted = 0
-        if 'transformed_data' in method_data and method_data['transformed_data'] is not None:
+        if skip_timeseries:
+            st.info("ℹ️ Skipping timeseries save - data already exists for these variables")
+        elif 'transformed_data' in method_data and method_data['transformed_data'] is not None:
             df_transformed = method_data['transformed_data']
             time_col = st.session_state.get('time_column', 'timestamp')
             
@@ -438,7 +513,7 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                 # Prepare data in long format for batch insert
                 records = []
                 
-                # Now that we've renamed columns in transformed_data, we can directly use output_variables
+                # Now columns in df_transformed should match output_variables after renaming
                 for var in output_variables:
                     if var in df_transformed.columns:
                         for idx, row in df_transformed.iterrows():
@@ -483,6 +558,7 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         
         # IMPROVED: Save parameters metadata
         params_saved = 0
+        params_skipped = 0
         for i, var in enumerate(output_variables):
             try:
                 description = f"{method_data.get('method_name', method_type)} component {i+1}"
@@ -500,12 +576,13 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                 ).eq('parameter_name', var).execute()
                 
                 if existing_check.data and len(existing_check.data) > 0:
-                    # Update existing parameter
+                    # Update existing parameter (only metadata, not create new)
                     db.client.table('parameters').update({
                         'data_type': f"{method_type}_component",
                         'description': description,
                         'updated_at': datetime.now().isoformat()
                     }).eq('parameter_id', existing_check.data[0]['parameter_id']).execute()
+                    params_skipped += 1
                 else:
                     # Insert new parameter
                     db.client.table('parameters').insert({
@@ -517,18 +594,34 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                         'created_at': datetime.now().isoformat(),
                         'updated_at': datetime.now().isoformat()
                     }).execute()
-                
-                params_saved += 1
+                    params_saved += 1
             except Exception as e:
                 st.error(f"⚠️ Error saving parameter '{var}': {str(e)}")
         
-        st.info(f"✅ Saved {params_saved} parameters to parameters table")
+        if params_saved > 0:
+            st.info(f"✅ Saved {params_saved} new parameters to parameters table")
+        if params_skipped > 0:
+            st.info(f"ℹ️ Updated {params_skipped} existing parameters (no duplicates created)")
         
-        # Update project progress tracking
-        db.upsert_progress_step(project_id, "dim_reduction_done", 10)
-        db.recompute_and_update_project_progress(project_id)
+        # Update project progress tracking (only if we actually saved something new)
+        if total_inserted > 0 or params_saved > 0:
+            db.upsert_progress_step(project_id, "dim_reduction_done", 10)
+            db.recompute_and_update_project_progress(project_id)
         
-        return True, f"✅ Saved {len(output_variables)} components with {total_inserted} data points"
+        # Create detailed success message
+        msg_parts = []
+        if total_inserted > 0:
+            msg_parts.append(f"{total_inserted} data points")
+        if params_saved > 0:
+            msg_parts.append(f"{params_saved} new parameters")
+        if params_skipped > 0:
+            msg_parts.append(f"{params_skipped} updated parameters")
+        if skip_timeseries:
+            msg_parts.append("(timeseries skipped - already exists)")
+        
+        final_msg = f"✅ Saved: {', '.join(msg_parts)}" if msg_parts else "✅ Metadata saved"
+        
+        return True, final_msg
     
     except Exception as e:
         import traceback
