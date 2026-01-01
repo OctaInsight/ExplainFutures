@@ -1,6 +1,11 @@
 """
 Clean text generation module
 Generate cleaned, structured narrative from scenario data
+
+PHASE 2 ENHANCEMENTS:
+- Display time expressions and ranges
+- Show value semantics (target, delta, range, rate)
+- Improved human-readable formatting
 """
 
 from typing import Dict, Optional
@@ -9,6 +14,8 @@ from typing import Dict, Optional
 def generate_cleaned_scenario_text(scenario: Dict, mappings: Optional[Dict[str, str]] = None) -> str:
     """
     Generate cleaned, structured narrative for a scenario
+    
+    PHASE 2: Enhanced with time and value semantics display
     
     Parameters:
     -----------
@@ -28,11 +35,21 @@ def generate_cleaned_scenario_text(scenario: Dict, mappings: Optional[Dict[str, 
     output.append(f"## {scenario['title']}")
     output.append("")
     
-    # Metadata
-    if scenario.get('horizon'):
-        output.append(f"**Target Horizon:** {scenario['horizon']}")
+    # PHASE 2: Enhanced metadata with time range
+    baseline = scenario.get('baseline_year')
+    horizon = scenario.get('horizon')
+    
+    if baseline and horizon:
+        output.append(f"**Time Period:** {baseline}–{horizon}")
+    elif horizon:
+        output.append(f"**Target Horizon:** {horizon}")
     else:
         output.append("**Target Horizon:** Not specified")
+    
+    # PHASE 2: Time confidence
+    time_conf = scenario.get('time_confidence', 0)
+    if time_conf > 0:
+        output.append(f"**Time Confidence:** {time_conf:.0%}")
     
     output.append("")
     
@@ -54,6 +71,8 @@ def generate_cleaned_scenario_text(scenario: Dict, mappings: Optional[Dict[str, 
 def format_item(item: Dict, mappings: Optional[Dict[str, str]] = None) -> str:
     """
     Format a single item for display
+    
+    PHASE 2: Enhanced with time and value semantics
     
     Parameters:
     -----------
@@ -77,12 +96,44 @@ def format_item(item: Dict, mappings: Optional[Dict[str, str]] = None) -> str:
     if mappings and param_name in mappings:
         parts.append(f"*(maps to: {mappings[param_name]})*")
     
-    # Direction and value
+    # Direction and value with PHASE 2 semantics
     direction = item['direction']
     value = item.get('value')
     unit = item.get('unit', '')
+    value_type = item.get('value_type', 'absolute')
     
-    if direction == 'target':
+    # PHASE 2: Handle different value types
+    if value_type == 'range':
+        value_min = item.get('value_min')
+        value_max = item.get('value_max')
+        if value_min is not None and value_max is not None:
+            parts.append(f"ranges **{format_value(value_min, unit)} to {format_value(value_max, unit)}**")
+    
+    elif value_type == 'rate':
+        if value is not None:
+            rate_period = item.get('rate_period', 'per year')
+            parts.append(f"grows at **{format_value(value, unit)}** {rate_period}")
+    
+    elif value_type == 'percent_point':
+        if value is not None:
+            verb = "increases" if direction == 'increase' else "decreases"
+            parts.append(f"{verb} by **{value:.1f} percentage points**")
+    
+    elif value_type == 'delta':
+        # Change from baseline
+        base_val = item.get('base_value')
+        target_val = item.get('target_value')
+        
+        if base_val is not None and target_val is not None:
+            parts.append(f"changes from **{format_value(base_val, unit)}** to **{format_value(target_val, unit)}**")
+        elif value is not None:
+            verb = "increases" if direction == 'increase' else "decreases"
+            parts.append(f"{verb} by **{format_value(value, unit)}**")
+        else:
+            verb = "increases" if direction == 'increase' else "decreases"
+            parts.append(f"**{verb}** (magnitude to be determined)")
+    
+    elif value_type == 'absolute_target':
         if value is not None:
             parts.append(f"reaches **{format_value(value, unit)}**")
         else:
@@ -90,14 +141,6 @@ def format_item(item: Dict, mappings: Optional[Dict[str, str]] = None) -> str:
     
     elif direction == 'stable':
         parts.append("remains **stable**")
-    
-    elif direction in ['increase', 'decrease']:
-        if value is not None:
-            verb = "increases" if direction == 'increase' else "decreases"
-            parts.append(f"{verb} by **{format_value(value, unit)}**")
-        else:
-            verb = "increases" if direction == 'increase' else "decreases"
-            parts.append(f"**{verb}** (magnitude to be determined)")
     
     elif direction == 'double':
         parts.append("**doubles** (+100%)")
@@ -108,11 +151,29 @@ def format_item(item: Dict, mappings: Optional[Dict[str, str]] = None) -> str:
     elif direction == 'triple':
         parts.append("**triples** (+200%)")
     
+    elif direction in ['increase', 'decrease']:
+        if value is not None:
+            verb = "increases" if direction == 'increase' else "decreases"
+            parts.append(f"{verb} by **{format_value(value, unit)}**")
+        else:
+            verb = "increases" if direction == 'increase' else "decreases"
+            parts.append(f"**{verb}** (magnitude to be determined)")
+    
     else:
         parts.append(f"direction: {direction}")
     
-    # Add horizon if specified
-    if item.get('horizon'):
+    # PHASE 2: Add time information
+    baseline_year = item.get('baseline_year')
+    target_year = item.get('target_year')
+    time_expr = item.get('time_expression', '')
+    
+    if baseline_year and target_year:
+        parts.append(f"**({baseline_year}–{target_year})**")
+    elif target_year:
+        parts.append(f"**by {target_year}**")
+    elif time_expr:
+        parts.append(f"**({time_expr})**")
+    elif item.get('horizon'):
         parts.append(f"by **{item['horizon']}**")
     
     return "- " + " ".join(parts)
@@ -121,6 +182,8 @@ def format_item(item: Dict, mappings: Optional[Dict[str, str]] = None) -> str:
 def format_value(value, unit: str) -> str:
     """
     Format value with unit
+    
+    PHASE 2: Enhanced formatting
     
     Parameters:
     -----------
@@ -144,6 +207,8 @@ def format_value(value, unit: str) -> str:
     
     if unit == '%':
         return f"{value:.1f}%"
+    elif unit == 'pp':
+        return f"{value:.1f} pp"
     elif unit in ['billion', 'million', 'thousand', 'trillion']:
         return f"{value:.2f} {unit}"
     elif unit in ['MtCO2', 'GtCO2', 'ktCO2']:
@@ -196,6 +261,8 @@ def generate_comparison_table(scenarios: list) -> str:
     """
     Generate markdown table comparing all scenarios
     
+    PHASE 2: Enhanced with time and value type display
+    
     Parameters:
     -----------
     scenarios : list
@@ -241,9 +308,25 @@ def generate_comparison_table(scenarios: list) -> str:
                     break
             
             if item:
-                # Format value
-                if item['value'] is not None:
+                # PHASE 2: Format value with type awareness
+                value_type = item.get('value_type', 'absolute')
+                
+                if value_type == 'range':
+                    v_min = item.get('value_min')
+                    v_max = item.get('value_max')
+                    if v_min is not None and v_max is not None:
+                        cell = f"{v_min}-{v_max}{item.get('unit', '')}"
+                    else:
+                        cell = format_value(item['value'], item.get('unit', ''))
+                
+                elif item['value'] is not None:
                     cell = format_value(item['value'], item.get('unit', ''))
+                    
+                    # Add type indicator
+                    if value_type == 'delta':
+                        cell = f"Δ{cell}"
+                    elif value_type == 'rate':
+                        cell = f"{cell}/yr"
                 else:
                     cell = item['direction']
             else:
