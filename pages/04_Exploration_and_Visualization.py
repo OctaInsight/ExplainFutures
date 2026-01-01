@@ -229,13 +229,28 @@ def load_project_data_from_database():
         return False
     
     try:
-        # Load RAW data
+        # Load data from ALL sources (original + cleaned + dimensionality reduction results)
+        data_sources = [
+            ('raw', 'original'),     # Try both names for raw data
+            'cleaned',                # Preprocessed data
+            'pca',                    # PCA components
+            'factor_analysis',        # Factor analysis components
+            'ica',                    # ICA components
+            'clustering'              # Clustering results (if any)
+        ]
+        
+        all_dfs = []
+        sources_loaded = []
+        
+        # Try to load raw/original first
         df_raw = None
         for src_label in ('raw', 'original'):
             try:
                 df_temp = db.load_timeseries_data(project_id=project_id, data_source=src_label)
                 if df_temp is not None and len(df_temp) > 0:
                     df_raw = df_temp
+                    all_dfs.append(df_temp)
+                    sources_loaded.append(src_label)
                     break
             except Exception:
                 continue
@@ -244,18 +259,27 @@ def load_project_data_from_database():
             st.error("❌ No raw data found. Please upload data on Page 2.")
             return False
         
-        # Load CLEANED data
-        df_cleaned = None
-        try:
-            df_cleaned = db.load_timeseries_data(project_id=project_id, data_source='cleaned')
-        except Exception:
-            df_cleaned = None
+        # Load all other sources
+        for source in ['cleaned', 'pca', 'factor_analysis', 'ica', 'clustering']:
+            try:
+                df_temp = db.load_timeseries_data(project_id=project_id, data_source=source)
+                if df_temp is not None and len(df_temp) > 0:
+                    all_dfs.append(df_temp)
+                    sources_loaded.append(source)
+            except Exception:
+                continue
         
-        # Combine
-        if df_cleaned is not None and len(df_cleaned) > 0:
-            df_all = pd.concat([df_raw, df_cleaned], ignore_index=True)
+        # Combine all data sources
+        if len(all_dfs) > 1:
+            df_all = pd.concat(all_dfs, ignore_index=True)
+            # Remove duplicates (keep last occurrence)
+            df_all = df_all.drop_duplicates(subset=['timestamp', 'variable'], keep='last')
         else:
             df_all = df_raw.copy()
+        
+        # Info about what was loaded
+        if len(sources_loaded) > 1:
+            st.success(f"✅ Loaded data from {len(sources_loaded)} sources: {', '.join(sources_loaded)}")
         
         # Store in session state
         st.session_state.df_long = df_all
