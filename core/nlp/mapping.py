@@ -1,6 +1,11 @@
 """
 Mapping module
 Map scenario parameters to dataset variables using similarity matching
+
+PHASE 2 ENHANCEMENTS:
+- Token-based similarity (lemmatized tokens)
+- Category-aware mapping
+- User synonym feedback integration
 """
 
 from typing import List, Dict, Optional
@@ -8,14 +13,25 @@ from difflib import SequenceMatcher
 import re
 
 
-def suggest_variable_mapping(parameter: str, available_variables: List[str], top_n: int = 5) -> List[Dict]:
+def suggest_variable_mapping(
+    parameter: str, 
+    available_variables: List[str], 
+    top_n: int = 5,
+    parameter_category: Optional[str] = None,
+    variable_categories: Optional[Dict[str, str]] = None,
+    user_synonyms: Optional[Dict[str, List[str]]] = None
+) -> List[Dict]:
     """
     Suggest dataset variables that match a scenario parameter
     
+    PHASE 2: Enhanced with token-based similarity and category awareness
+    
     Uses:
+    - Token-based similarity (lemmatized)
     - String similarity
     - Synonym matching
     - Common abbreviations
+    - Category matching
     
     Parameters:
     -----------
@@ -25,6 +41,12 @@ def suggest_variable_mapping(parameter: str, available_variables: List[str], top
         List of available variable names in dataset
     top_n : int
         Number of top suggestions to return
+    parameter_category : str, optional
+        Category of the parameter (economy, environment, social)
+    variable_categories : dict, optional
+        Mapping of variable name to category
+    user_synonyms : dict, optional
+        User-provided synonym dictionary from unification module
         
     Returns:
     --------
@@ -32,43 +54,144 @@ def suggest_variable_mapping(parameter: str, available_variables: List[str], top
         List of suggestions with:
         {
             'variable': str,
-            'similarity': float (0-1)
+            'similarity': float (0-1),
+            'match_reason': str
         }
     """
     suggestions = []
     
     parameter_lower = parameter.lower().strip()
+    parameter_tokens = tokenize_and_lemmatize(parameter_lower)
     
     for var in available_variables:
         var_lower = var.lower().strip()
+        var_tokens = tokenize_and_lemmatize(var_lower)
         
         # Calculate base similarity
         similarity = calculate_similarity(parameter_lower, var_lower)
+        match_reason = "string similarity"
         
-        # Boost for synonyms
+        # PHASE 2: Token-based similarity (often better for multi-word terms)
+        token_sim = token_similarity(parameter_tokens, var_tokens)
+        if token_sim > similarity:
+            similarity = token_sim
+            match_reason = "token match"
+        
+        # PHASE 2: Category boost
+        if parameter_category and variable_categories:
+            var_category = variable_categories.get(var)
+            if var_category and var_category == parameter_category:
+                similarity += 0.15
+                match_reason = f"category match ({parameter_category})"
+        
+        # Boost for synonyms (system)
         if are_synonyms(parameter_lower, var_lower):
             similarity += 0.2
+            match_reason = "synonym match"
+        
+        # PHASE 2: User synonym boost
+        if user_synonyms and parameter_lower in user_synonyms:
+            if var_lower in [s.lower() for s in user_synonyms[parameter_lower]]:
+                similarity += 0.25
+                match_reason = "user synonym"
         
         # Boost for abbreviations
         if is_abbreviation(parameter_lower, var_lower):
             similarity += 0.15
+            match_reason = "abbreviation match"
         
         # Boost for exact match
         if parameter_lower == var_lower:
             similarity = 1.0
+            match_reason = "exact match"
         
         # Cap at 1.0
         similarity = min(similarity, 1.0)
         
         suggestions.append({
             'variable': var,
-            'similarity': similarity
+            'similarity': similarity,
+            'match_reason': match_reason
         })
     
     # Sort by similarity
     suggestions.sort(key=lambda x: x['similarity'], reverse=True)
     
     return suggestions[:top_n]
+
+
+def tokenize_and_lemmatize(text: str) -> List[str]:
+    """
+    PHASE 2: Tokenize and lemmatize text for better matching
+    
+    Parameters:
+    -----------
+    text : str
+        Text to tokenize
+        
+    Returns:
+    --------
+    tokens : List[str]
+        List of lemmatized tokens
+    """
+    # Simple lemmatization rules (without requiring NLTK)
+    lemma_rules = {
+        'emissions': 'emission',
+        'countries': 'country',
+        'energies': 'energy',
+        'economies': 'economy',
+        'populations': 'population',
+        'investments': 'investment',
+        'technologies': 'technology',
+        'policies': 'policy',
+        'rates': 'rate',
+        'levels': 'level',
+        'shares': 'share',
+        'values': 'value',
+        'changes': 'change',
+        'increases': 'increase',
+        'decreases': 'decrease'
+    }
+    
+    # Tokenize (split on whitespace and special chars)
+    tokens = re.findall(r'\w+', text.lower())
+    
+    # Apply simple lemmatization
+    lemmatized = []
+    for token in tokens:
+        # Check if plural form exists in rules
+        lemmatized.append(lemma_rules.get(token, token))
+    
+    return lemmatized
+
+
+def token_similarity(tokens1: List[str], tokens2: List[str]) -> float:
+    """
+    PHASE 2: Calculate similarity based on token overlap
+    
+    Parameters:
+    -----------
+    tokens1, tokens2 : List[str]
+        Lists of tokens to compare
+        
+    Returns:
+    --------
+    similarity : float (0-1)
+    """
+    if not tokens1 or not tokens2:
+        return 0.0
+    
+    # Calculate Jaccard similarity
+    set1 = set(tokens1)
+    set2 = set(tokens2)
+    
+    intersection = len(set1.intersection(set2))
+    union = len(set1.union(set2))
+    
+    if union == 0:
+        return 0.0
+    
+    return intersection / union
 
 
 def calculate_similarity(str1: str, str2: str) -> float:
@@ -102,14 +225,18 @@ def are_synonyms(str1: str, str2: str) -> bool:
     """
     # Define synonym groups
     synonym_groups = [
-        {'gdp', 'gross domestic product', 'economic output', 'economy'},
-        {'co2', 'carbon dioxide', 'emissions', 'carbon emissions', 'co2 emissions'},
-        {'renewable', 'renewables', 'renewable energy', 'clean energy', 're'},
-        {'population', 'pop', 'inhabitants'},
-        {'temperature', 'temp', 'warming', 'global temperature'},
+        {'gdp', 'gross domestic product', 'economic output', 'economy', 'national income'},
+        {'co2', 'carbon dioxide', 'emissions', 'carbon emissions', 'co2 emissions', 'ghg', 'greenhouse gas'},
+        {'renewable', 'renewables', 'renewable energy', 'clean energy', 're', 'green energy'},
+        {'population', 'pop', 'inhabitants', 'people', 'demographic'},
+        {'temperature', 'temp', 'warming', 'global temperature', 'climate'},
         {'energy', 'power', 'electricity'},
-        {'consumption', 'demand', 'usage'},
-        {'production', 'output', 'generation'},
+        {'consumption', 'demand', 'usage', 'use'},
+        {'production', 'output', 'generation', 'supply'},
+        {'investment', 'capital', 'funding', 'finance'},
+        {'employment', 'jobs', 'labor', 'labour', 'workforce'},
+        {'inequality', 'gini', 'disparity', 'income inequality'},
+        {'productivity', 'efficiency', 'output per worker'}
     ]
     
     str1 = str1.lower().strip()
@@ -267,3 +394,44 @@ def get_unmapped_parameters(scenario_data: Dict, mappings: Dict[str, str]) -> Li
             unmapped.append(param_name)
     
     return list(set(unmapped))  # Remove duplicates
+
+
+def get_category_for_parameter(parameter: str) -> str:
+    """
+    PHASE 2: Infer category for a parameter based on keywords
+    
+    Parameters:
+    -----------
+    parameter : str
+        Parameter name
+        
+    Returns:
+    --------
+    category : str
+        'economy', 'environment', 'social', or 'other'
+    """
+    param_lower = parameter.lower()
+    
+    # Economic indicators
+    economic_keywords = ['gdp', 'income', 'economic', 'investment', 'capital', 'finance', 
+                        'productivity', 'employment', 'job', 'wage', 'salary', 'trade', 'export', 'import']
+    
+    # Environmental indicators
+    environmental_keywords = ['emission', 'co2', 'carbon', 'climate', 'temperature', 'energy',
+                             'renewable', 'pollution', 'waste', 'water', 'air', 'environmental',
+                             'forest', 'biodiversity', 'ecosystem', 'ghg', 'methane']
+    
+    # Social indicators
+    social_keywords = ['population', 'health', 'education', 'inequality', 'poverty', 'social',
+                      'welfare', 'cohesion', 'access', 'literacy', 'mortality', 'life expectancy',
+                      'demographic', 'urban', 'rural', 'housing']
+    
+    # Check each category
+    if any(kw in param_lower for kw in economic_keywords):
+        return 'economy'
+    elif any(kw in param_lower for kw in environmental_keywords):
+        return 'environment'
+    elif any(kw in param_lower for kw in social_keywords):
+        return 'social'
+    else:
+        return 'other'
