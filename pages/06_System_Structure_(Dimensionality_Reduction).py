@@ -225,6 +225,17 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
                         output_variables = [f"{v}{new_suffix}" for v in output_variables]
                         method_data['output_variables'] = output_variables
         
+        # Convert any numpy arrays to lists before saving
+        def safe_convert(value):
+            """Convert numpy arrays to lists, handle None"""
+            if value is None:
+                return None
+            if isinstance(value, np.ndarray):
+                return value.tolist()
+            if isinstance(value, (list, tuple)):
+                return [safe_convert(v) for v in value]
+            return value
+        
         # Save to dimensionality_reduction_results
         reduction_data = {
             'project_id': project_id,
@@ -233,17 +244,17 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
             'method_name': method_data.get('method_name', method_type),
             'input_variables': input_variables,
             'output_variables': output_variables,
-            'n_components': method_data.get('n_components'),
-            'explained_variance': method_data.get('explained_variance'),
-            'cumulative_variance': method_data.get('cumulative_variance'),
-            'total_variance_explained': method_data.get('total_variance_explained'),
-            'loadings': json.dumps(method_data.get('loadings')) if method_data.get('loadings') else None,
-            'transformation_matrix': json.dumps(method_data.get('transformation_matrix')) if method_data.get('transformation_matrix') else None,
-            'component_equations': json.dumps(method_data.get('component_equations')) if method_data.get('component_equations') else None,
-            'n_clusters': method_data.get('n_clusters'),
-            'cluster_assignments': json.dumps(method_data.get('cluster_assignments')) if method_data.get('cluster_assignments') else None,
+            'n_components': int(method_data['n_components']) if method_data.get('n_components') is not None else None,
+            'explained_variance': safe_convert(method_data.get('explained_variance')),
+            'cumulative_variance': safe_convert(method_data.get('cumulative_variance')),
+            'total_variance_explained': float(method_data['total_variance_explained']) if method_data.get('total_variance_explained') is not None else None,
+            'loadings': json.dumps(safe_convert(method_data.get('loadings'))) if method_data.get('loadings') is not None else None,
+            'transformation_matrix': json.dumps(safe_convert(method_data.get('transformation_matrix'))) if method_data.get('transformation_matrix') is not None else None,
+            'component_equations': json.dumps(safe_convert(method_data.get('component_equations'))) if method_data.get('component_equations') is not None else None,
+            'n_clusters': int(method_data['n_clusters']) if method_data.get('n_clusters') is not None else None,
+            'cluster_assignments': json.dumps(safe_convert(method_data.get('cluster_assignments'))) if method_data.get('cluster_assignments') is not None else None,
             'removed_variables': method_data.get('removed_variables'),
-            'correlation_threshold': method_data.get('correlation_threshold'),
+            'correlation_threshold': float(method_data['correlation_threshold']) if method_data.get('correlation_threshold') is not None else None,
             'is_accepted': True,
             'accepted_at': datetime.now().isoformat(),
             'config': json.dumps(method_data.get('config', {})),
@@ -274,8 +285,10 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         # Save parameters metadata
         for i, var in enumerate(output_variables):
             description = f"{method_data.get('method_name', method_type)} component {i+1}"
-            if method_type == 'pca' and 'explained_variance' in method_data:
-                description += f" - Explains {method_data['explained_variance'][i]*100:.1f}% variance"
+            if method_type == 'pca' and 'explained_variance' in method_data and method_data['explained_variance'] is not None:
+                ev = method_data['explained_variance']
+                if isinstance(ev, (list, np.ndarray)) and len(ev) > i:
+                    description += f" - Explains {float(ev[i])*100:.1f}% variance"
             
             db.client.table('parameters').insert({
                 'project_id': project_id,
@@ -295,7 +308,212 @@ def save_dimensionality_reduction_results(method_type, method_data, renamed_comp
         return True, f"✅ Saved {len(output_variables)} components to database"
     
     except Exception as e:
-        return False, f"Error: {str(e)}"
+        import traceback
+        return False, f"Error: {str(e)}\n{traceback.format_exc()}"
+
+
+def handle_correlation_filtering(df_wide, feature_cols):
+    """Handle correlation-based filtering"""
+    st.markdown("*Remove highly correlated (redundant) variables*")
+    
+    st.markdown("""
+    ### 📊 How It Works
+    
+    Correlation filtering identifies and removes redundant variables that are highly correlated with each other.
+    This is the simplest dimensionality reduction method.
+    
+    **When to use:**
+    - You have many highly correlated variables
+    - You want a simple, interpretable reduction
+    - You don't need to create new composite variables
+    """)
+    
+    # Calculate correlation matrix
+    df_features = df_wide[feature_cols]
+    corr_matrix = df_features.corr().abs()
+    
+    # Threshold selection
+    threshold = st.slider(
+        "Correlation threshold (remove variables above this value):",
+        min_value=0.5,
+        max_value=0.99,
+        value=0.85,
+        step=0.05,
+        help="Variables with correlation above this threshold will be candidates for removal"
+    )
+    
+    # Find highly correlated pairs
+    upper_triangle = corr_matrix.where(
+        np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)
+    )
+    
+    to_remove = set()
+    correlated_pairs = []
+    
+    for column in upper_triangle.columns:
+        high_corr = upper_triangle[column][upper_triangle[column] > threshold]
+        for index in high_corr.index:
+            correlated_pairs.append({
+                'Variable 1': column,
+                'Variable 2': index,
+                'Correlation': high_corr[index]
+            })
+            # Remove the second variable (you can change this logic)
+            to_remove.add(index)
+    
+    if correlated_pairs:
+        st.subheader(f"🔍 Found {len(correlated_pairs)} highly correlated pairs")
+        
+        df_pairs = pd.DataFrame(correlated_pairs)
+        st.dataframe(df_pairs, use_container_width=True)
+        
+        st.subheader(f"🗑️ Variables to remove: {len(to_remove)}")
+        st.write(sorted(list(to_remove)))
+        
+        remaining = sorted([v for v in feature_cols if v not in to_remove])
+        st.subheader(f"✅ Remaining variables: {len(remaining)}")
+        st.write(remaining)
+        
+        # Visualization
+        import plotly.graph_objects as go
+        
+        fig = go.Figure(data=go.Heatmap(
+            z=corr_matrix.values,
+            x=corr_matrix.columns,
+            y=corr_matrix.columns,
+            colorscale='RdBu',
+            zmid=0,
+            text=corr_matrix.values,
+            texttemplate='%{text:.2f}',
+            textfont={"size": 8}
+        ))
+        
+        fig.update_layout(
+            title="Correlation Matrix",
+            xaxis_title="Variables",
+            yaxis_title="Variables",
+            height=600
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        st.info("ℹ️ **Note:** Correlation filtering removes variables but doesn't create new ones, so there's nothing to save to database. You can use the remaining variables list for other analyses.")
+        
+    else:
+        st.success(f"✅ No variables exceed correlation threshold of {threshold}")
+        st.info("Try lowering the threshold to find correlated variables.")
+
+
+def handle_pca_analysis(df_wide, feature_cols):
+    """Handle PCA analysis with renaming option"""
+    st.markdown("*Find orthogonal components that explain variance*")
+    
+    # Run PCA analysis
+    run_pca_analysis(df_wide, feature_cols)
+    
+    # Check if PCA results exist
+    if 'pca' in st.session_state.reduction_results:
+        pca = st.session_state.reduction_results['pca']
+        
+        st.markdown("---")
+        st.subheader("✏️ Rename Components")
+        st.markdown("Give meaningful names to your principal components (e.g., 'Economic_Index', 'Social_Factor')")
+        
+        renamed_components = {}
+        cols = st.columns(min(3, pca['n_components']))
+        
+        for i in range(pca['n_components']):
+            col_idx = i % 3
+            with cols[col_idx]:
+                default_name = f"PC{i+1}"
+                new_name = st.text_input(
+                    f"Rename {default_name}:",
+                    value=default_name,
+                    key=f"rename_pca_{i}"
+                )
+                renamed_components[default_name] = new_name
+        
+        st.session_state.component_names['pca'] = renamed_components
+
+
+def handle_factor_analysis(df_wide, feature_cols):
+    """Handle Factor Analysis with renaming option"""
+    st.markdown("*Discover latent factors underlying your data*")
+    
+    run_factor_analysis(df_wide, feature_cols)
+    
+    if 'factor_analysis' in st.session_state.reduction_results:
+        fa = st.session_state.reduction_results['factor_analysis']
+        
+        st.markdown("---")
+        st.subheader("✏️ Rename Factors")
+        
+        renamed_components = {}
+        cols = st.columns(min(3, fa['n_factors']))
+        
+        for i in range(fa['n_factors']):
+            col_idx = i % 3
+            with cols[col_idx]:
+                default_name = f"Factor{i+1}"
+                new_name = st.text_input(
+                    f"Rename {default_name}:",
+                    value=default_name,
+                    key=f"rename_fa_{i}"
+                )
+                renamed_components[default_name] = new_name
+        
+        st.session_state.component_names['factor_analysis'] = renamed_components
+
+
+def handle_ica_analysis(df_wide, feature_cols):
+    """Handle ICA with renaming option"""
+    st.markdown("*Find statistically independent sources*")
+    
+    run_ica_analysis(df_wide, feature_cols)
+    
+    if 'ica' in st.session_state.reduction_results:
+        ica = st.session_state.reduction_results['ica']
+        
+        st.markdown("---")
+        st.subheader("✏️ Rename Independent Components")
+        
+        renamed_components = {}
+        cols = st.columns(min(3, ica['n_components']))
+        
+        for i in range(ica['n_components']):
+            col_idx = i % 3
+            with cols[col_idx]:
+                default_name = f"IC{i+1}"
+                new_name = st.text_input(
+                    f"Rename {default_name}:",
+                    value=default_name,
+                    key=f"rename_ica_{i}"
+                )
+                renamed_components[default_name] = new_name
+        
+        st.session_state.component_names['ica'] = renamed_components
+
+
+def handle_hierarchical_clustering(df_wide, feature_cols):
+    """Handle clustering"""
+    st.markdown("*Group similar variables together*")
+    
+    run_hierarchical_clustering(df_wide, feature_cols)
+
+
+def handle_summary(df_wide, feature_cols, all_feature_cols):
+    """Display summary of results"""
+    
+    if not st.session_state.reduction_results:
+        st.info("ℹ️ No analysis results yet. Please run at least one method from the tabs above.")
+        return
+    
+    st.success(f"✅ {len(st.session_state.reduction_results)} method(s) applied")
+    
+    # Show summary
+    for method, results in st.session_state.reduction_results.items():
+        with st.expander(f"📊 {method.upper()} Results", expanded=True):
+            st.json(results)
 
 
 def main():
@@ -447,15 +665,13 @@ def main():
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        if st.checkbox("📋 Use all variables", value=True, key="use_all_vars"):
-            feature_cols = all_feature_cols
-        else:
-            feature_cols = st.multiselect(
-                "Select variables:",
-                options=all_feature_cols,
-                default=all_feature_cols[:5] if len(all_feature_cols) > 5 else all_feature_cols,
-                key="selected_features_manual"
-            )
+        # CHANGED: Removed checkbox, user must select from dropdown
+        feature_cols = st.multiselect(
+            "Select variables for analysis:",
+            options=all_feature_cols,
+            default=all_feature_cols,  # All selected by default
+            key="selected_features_manual"
+        )
     
     with col2:
         st.metric("Selected Features", len(feature_cols))
@@ -471,16 +687,18 @@ def main():
     st.markdown("---")
     st.subheader("📊 Step 2: Run Dimensionality Reduction Analysis")
     
+    # CHANGED: Renamed last tab from "Summary & Save" to "Summary"
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "🔗 Correlation Filtering",
         "🧮 PCA Analysis",
         "🎯 Factor Analysis",
         "🔬 Independent Component Analysis",
         "🌳 Hierarchical Clustering",
-        "📋 Summary & Save"
+        "📋 Summary"
     ])
     
     with tab1:
+        # REMOVED duplicate title - tab name is enough
         handle_correlation_filtering(df_wide, feature_cols)
     
     with tab2:
@@ -496,142 +714,9 @@ def main():
         handle_hierarchical_clustering(df_wide, feature_cols)
     
     with tab6:
-        handle_summary_and_save(df_wide, feature_cols, all_feature_cols)
-
-
-# Analysis handler functions would go here
-# (I'll continue with these in the next part)
-
-def handle_correlation_filtering(df_wide, feature_cols):
-    """Handle correlation-based filtering"""
-    st.header("🔗 Correlation-Based Feature Filtering")
-    st.markdown("*Remove highly correlated (redundant) variables*")
+        handle_summary(df_wide, feature_cols, all_feature_cols)
     
-    st.info("This method removes variables but doesn't create new ones, so there's nothing to save to database.")
-    
-    # Rest of correlation filtering code...
-    st.markdown("Implementation of correlation filtering here...")
-
-
-def handle_pca_analysis(df_wide, feature_cols):
-    """Handle PCA analysis with renaming option"""
-    st.header("🧮 Principal Component Analysis (PCA)")
-    st.markdown("*Find orthogonal components that explain variance*")
-    
-    # Run PCA analysis
-    run_pca_analysis(df_wide, feature_cols)
-    
-    # Check if PCA results exist
-    if 'pca' in st.session_state.reduction_results:
-        pca = st.session_state.reduction_results['pca']
-        
-        st.markdown("---")
-        st.subheader("✏️ Rename Components")
-        st.markdown("Give meaningful names to your principal components (e.g., 'Economic_Index', 'Social_Factor')")
-        
-        renamed_components = {}
-        cols = st.columns(min(3, pca['n_components']))
-        
-        for i in range(pca['n_components']):
-            col_idx = i % 3
-            with cols[col_idx]:
-                default_name = f"PC{i+1}"
-                new_name = st.text_input(
-                    f"Rename {default_name}:",
-                    value=default_name,
-                    key=f"rename_pca_{i}"
-                )
-                renamed_components[default_name] = new_name
-        
-        st.session_state.component_names['pca'] = renamed_components
-
-
-def handle_factor_analysis(df_wide, feature_cols):
-    """Handle Factor Analysis with renaming option"""
-    st.header("🎯 Factor Analysis")
-    st.markdown("*Discover latent factors underlying your data*")
-    
-    run_factor_analysis(df_wide, feature_cols)
-    
-    if 'factor_analysis' in st.session_state.reduction_results:
-        fa = st.session_state.reduction_results['factor_analysis']
-        
-        st.markdown("---")
-        st.subheader("✏️ Rename Factors")
-        
-        renamed_components = {}
-        cols = st.columns(min(3, fa['n_factors']))
-        
-        for i in range(fa['n_factors']):
-            col_idx = i % 3
-            with cols[col_idx]:
-                default_name = f"Factor{i+1}"
-                new_name = st.text_input(
-                    f"Rename {default_name}:",
-                    value=default_name,
-                    key=f"rename_fa_{i}"
-                )
-                renamed_components[default_name] = new_name
-        
-        st.session_state.component_names['factor_analysis'] = renamed_components
-
-
-def handle_ica_analysis(df_wide, feature_cols):
-    """Handle ICA with renaming option"""
-    st.header("🔬 Independent Component Analysis (ICA)")
-    st.markdown("*Find statistically independent sources*")
-    
-    run_ica_analysis(df_wide, feature_cols)
-    
-    if 'ica' in st.session_state.reduction_results:
-        ica = st.session_state.reduction_results['ica']
-        
-        st.markdown("---")
-        st.subheader("✏️ Rename Independent Components")
-        
-        renamed_components = {}
-        cols = st.columns(min(3, ica['n_components']))
-        
-        for i in range(ica['n_components']):
-            col_idx = i % 3
-            with cols[col_idx]:
-                default_name = f"IC{i+1}"
-                new_name = st.text_input(
-                    f"Rename {default_name}:",
-                    value=default_name,
-                    key=f"rename_ica_{i}"
-                )
-                renamed_components[default_name] = new_name
-        
-        st.session_state.component_names['ica'] = renamed_components
-
-
-def handle_hierarchical_clustering(df_wide, feature_cols):
-    """Handle clustering"""
-    st.header("🌳 Hierarchical Clustering")
-    st.markdown("*Group similar variables together*")
-    
-    run_hierarchical_clustering(df_wide, feature_cols)
-
-
-def handle_summary_and_save(df_wide, feature_cols, all_feature_cols):
-    """Summary and save results"""
-    st.header("📋 Summary & Save Results")
-    
-    if not st.session_state.reduction_results:
-        st.info("ℹ️ No analysis results yet. Please run at least one method from the tabs above.")
-        return
-    
-    st.success(f"✅ {len(st.session_state.reduction_results)} method(s) applied")
-    
-    # Show summary
-    st.subheader("📊 Analysis Summary")
-    
-    for method, results in st.session_state.reduction_results.items():
-        with st.expander(f"📊 {method.upper()} Results", expanded=True):
-            st.json(results)
-    
-    # Save button
+    # MOVED: Save button outside tabs
     st.markdown("---")
     st.subheader("💾 Save Results to Database")
     
